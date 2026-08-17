@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: check (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+      # Architectural gate: the control core must stay harness-agnostic.
+      # Harness-specific names belong in crates/adapters, never in the core.
+      - name: Core purity gate
+        shell: bash
+        run: |
+          if grep -rEI 'deepseek|dsh' crates/deepmate-core/src crates/deepmate-core/Cargo.toml; then
+            echo "::error::deepmate-core must not reference harness-specific names (deepseek/dsh)"
+            exit 1
+          fi
