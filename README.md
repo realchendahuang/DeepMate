@@ -70,19 +70,12 @@ DeepMate is designed around adapters rather than direct coupling to one harness 
                DeepMate
 
         ┌──────────────────┐
-        │    Desktop UI    │
+        │ Desktop UI + CLI │
         └────────┬─────────┘
                  │
         ┌────────▼─────────┐
         │   Control Core   │
-        │                  │
-        │ Runtime          │
-        │ Profiles         │
-        │ Providers        │
-        │ Models           │
-        │ Plugins          │
-        │ Marketplace      │
-        │ Doctor           │
+        │       Rust       │
         └────────┬─────────┘
                  │
         ┌────────▼─────────┐
@@ -94,23 +87,25 @@ DeepMate is designed around adapters rather than direct coupling to one harness 
         └──────────────────┘
 ```
 
-The UI should not need to know whether a harness stores configuration in YAML, JSON, a database or exposes an API. Those implementation details belong inside the adapter layer.
+The UI does not need to know how a harness stores configuration or exposes its runtime. Those implementation details belong inside the adapter layer.
 
 This keeps the product resilient as harnesses evolve and makes future multi-harness support possible.
+
+For the full technical design, see **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 ## Design principles
 
 ### 1. Lightweight by default
 
-No bundled Chromium. No embedded browser shell for the main experience. No duplicate editor stack.
+Keep the resident control surface small, fast and focused. The actual Harness work interface opens in the system browser.
 
 ### 2. Respect the harness as the source of truth
 
-DeepMate should manage the harness through its official interfaces and formats whenever possible instead of maintaining a second copy of harness configuration.
+DeepMate manages the harness through its official interfaces and formats whenever possible instead of maintaining a second copy of harness-owned configuration.
 
 ### 3. Extend, do not fork
 
-DeepMate should use the existing DeepSeek Harness profile, bundle, plugin, settings and provider mechanisms rather than inventing incompatible replacements.
+DeepMate uses the existing DeepSeek Harness profile, bundle, plugin, settings and provider mechanisms rather than inventing incompatible replacements.
 
 ### 4. Everything behind an adapter
 
@@ -120,16 +115,55 @@ Harness-specific behavior belongs behind a stable adapter boundary so the contro
 
 DeepMate manages the environment around the agent. The actual conversation and execution experience remains owned by the harness.
 
-## Planned technology
+### 6. Transparent local data
 
-The current direction is:
+DeepMate-owned configuration and state use portable file formats that are easy to inspect, back up and move between machines.
 
-- **Rust** for the control core
-- a lightweight native cross-platform UI layer
-- system-native process and service management where appropriate
-- no embedded WebView as the primary Harness interface
+## Technology stack
 
-The exact UI implementation is still being evaluated and may evolve as the project matures.
+The current planned stack is:
+
+- **Rust** — control core, adapters, runtime management and shared domain logic
+- **Slint** — lightweight cross-platform desktop UI
+- **Tokio** — asynchronous runtime and background work
+- **reqwest + rustls** — network access
+- **Serde** — serialization foundation
+- **TOML** — human-owned DeepMate configuration
+- **JSON** — structured state, cache and snapshots
+- **JSONL** — append-oriented history and structured records
+- **clap** — command-line interface
+- **tracing** — structured logging and diagnostics
+- **thiserror + anyhow** — domain and application error handling
+- **OS secure credential store** — DeepMate-owned secrets
+- **JSON-RPC over stdio** — planned public protocol for third-party harness adapters
+
+The desktop app and CLI are both consumers of the same Rust control core.
+
+## Data layout
+
+DeepMate-owned data follows a simple file-based structure:
+
+```text
+<DeepMate Data>/
+│
+├── config.toml
+├── adapters/
+│   └── deepseek-harness.toml
+├── cache/
+│   ├── marketplace.json
+│   └── plugin-metadata.json
+├── history/
+│   ├── actions.jsonl
+│   └── doctor.jsonl
+├── snapshots/
+│   └── *.json
+└── logs/
+    └── deepmate.log
+```
+
+The actual root directory follows the operating system's standard application-data convention.
+
+Harness-owned state remains owned by the active harness and is accessed through its adapter.
 
 ## Roadmap
 
@@ -140,6 +174,7 @@ The exact UI implementation is still being evaluated and may evolve as the proje
 - Environment diagnostics
 - Provider and model management
 - Profile discovery and management
+- Initial CLI
 
 ### Phase 2 — Ecosystem management
 
@@ -158,7 +193,7 @@ The exact UI implementation is still being evaluated and may evolve as the proje
 
 ### Phase 4 — More harnesses
 
-- Stable public adapter interface
+- Stable public adapter protocol
 - Additional harness / agent runtime adapters
 
 ## Project status
