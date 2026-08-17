@@ -139,6 +139,41 @@ The current planned stack is:
 
 The desktop app and CLI are both consumers of the same Rust control core.
 
+## Getting started
+
+Requirements: a recent stable Rust toolchain.
+
+```bash
+# Build everything
+cargo build --workspace
+
+# Run the CLI against the built-in deterministic test adapter
+cargo run -- --adapter test status
+cargo run -- --adapter test doctor
+
+# Full workspace gate (formatting, clippy, tests)
+make ci
+```
+
+CLI command surface:
+
+```text
+deepmate adapters              List registered adapters
+deepmate detect                Detect the active harness
+deepmate status                Show the active harness runtime status
+deepmate open                  Open the harness UI in the system browser
+deepmate doctor                Run environment diagnostics
+deepmate runtime start|stop|restart
+                                Control the harness runtime
+deepmate profile list          List harness profiles
+deepmate provider list         List configured providers
+deepmate model list            List available models
+deepmate plugin list           List installed plugins
+```
+
+Append `--json` to any command for machine-readable output. Logs go to
+stderr, so JSON on stdout is never polluted.
+
 ## Data layout
 
 DeepMate-owned data follows a simple file-based structure:
@@ -198,9 +233,18 @@ Harness-owned state remains owned by the active harness and is accessed through 
 
 ## Project status
 
-DeepMate is currently in **early development**.
+DeepMate is currently in **early development**, with a working Stage 1
+foundation:
 
-The first goal is to build a solid, minimal foundation for DeepSeek Harness rather than rush into a large feature set.
+- Rust workspace with `deepmate-core`, `deepmate-platform` and the
+  `deepseek-harness` adapter
+- `deepmate` CLI with `adapters`, `detect`, `status`, `open`, `doctor`,
+  `runtime`, `profile`, `provider`, `model` and `plugin` commands
+- Deterministic `test` adapter for development and CI
+- Cross-platform CI (fmt, clippy, tests) with a core purity gate
+
+The first goal is to build a solid, minimal foundation for DeepSeek Harness
+rather than rush into a large feature set.
 
 ## Related project
 
