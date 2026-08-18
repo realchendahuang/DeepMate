@@ -45,6 +45,10 @@ impl FakeAdapter {
             status: RuntimeStatus::installed(),
             capabilities: AdapterCapabilities {
                 runtime: true,
+                profiles: true,
+                providers: true,
+                models: true,
+                plugins: true,
                 ..Default::default()
             },
             doctor: DoctorReport {
