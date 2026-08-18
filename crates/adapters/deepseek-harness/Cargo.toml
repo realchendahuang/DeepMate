@@ -10,4 +10,7 @@ deepmate-core = { path = "../../deepmate-core" }
 deepmate-platform = { path = "../../deepmate-platform" }
 async-trait.workspace = true
 serde.workspace = true
+serde_json.workspace = true
+serde_yml.workspace = true
 tokio.workspace = true
+tracing.workspace = true
