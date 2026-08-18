@@ -502,6 +502,9 @@ Conceptual data layout:
 │   ├── coding.json
 │   └── research.json
 │
+├── state/
+│   └── harness.pid
+│
 └── logs/
     └── deepmate.log
 ```

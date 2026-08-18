@@ -171,8 +171,15 @@ deepmate model list            List available models
 deepmate plugin list           List installed plugins
 ```
 
+Commands that the active adapter does not declare support for are rejected
+with a clear error instead of returning empty results. `--adapter test`
+supports the full surface; the DeepSeek Harness adapter currently supports
+runtime control, detect, status, open, doctor, profile list, provider list,
+model list and plugin list.
+
 Append `--json` to any command for machine-readable output. Logs go to
-stderr, so JSON on stdout is never polluted.
+stderr and to `logs/deepmate.log` in the data directory, so JSON on stdout
+is never polluted.
 
 ## Data layout
 
@@ -192,11 +199,15 @@ DeepMate-owned data follows a simple file-based structure:
 │   └── doctor.jsonl
 ├── snapshots/
 │   └── *.json
+├── state/
+│   └── harness.pid
 └── logs/
-    └── deepmate.log
+    ├── deepmate.log
+    └── harness-web.log
 ```
 
-The actual root directory follows the operating system's standard application-data convention.
+The root follows the operating system's application-data convention and can
+be overridden with `DEEPMATE_DATA_DIR` or `--data-dir`.
 
 Harness-owned state remains owned by the active harness and is accessed through its adapter.
 
@@ -241,6 +252,15 @@ foundation:
 - `deepmate` CLI with `adapters`, `detect`, `status`, `open`, `doctor`,
   `runtime`, `profile`, `provider`, `model` and `plugin` commands
 - Deterministic `test` adapter for development and CI
+- File-based data layer: OS-convention data directory, TOML config, JSONL
+  action history and file logging
+- Capability-gated CLI: commands are only exposed when the active adapter
+  supports them
+- DeepSeek Harness adapter with real `dsh` integration: CLI detection, web
+  UI reachability, `runtime start` (detached `dsh web` with pid tracking),
+  `runtime stop`, profile discovery, plugin inventory, and provider/model
+  catalogs through the documented `$DSH_HOME` file contracts
+  (`profiles/*/package.json` and `settings.yaml`)
 - Cross-platform CI (fmt, clippy, tests) with a core purity gate
 
 The first goal is to build a solid, minimal foundation for DeepSeek Harness
