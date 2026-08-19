@@ -14,7 +14,7 @@
 // and usually yields None for the real CLI.
 
 use std::net::ToSocketAddrs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -110,24 +110,95 @@ impl DeepSeekHarnessAdapter {
         std::net::TcpStream::connect_timeout(&addr, UI_PROBE_TIMEOUT).is_ok()
     }
 
-    // Locate the harness CLI on PATH, probing once and caching the result.
+    // Candidate launcher commands, most specific first:
+    // 1. the explicit DEEPMATE_DSH_BIN override
+    // 2. the configured names resolved on PATH
+    // 3. launcher bins found in npm's npx cache, a common install location
+    //    (`npx @deepseek-ai/dsh`) that is not on PATH
+    fn candidate_commands(&self) -> Vec<String> {
+        let mut candidates = Vec::new();
+        if let Ok(bin) = std::env::var("DEEPMATE_DSH_BIN") {
+            if !bin.is_empty() {
+                candidates.push(bin);
+            }
+        }
+        candidates.extend(self.cli_names.iter().cloned());
+        candidates.extend(self.npx_candidates());
+        candidates
+    }
+
+    // Absolute paths to `<name>` launcher bins inside npm's npx cache. The
+    // cache holds one directory per `npx` install; only entries that actually
+    // exist are returned, in deterministic order.
+    fn npx_candidates(&self) -> Vec<String> {
+        let Some(root) = Self::npm_npx_root() else {
+            return Vec::new();
+        };
+        let Ok(entries) = std::fs::read_dir(&root) else {
+            return Vec::new();
+        };
+        let mut bins: Vec<String> = entries
+            .flatten()
+            .filter(|entry| entry.file_type().is_ok_and(|t| t.is_dir()))
+            .flat_map(|entry| {
+                self.cli_names.iter().map(move |name| {
+                    entry
+                        .path()
+                        .join("node_modules")
+                        .join(".bin")
+                        .join(name)
+                        .to_string_lossy()
+                        .into_owned()
+                })
+            })
+            .filter(|path| Path::new(path).is_file())
+            .collect();
+        bins.sort();
+        bins.dedup();
+        bins
+    }
+
+    fn npm_npx_root() -> Option<PathBuf> {
+        #[cfg(target_os = "windows")]
+        {
+            if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+                let root = PathBuf::from(local).join("npm-cache").join("_npx");
+                if root.is_dir() {
+                    return Some(root);
+                }
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            if let Some(home) = std::env::var_os("HOME") {
+                let root = PathBuf::from(home).join(".npm").join("_npx");
+                if root.is_dir() {
+                    return Some(root);
+                }
+            }
+        }
+        None
+    }
+
+    // Locate the harness CLI, probing each candidate command once and caching
+    // the result.
     fn find_cli(&self) -> Option<String> {
         self.cli_cache
             .get_or_init(|| {
-                self.cli_names.iter().find_map(|name| {
+                self.candidate_commands().into_iter().find_map(|name| {
                     // If the process can be spawned at all, we treat it as
                     // present. A non-zero exit may still mean a real CLI
                     // exists but uses a different flag.
-                    Command::new(name).arg("--version").output().ok()?;
-                    Some(name.clone())
+                    Command::new(&name).arg("--version").output().ok()?;
+                    Some(name)
                 })
             })
             .clone()
     }
 
     // Best-effort version from `--version` output. The real `dsh` launcher
-    // has no --version flag, so this usually returns None; it stays useful
-    // for compatible wrappers that do support it.
+    // reports a prerelease like `0.1.0-rc.6`; it stays None only when no
+    // token looks like a version at all.
     fn cli_version(&self) -> Option<String> {
         let cli = self.find_cli()?;
         let output = Command::new(&cli).arg("--version").output().ok()?;
@@ -139,7 +210,9 @@ impl DeepSeekHarnessAdapter {
             let candidate = token.trim_start_matches('v');
             let looks_like_version = candidate.chars().next().is_some_and(|c| c.is_ascii_digit())
                 && candidate.split('.').count() >= 2
-                && candidate.chars().all(|c| c.is_ascii_digit() || c == '.');
+                && candidate
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || c == '.' || c == '-' || c.is_ascii_alphabetic());
             looks_like_version.then(|| candidate.to_string())
         })
     }
@@ -429,5 +502,34 @@ mod tests {
         let detection = adapter.detect().await.unwrap();
         assert!(detection.found);
         assert_eq!(detection.harness.unwrap().version.as_deref(), Some("1.2.3"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn detect_parses_prerelease_version() {
+        // The real dsh launcher reports a prerelease such as 0.1.0-rc.6.
+        let dir = std::env::temp_dir().join(format!(
+            "deepmate-adapter-prerelease-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("fake-dsh");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\n[ \"$1\" = \"--version\" ] && echo '0.1.0-rc.6'\n",
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+        let adapter = DeepSeekHarnessAdapter::new(Arc::new(SystemPlatform))
+            .with_cli_names(vec![script.to_string_lossy().into_owned()]);
+        let detection = adapter.detect().await.unwrap();
+        assert!(detection.found);
+        assert_eq!(
+            detection.harness.unwrap().version.as_deref(),
+            Some("0.1.0-rc.6")
+        );
     }
 }
