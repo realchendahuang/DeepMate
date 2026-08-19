@@ -272,4 +272,10 @@ rather than rush into a large feature set.
 
 ## License
 
-License information will be added as the project is prepared for its first public release.
+DeepMate is dual-licensed under the **MIT** and **Apache-2.0** licenses.
+
+- MIT License — see [LICENSE-MIT](LICENSE-MIT)
+- Apache License 2.0 — see [LICENSE-APACHE](LICENSE-APACHE)
+
+Unless you explicitly state otherwise, any contribution intentionally
+submitted for inclusion in the work shall be dual-licensed as above.

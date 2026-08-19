@@ -34,7 +34,7 @@ use dsh::{discover_profiles, list_all_plugins, list_models, list_providers};
 
 const ADAPTER_ID: &str = "deepseek-harness";
 const ADAPTER_NAME: &str = "DeepSeek Harness";
-const ADAPTER_VERSION: &str = "0.2.0";
+const ADAPTER_VERSION: &str = "0.1.0";
 const DEFAULT_UI_URL: &str = "http://127.0.0.1:3080";
 const UI_PROBE_TIMEOUT: Duration = Duration::from_millis(500);
 

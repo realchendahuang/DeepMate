@@ -11,7 +11,8 @@ members = [
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/deepseek-ai/deepmate"
+repository = "https://github.com/realchendahuang/DeepMate"
+description = "A lightweight companion and control plane for AI harnesses, starting with DeepSeek Harness."
 
 [workspace.dependencies]
 anyhow = "1"
