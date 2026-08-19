@@ -117,23 +117,70 @@ pub fn discover_profiles() -> CoreResult<Vec<Profile>> {
     Ok(profiles)
 }
 
-// List the plugins of one profile: its declared dependencies, with `enabled`
-// reflecting whether the package is actually installed in the profile.
+// The two node_modules roots a package can be installed into: the
+// profile-local directory first, then the launcher-maintained shared
+// fallback used by the real dsh web profile.
+fn module_dir(profile_dir: &Path, shared: &Path, name: &str) -> Option<PathBuf> {
+    let local = profile_dir.join("node_modules").join(name);
+    if local.is_dir() {
+        return Some(local);
+    }
+    let fallback = shared.join(name);
+    if fallback.is_dir() {
+        return Some(fallback);
+    }
+    None
+}
+
+// Best-effort installed version read from a package's own package.json.
+fn installed_version(dir: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(dir.join("package.json")).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    value
+        .get("version")
+        .and_then(|v| v.as_str())
+        .map(|v| v.to_string())
+}
+
+// Build one plugin record for a bundle or dependency.
+fn plugin_for(profile_dir: &Path, shared: &Path, id: &str, declared: Option<String>) -> Plugin {
+    let installed = module_dir(profile_dir, shared, id);
+    Plugin {
+        id: id.to_string(),
+        name: id.to_string(),
+        // Prefer the actually installed version; fall back to the declared
+        // range only when the package is not installed.
+        version: installed
+            .as_deref()
+            .and_then(installed_version)
+            .or(declared),
+        enabled: installed.is_some(),
+    }
+}
+
+// List the plugins of one profile: its bundle layers (the profile's own
+// `dsh.profile.bundles`) plus its declared dependencies, with `enabled`
+// reflecting whether each package is actually installed in the profile-local
+// node_modules or the launcher-maintained shared fallback.
 pub fn list_plugins(profile_id: &str) -> CoreResult<Vec<Plugin>> {
     let Some(home) = dsh_home() else {
         return Ok(Vec::new());
     };
     let dir = home.join("profiles").join(profile_id);
+    let shared = home.join("profiles").join("node_modules");
     let manifest = read_manifest(&dir)?;
     let mut plugins = Vec::new();
+    if let Some(bundles) = manifest
+        .dsh
+        .and_then(|dsh| dsh.profile)
+        .and_then(|profile| profile.bundles)
+    {
+        for bundle in bundles {
+            plugins.push(plugin_for(&dir, &shared, &bundle, None));
+        }
+    }
     for (name, version) in manifest.dependencies.unwrap_or_default() {
-        let installed = dir.join("node_modules").join(&name).is_dir();
-        plugins.push(Plugin {
-            id: name.clone(),
-            name,
-            version: Some(version),
-            enabled: installed,
-        });
+        plugins.push(plugin_for(&dir, &shared, &name, Some(version)));
     }
     plugins.sort_by(|a, b| a.id.cmp(&b.id));
     Ok(plugins)
@@ -388,7 +435,7 @@ mod tests {
     }
 
     #[test]
-    fn list_plugins_reads_dependencies_and_install_state() {
+    fn list_plugins_reads_bundles_dependencies_and_install_state() {
         let _guard = ENV_LOCK.lock().unwrap();
         let previous = std::env::var_os(DSH_HOME_ENV);
         let home = fixture_home();
@@ -398,16 +445,44 @@ mod tests {
             &[("turtle-ui", "^1.0.0"), ("plain-lib", "2.0.0")],
             &["@deepseek-ai/dsh-base"],
         );
-        // turtle-ui is installed; plain-lib is declared but not installed.
+        // turtle-ui is installed; plain-lib and the base bundle are not.
         std::fs::create_dir_all(home.join("profiles/web/node_modules/turtle-ui")).unwrap();
         std::env::set_var(DSH_HOME_ENV, &home);
         let plugins = list_plugins("web").unwrap();
-        assert_eq!(plugins.len(), 2);
-        assert_eq!(plugins[0].id, "plain-lib");
+        assert_eq!(plugins.len(), 3);
+        assert_eq!(plugins[0].id, "@deepseek-ai/dsh-base");
         assert!(!plugins[0].enabled);
-        assert_eq!(plugins[1].id, "turtle-ui");
-        assert!(plugins[1].enabled);
-        assert_eq!(plugins[1].version.as_deref(), Some("^1.0.0"));
+        assert_eq!(plugins[1].id, "plain-lib");
+        assert!(!plugins[1].enabled);
+        assert_eq!(plugins[1].version.as_deref(), Some("2.0.0"));
+        assert_eq!(plugins[2].id, "turtle-ui");
+        assert!(plugins[2].enabled);
+        assert_eq!(plugins[2].version.as_deref(), Some("^1.0.0"));
+        restore_env(DSH_HOME_ENV, previous);
+    }
+
+    #[test]
+    fn plugins_resolve_from_launcher_shared_fallback() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let previous = std::env::var_os(DSH_HOME_ENV);
+        let home = fixture_home();
+        write_profile(&home, "web", &[], &["@deepseek-ai/dsh-base"]);
+        // The real dsh web profile installs its bundles into the shared
+        // launcher fallback, not the profile directory, and carries a real
+        // installed version.
+        let bundle_dir = home.join("profiles/node_modules/@deepseek-ai/dsh-base");
+        std::fs::create_dir_all(&bundle_dir).unwrap();
+        std::fs::write(
+            bundle_dir.join("package.json"),
+            r#"{"name": "@deepseek-ai/dsh-base", "version": "0.3.1"}"#,
+        )
+        .unwrap();
+        std::env::set_var(DSH_HOME_ENV, &home);
+        let plugins = list_plugins("web").unwrap();
+        assert_eq!(plugins.len(), 1);
+        assert_eq!(plugins[0].id, "@deepseek-ai/dsh-base");
+        assert!(plugins[0].enabled);
+        assert_eq!(plugins[0].version.as_deref(), Some("0.3.1"));
         restore_env(DSH_HOME_ENV, previous);
     }
 
