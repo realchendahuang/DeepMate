@@ -165,8 +165,8 @@ macOS (Apple Silicon and Intel) and Windows (x86_64) are published on
 Both the CLI and the desktop app accept `--adapter` (default
 `deepseek-harness`, use `test` for the deterministic fake adapter) and
 `--data-dir` to override the data directory. On Linux, building the desktop
-app requires `libgtk-3-dev` and `libayatana-appindicator3-dev` for the
-system tray icon.
+app requires `libgtk-3-dev`, `libayatana-appindicator3-dev` and `libxdo-dev`
+for the system tray icon.
 
 CLI command surface:
 
