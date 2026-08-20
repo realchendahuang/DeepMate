@@ -47,6 +47,10 @@ pub enum UiEvent {
     },
     Status(RuntimeStatus),
     Doctor(Box<DoctorReport>),
+    // A user-triggered action completed successfully; carries the history
+    // action name so the UI layer can record it (mirroring CLI semantics:
+    // only successful actions are recorded).
+    ActionCompleted(&'static str),
     Busy(bool),
     Error(String),
 }
@@ -77,11 +81,16 @@ pub fn spawn(adapter: Box<dyn HarnessAdapter>) -> Bridge {
                     if event_tx.send(UiEvent::Busy(true)).is_err() {
                         return;
                     }
+                    // Sends Busy(false) when dropped, so a panic inside an
+                    // adapter future can never leave the UI stuck in the busy
+                    // state even though the bridge thread itself dies.
+                    let mut busy = BusyGuard::armed(&event_tx);
                     for event in handle(adapter.as_ref(), &cmd).await {
                         if event_tx.send(event).is_err() {
                             return;
                         }
                     }
+                    busy.disarm();
                     if event_tx.send(UiEvent::Busy(false)).is_err() {
                         return;
                     }
@@ -96,6 +105,31 @@ pub fn spawn(adapter: Box<dyn HarnessAdapter>) -> Bridge {
     }
 }
 
+// Sends Busy(false) on drop unless disarmed, closing the busy bracket even
+// when `handle` panics.
+struct BusyGuard<'a> {
+    tx: &'a std_mpsc::Sender<UiEvent>,
+    armed: bool,
+}
+
+impl<'a> BusyGuard<'a> {
+    fn armed(tx: &'a std_mpsc::Sender<UiEvent>) -> Self {
+        Self { tx, armed: true }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for BusyGuard<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = self.tx.send(UiEvent::Busy(false));
+        }
+    }
+}
+
 // Execute one command against the adapter and return the events to emit.
 //
 // Every CoreError is converted into a UiEvent::Error; this function never
@@ -107,11 +141,14 @@ async fn handle(adapter: &dyn HarnessAdapter, cmd: &UiCommand) -> Vec<UiEvent> {
         UiCommand::RuntimeStop => runtime_command(adapter, RuntimeOp::Stop).await,
         UiCommand::RuntimeRestart => runtime_command(adapter, RuntimeOp::Restart).await,
         UiCommand::OpenHarness => match adapter.open_ui().await {
-            Ok(()) => Vec::new(),
+            Ok(()) => vec![UiEvent::ActionCompleted("desktop.open")],
             Err(err) => vec![UiEvent::Error(err.to_string())],
         },
         UiCommand::RunDoctor => match adapter.doctor().await {
-            Ok(report) => vec![UiEvent::Doctor(Box::new(report))],
+            Ok(report) => vec![
+                UiEvent::Doctor(Box::new(report)),
+                UiEvent::ActionCompleted("desktop.doctor"),
+            ],
             Err(err) => vec![UiEvent::Error(err.to_string())],
         },
     }
@@ -131,13 +168,22 @@ async fn runtime_command(adapter: &dyn HarnessAdapter, op: RuntimeOp) -> Vec<UiE
             adapter.metadata().id
         ))];
     }
+    let action = match op {
+        RuntimeOp::Start => "desktop.runtime.start",
+        RuntimeOp::Stop => "desktop.runtime.stop",
+        RuntimeOp::Restart => "desktop.runtime.restart",
+    };
     let result = match op {
         RuntimeOp::Start => adapter.start().await,
         RuntimeOp::Stop => adapter.stop().await,
         RuntimeOp::Restart => adapter.restart().await,
     };
     match result {
-        Ok(()) => refresh_status(adapter).await,
+        Ok(()) => {
+            let mut events = vec![UiEvent::ActionCompleted(action)];
+            events.extend(refresh_status(adapter).await);
+            events
+        }
         Err(err) => vec![UiEvent::Error(err.to_string())],
     }
 }
@@ -280,6 +326,12 @@ mod tests {
         let bridge = spawn(Box::new(FakeAdapter::running()));
         let events = run_command(&bridge, UiCommand::RuntimeStart);
 
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, UiEvent::ActionCompleted("desktop.runtime.start"))),
+            "expected ActionCompleted after a successful start: {events:?}"
+        );
         let statuses: Vec<_> = events
             .iter()
             .filter_map(|event| match event {
@@ -307,6 +359,12 @@ mod tests {
         assert_eq!(reports.len(), 1, "expected exactly one Doctor event");
         assert_eq!(reports[0].adapter_id, "test");
         assert_eq!(reports[0].checks.len(), 1);
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, UiEvent::ActionCompleted("desktop.doctor"))),
+            "expected ActionCompleted after a successful doctor run: {events:?}"
+        );
     }
 
     #[tokio::test]
@@ -315,13 +373,20 @@ mod tests {
         adapter.capabilities = AdapterCapabilities::default();
         let bridge = spawn(Box::new(adapter));
 
-        // A gated runtime operation must surface an Error event.
+        // A gated runtime operation must surface an Error event and no
+        // ActionCompleted.
         let events = run_command(&bridge, UiCommand::RuntimeStart);
         assert!(
             events
                 .iter()
                 .any(|event| matches!(event, UiEvent::Error(_))),
             "expected an Error event for unsupported runtime control: {events:?}"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, UiEvent::ActionCompleted(_))),
+            "failed operations must not record an action: {events:?}"
         );
 
         // RefreshAll still completes, with all counts marked unsupported.

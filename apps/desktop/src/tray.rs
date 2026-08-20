@@ -2,8 +2,10 @@
 //
 // The tray icon carries the DeepMate logo (bundled, decoded and resized to
 // 32x32 RGBA at startup) and a small context menu. Left-clicking the icon
-// toggles the control-center window; the menu offers explicit Show and Quit
-// entries. Tray and menu events arrive on global channels, so a polling
+// toggles the control-center window (Windows/macOS; the Linux
+// StatusNotifierItem backend does not deliver click events, so Linux users
+// use the menu); the menu offers explicit Show and Quit entries on every
+// platform. Tray and menu events arrive on global channels, so a polling
 // thread forwards them into the Slint UI thread.
 
 use std::cell::RefCell;
@@ -75,7 +77,8 @@ fn build(window: Weak<AppWindow>) -> Result<()> {
 
     let tray = TrayIconBuilder::new()
         .with_menu(Box::new(menu))
-        // Left-click toggles the window; the menu opens on right-click.
+        // Left-click toggles the window (where the platform delivers click
+        // events); the menu opens on right-click.
         .with_menu_on_left_click(false)
         .with_tooltip("DeepMate")
         .with_icon(icon)
@@ -121,16 +124,14 @@ fn dispatch(window: &Weak<AppWindow>, action: impl FnOnce(&AppWindow) + Send + '
 }
 
 fn forward_tray_event(window: &Weak<AppWindow>, event: TrayIconEvent) -> bool {
-    // Clicks fire for both press and release; react to the release only, and
-    // to double-clicks (Windows), so a single click toggles exactly once.
+    // Clicks fire for both press and release; react to the release only.
+    // DoubleClick is deliberately ignored: on Windows a double-click also
+    // fires Click{Up}, so handling both would toggle the window twice.
     let toggle = matches!(
         &event,
         TrayIconEvent::Click {
             button: MouseButton::Left,
             button_state: MouseButtonState::Up,
-            ..
-        } | TrayIconEvent::DoubleClick {
-            button: MouseButton::Left,
             ..
         }
     );

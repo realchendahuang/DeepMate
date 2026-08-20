@@ -6,7 +6,14 @@
 //
 // History action names follow the CLI convention with a `desktop.` prefix:
 // desktop.runtime.start, desktop.runtime.stop, desktop.runtime.restart,
-// desktop.open, desktop.doctor.
+// desktop.open, desktop.doctor. Like the CLI, only successful actions are
+// recorded.
+
+// The tray app must not pop a console window on Windows release builds.
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -83,8 +90,8 @@ fn main() -> anyhow::Result<()> {
         &capabilities,
     ))));
 
-    wire_commands(&window, &bridge, &layout, &cli.adapter);
-    let _events_timer = wire_events(&window, bridge.events);
+    wire_commands(&window, &bridge);
+    let _events_timer = wire_events(&window, bridge.events, layout.clone(), cli.adapter.clone());
     wire_close_behavior(&window, config.ui.close_to_tray);
 
     tray::install(&window)?;
@@ -96,44 +103,33 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-// Forward UI callbacks to the bridge as commands, recording action history
-// for the state-changing ones (mirroring the CLI action names with a
-// `desktop.` prefix).
-fn wire_commands(
-    window: &AppWindow,
-    bridge: &bridge::Bridge,
-    layout: &DataLayout,
-    adapter_id: &str,
-) {
-    let sender = |command: UiCommand, action: Option<&'static str>| {
+// Forward UI callbacks to the bridge as commands. Action history is recorded
+// later, when the bridge reports the action as completed (UiEvent::
+// ActionCompleted), mirroring the CLI which records only successful commands.
+fn wire_commands(window: &AppWindow, bridge: &bridge::Bridge) {
+    let sender = |command: UiCommand| {
         let cmd = bridge.cmd.clone();
-        let layout = layout.clone();
-        let adapter_id = adapter_id.to_string();
         move || {
-            if let Some(action) = action {
-                record_action(&layout, &adapter_id, action.to_string());
-            }
             let _ = cmd.send(command);
         }
     };
-    window.on_refresh_all(sender(UiCommand::RefreshAll, None));
-    window.on_runtime_start(sender(
-        UiCommand::RuntimeStart,
-        Some("desktop.runtime.start"),
-    ));
-    window.on_runtime_stop(sender(UiCommand::RuntimeStop, Some("desktop.runtime.stop")));
-    window.on_runtime_restart(sender(
-        UiCommand::RuntimeRestart,
-        Some("desktop.runtime.restart"),
-    ));
-    window.on_open_harness(sender(UiCommand::OpenHarness, Some("desktop.open")));
-    window.on_run_doctor(sender(UiCommand::RunDoctor, Some("desktop.doctor")));
+    window.on_refresh_all(sender(UiCommand::RefreshAll));
+    window.on_runtime_start(sender(UiCommand::RuntimeStart));
+    window.on_runtime_stop(sender(UiCommand::RuntimeStop));
+    window.on_runtime_restart(sender(UiCommand::RuntimeRestart));
+    window.on_open_harness(sender(UiCommand::OpenHarness));
+    window.on_run_doctor(sender(UiCommand::RunDoctor));
 }
 
 // Drain bridge events on the UI thread with a repeating timer and apply them
 // to the window properties and models. The returned timer must be kept alive
 // for the duration of the event loop.
-fn wire_events(window: &AppWindow, events: std::sync::mpsc::Receiver<UiEvent>) -> slint::Timer {
+fn wire_events(
+    window: &AppWindow,
+    events: std::sync::mpsc::Receiver<UiEvent>,
+    layout: DataLayout,
+    adapter_id: String,
+) -> slint::Timer {
     let weak = window.as_weak();
     let timer = slint::Timer::default();
     timer.start(
@@ -144,7 +140,7 @@ fn wire_events(window: &AppWindow, events: std::sync::mpsc::Receiver<UiEvent>) -
                 return;
             };
             while let Ok(event) = events.try_recv() {
-                apply_event(&window, event);
+                apply_event(&window, event, &layout, &adapter_id);
             }
         },
     );
@@ -167,9 +163,18 @@ fn wire_close_behavior(window: &AppWindow, close_to_tray: bool) {
     }
 }
 
-fn apply_event(window: &AppWindow, event: UiEvent) {
+fn apply_event(window: &AppWindow, event: UiEvent, layout: &DataLayout, adapter_id: &str) {
     match event {
-        UiEvent::Busy(busy) => window.set_busy(busy),
+        UiEvent::Busy(busy) => {
+            // A new command supersedes any previous error: clear the error
+            // bar when a command starts, so errors raised later in the same
+            // batch (for example by a partial refresh) stay visible.
+            if busy {
+                window.set_error_text("".into());
+            }
+            window.set_busy(busy);
+        }
+        UiEvent::ActionCompleted(action) => record_action(layout, adapter_id, action.to_string()),
         UiEvent::Error(message) => {
             tracing::warn!(%message, "bridge error");
             window.set_error_text(message.into());
@@ -194,8 +199,6 @@ fn apply_event(window: &AppWindow, event: UiEvent) {
             window.set_detection_detail(detection.detail.unwrap_or_default().into());
             set_status(window, &status);
             set_counts(window, &counts);
-            // A successful refresh clears any stale error.
-            window.set_error_text("".into());
         }
         UiEvent::Doctor(report) => {
             let rows: Vec<CheckRow> = report
