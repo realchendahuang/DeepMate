@@ -25,6 +25,14 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # The desktop shell uses tray-icon, which needs system GTK/AppIndicator
+      # development packages on Linux.
+      - name: Install Linux tray dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libayatana-appindicator3-dev
+
       - name: Format
         run: cargo fmt --all --check
 
