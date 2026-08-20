@@ -1,0 +1,238 @@
+import { Button, ScrollView } from "std-widgets.slint";
+import { Card } from "../components/Card.slint";
+import { Badge } from "../components/Badge.slint";
+import { Colors } from "../theme/Colors.slint";
+import { Metrics } from "../theme/Metrics.slint";
+import { Typography } from "../theme/Typography.slint";
+
+// One label/value cell in the inventory row.
+component CountCell inherits VerticalLayout {
+    in property <string> label: "";
+    in property <int> value: -1;
+
+    spacing: 2px;
+
+    Text {
+        text: root.label;
+        color: Colors.text-dim;
+        font-size: Typography.small;
+    }
+
+    Text {
+        text: root.value < 0 ? "—" : root.value;
+        color: Colors.text;
+        font-size: Typography.title;
+        font-weight: 700;
+    }
+}
+
+// Landing page: identity, runtime at a glance, capabilities and counts.
+export component OverviewPage inherits Rectangle {
+    in property <string> adapter-name: "";
+    in property <string> adapter-version: "";
+    in property <bool> harness-found: false;
+    in property <string> harness-name: "";
+    in property <string> harness-version: "";
+    in property <string> detection-detail: "";
+    in property <string> status-kind: "unknown";
+    in property <string> status-tone: "neutral";
+    in property <string> status-pid: "";
+    in property <string> status-message: "";
+    in property <[string]> capabilities: [];
+    in property <int> counts-profiles: -1;
+    in property <int> counts-providers: -1;
+    in property <int> counts-models: -1;
+    in property <int> counts-plugins: -1;
+    in property <bool> busy: false;
+
+    callback refresh();
+    callback open-harness();
+    callback run-doctor();
+
+    background: Colors.bg;
+
+    sv := ScrollView {
+        VerticalLayout {
+            width: sv.visible-width;
+            padding: Metrics.padding;
+            spacing: Metrics.spacing;
+            alignment: start;
+
+            Text {
+                text: "Overview";
+                color: Colors.text;
+                font-size: Typography.title;
+                font-weight: 700;
+            }
+
+            Card {
+                Text {
+                    text: "Harness";
+                    color: Colors.text;
+                    font-size: Typography.heading;
+                    font-weight: 600;
+                }
+
+                HorizontalLayout {
+                    spacing: Metrics.spacing;
+                    alignment: start;
+
+                    Text {
+                        text: root.harness-found ? root.harness-name : "Not detected";
+                        color: root.harness-found ? Colors.text : Colors.warn;
+                        font-size: Typography.body;
+                        vertical-alignment: center;
+                    }
+
+                    Badge {
+                        text: root.harness-found ? "detected" : "missing";
+                        kind: root.harness-found ? "pass" : "warn";
+                    }
+                }
+
+                if root.harness-version != "": Text {
+                    text: "Version: " + root.harness-version;
+                    color: Colors.text-dim;
+                    font-size: Typography.body;
+                }
+
+                Text {
+                    text: "Adapter: " + root.adapter-name + " (" + root.adapter-version + ")";
+                    color: Colors.text-dim;
+                    font-size: Typography.body;
+                }
+
+                if root.detection-detail != "": Text {
+                    text: root.detection-detail;
+                    color: Colors.text-dim;
+                    font-size: Typography.small;
+                    wrap: word-wrap;
+                }
+            }
+
+            Card {
+                Text {
+                    text: "Runtime";
+                    color: Colors.text;
+                    font-size: Typography.heading;
+                    font-weight: 600;
+                }
+
+                HorizontalLayout {
+                    spacing: Metrics.spacing;
+                    alignment: start;
+
+                    Badge {
+                        text: root.status-kind;
+                        kind: root.status-tone;
+                    }
+
+                    if root.status-pid != "": Text {
+                        text: "PID " + root.status-pid;
+                        color: Colors.text-dim;
+                        font-size: Typography.body;
+                        vertical-alignment: center;
+                    }
+                }
+
+                if root.status-message != "": Text {
+                    text: root.status-message;
+                    color: Colors.text-dim;
+                    font-size: Typography.body;
+                    wrap: word-wrap;
+                }
+            }
+
+            Card {
+                Text {
+                    text: "Capabilities";
+                    color: Colors.text;
+                    font-size: Typography.heading;
+                    font-weight: 600;
+                }
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: start;
+
+                    for cap in root.capabilities: Badge {
+                        text: cap;
+                        kind: "accent";
+                    }
+                }
+            }
+
+            Card {
+                Text {
+                    text: "Inventory";
+                    color: Colors.text;
+                    font-size: Typography.heading;
+                    font-weight: 600;
+                }
+
+                HorizontalLayout {
+                    spacing: 32px;
+                    alignment: start;
+
+                    CountCell {
+                        label: "Profiles";
+                        value: root.counts-profiles;
+                    }
+
+                    CountCell {
+                        label: "Providers";
+                        value: root.counts-providers;
+                    }
+
+                    CountCell {
+                        label: "Models";
+                        value: root.counts-models;
+                    }
+
+                    CountCell {
+                        label: "Plugins";
+                        value: root.counts-plugins;
+                    }
+                }
+            }
+
+            Card {
+                Text {
+                    text: "Quick actions";
+                    color: Colors.text;
+                    font-size: Typography.heading;
+                    font-weight: 600;
+                }
+
+                HorizontalLayout {
+                    spacing: Metrics.spacing;
+                    alignment: start;
+
+                    Button {
+                        text: "Open Harness";
+                        enabled: !root.busy;
+                        clicked => {
+                            root.open-harness();
+                        }
+                    }
+
+                    Button {
+                        text: "Run Doctor";
+                        enabled: !root.busy;
+                        clicked => {
+                            root.run-doctor();
+                        }
+                    }
+
+                    Button {
+                        text: "Refresh";
+                        enabled: !root.busy;
+                        clicked => {
+                            root.refresh();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

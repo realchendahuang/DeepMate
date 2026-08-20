@@ -1,0 +1,123 @@
+import { Button, ScrollView } from "std-widgets.slint";
+import { Card } from "../components/Card.slint";
+import { Badge } from "../components/Badge.slint";
+import { Colors } from "../theme/Colors.slint";
+import { Metrics } from "../theme/Metrics.slint";
+import { Typography } from "../theme/Typography.slint";
+
+// Runtime lifecycle page: status plus start/stop/restart controls.
+export component RuntimePage inherits Rectangle {
+    in property <string> status-kind: "unknown";
+    in property <string> status-tone: "neutral";
+    in property <string> status-pid: "";
+    in property <string> status-message: "";
+    in property <bool> busy: false;
+
+    callback runtime-start();
+    callback runtime-stop();
+    callback runtime-restart();
+    callback open-ui();
+
+    background: Colors.bg;
+
+    sv := ScrollView {
+        VerticalLayout {
+            width: sv.visible-width;
+            padding: Metrics.padding;
+            spacing: Metrics.spacing;
+            alignment: start;
+
+            Text {
+                text: "Runtime";
+                color: Colors.text;
+                font-size: Typography.title;
+                font-weight: 700;
+            }
+
+            Card {
+                Text {
+                    text: "Status";
+                    color: Colors.text;
+                    font-size: Typography.heading;
+                    font-weight: 600;
+                }
+
+                HorizontalLayout {
+                    spacing: Metrics.spacing;
+                    alignment: start;
+
+                    Badge {
+                        text: root.status-kind;
+                        kind: root.status-tone;
+                    }
+
+                    if root.status-pid != "": Text {
+                        text: "PID " + root.status-pid;
+                        color: Colors.text-dim;
+                        font-size: Typography.body;
+                        vertical-alignment: center;
+                    }
+                }
+
+                if root.status-message != "": Text {
+                    text: root.status-message;
+                    color: Colors.text-dim;
+                    font-size: Typography.body;
+                    wrap: word-wrap;
+                }
+            }
+
+            Card {
+                Text {
+                    text: "Control";
+                    color: Colors.text;
+                    font-size: Typography.heading;
+                    font-weight: 600;
+                }
+
+                HorizontalLayout {
+                    spacing: Metrics.spacing;
+                    alignment: start;
+
+                    Button {
+                        text: "Start";
+                        enabled: !root.busy;
+                        clicked => {
+                            root.runtime-start();
+                        }
+                    }
+
+                    Button {
+                        text: "Stop";
+                        enabled: !root.busy;
+                        clicked => {
+                            root.runtime-stop();
+                        }
+                    }
+
+                    Button {
+                        text: "Restart";
+                        enabled: !root.busy;
+                        clicked => {
+                            root.runtime-restart();
+                        }
+                    }
+
+                    Button {
+                        text: "Open UI";
+                        enabled: !root.busy;
+                        clicked => {
+                            root.open-ui();
+                        }
+                    }
+                }
+
+                if root.busy: Text {
+                    text: "Working…";
+                    color: Colors.text-dim;
+                    font-size: Typography.small;
+                }
+            }
+        }
+    }
+}

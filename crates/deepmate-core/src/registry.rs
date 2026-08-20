@@ -22,6 +22,18 @@ impl AdapterRegistry {
             .map(|adapter| adapter.as_ref())
     }
 
+    // Take ownership of a registered adapter by id, consuming the registry.
+    //
+    // Frontends that share one adapter across threads (for example the
+    // desktop bridge) need owned access rather than a borrow.
+    pub fn into_adapter(mut self, id: &str) -> Option<Box<dyn HarnessAdapter>> {
+        let index = self
+            .adapters
+            .iter()
+            .position(|adapter| adapter.metadata().id == id)?;
+        Some(self.adapters.remove(index))
+    }
+
     pub fn list(&self) -> Vec<AdapterMetadata> {
         self.adapters
             .iter()
@@ -35,5 +47,25 @@ impl AdapterRegistry {
 
     pub fn len(&self) -> usize {
         self.adapters.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testkit::FakeAdapter;
+
+    #[test]
+    fn into_adapter_transfers_ownership() {
+        let mut registry = AdapterRegistry::new();
+        registry.register(Box::new(FakeAdapter::healthy()));
+        let adapter = registry.into_adapter("test").expect("adapter registered");
+        assert_eq!(adapter.metadata().id, "test");
+    }
+
+    #[test]
+    fn into_adapter_returns_none_for_unknown_id() {
+        let registry = AdapterRegistry::new();
+        assert!(registry.into_adapter("missing").is_none());
     }
 }

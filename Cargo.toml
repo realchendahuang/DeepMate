@@ -6,6 +6,7 @@ members = [
     "crates/deepmate-app",
     "crates/adapters/deepseek-harness",
     "apps/cli",
+    "apps/desktop",
 ]
 
 [workspace.package]

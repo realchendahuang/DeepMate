@@ -1,0 +1,29 @@
+[package]
+name = "deepmate-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "deepmate-desktop"
+path = "src/main.rs"
+
+[dependencies]
+deepmate-core = { path = "../../crates/deepmate-core" }
+deepmate-platform = { path = "../../crates/deepmate-platform" }
+deepmate-app = { path = "../../crates/deepmate-app" }
+deepseek-harness = { path = "../../crates/adapters/deepseek-harness" }
+anyhow.workspace = true
+clap.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+slint = "1"
+tray-icon = "0.24"
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[dev-dependencies]
+tokio.workspace = true
+
+[build-dependencies]
+slint-build = "1"

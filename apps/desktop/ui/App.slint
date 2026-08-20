@@ -1,0 +1,142 @@
+// DeepMate desktop application shell.
+//
+// The window is a thin control center: it renders state from the core through
+// the shared bridge and forwards user intent back as commands. Business logic
+// never lives in UI callbacks.
+
+import { Sidebar } from "components/Sidebar.slint";
+import { OverviewPage } from "pages/Overview.slint";
+import { RuntimePage } from "pages/Runtime.slint";
+import { DoctorPage, CheckRow } from "pages/Doctor.slint";
+import { Colors } from "theme/Colors.slint";
+import { Typography } from "theme/Typography.slint";
+import { Metrics } from "theme/Metrics.slint";
+
+export component AppWindow inherits Window {
+    icon: @image-url("../../../logo/logo.png");
+    title: "DeepMate";
+    min-width: 900px;
+    min-height: 600px;
+    background: Colors.bg;
+    default-font-size: Typography.body;
+
+    in-out property <int> current-page: 0;
+
+    // Adapter / harness identity.
+    in property <string> adapter-id: "";
+    in property <string> adapter-name: "";
+    in property <string> adapter-version: "";
+    in property <bool> harness-found: false;
+    in property <string> harness-name: "";
+    in property <string> harness-version: "";
+    in property <string> detection-detail: "";
+
+    // Runtime status.
+    in property <string> status-kind: "unknown";
+    in property <string> status-tone: "neutral";
+    in property <string> status-pid: "";
+    in property <string> status-message: "";
+
+    // Capability badges and inventory counts (-1 = unsupported).
+    in property <[string]> capabilities: [];
+    in property <int> counts-profiles: -1;
+    in property <int> counts-providers: -1;
+    in property <int> counts-models: -1;
+    in property <int> counts-plugins: -1;
+
+    // Doctor report rows.
+    in property <[CheckRow]> doctor-checks: [];
+
+    // Global UI state.
+    in property <bool> busy: false;
+    in property <string> error-text: "";
+
+    callback refresh-all();
+    callback runtime-start();
+    callback runtime-stop();
+    callback runtime-restart();
+    callback open-harness();
+    callback run-doctor();
+
+    HorizontalLayout {
+        Sidebar {
+            items: ["Overview", "Runtime", "Doctor"];
+            selected <=> root.current-page;
+        }
+
+        VerticalLayout {
+            if root.error-text != "": Rectangle {
+                height: 34px;
+                background: Colors.fail.with-alpha(0.15);
+
+                Text {
+                    x: Metrics.padding;
+                    height: 100%;
+                    vertical-alignment: center;
+                    text: root.error-text;
+                    color: Colors.fail;
+                    font-size: Typography.body;
+                }
+            }
+
+            if root.current-page == 0: OverviewPage {
+                adapter-name: root.adapter-name;
+                adapter-version: root.adapter-version;
+                harness-found: root.harness-found;
+                harness-name: root.harness-name;
+                harness-version: root.harness-version;
+                detection-detail: root.detection-detail;
+                status-kind: root.status-kind;
+                status-tone: root.status-tone;
+                status-pid: root.status-pid;
+                status-message: root.status-message;
+                capabilities: root.capabilities;
+                counts-profiles: root.counts-profiles;
+                counts-providers: root.counts-providers;
+                counts-models: root.counts-models;
+                counts-plugins: root.counts-plugins;
+                busy: root.busy;
+
+                refresh => {
+                    root.refresh-all();
+                }
+                open-harness => {
+                    root.open-harness();
+                }
+                run-doctor => {
+                    root.run-doctor();
+                }
+            }
+
+            if root.current-page == 1: RuntimePage {
+                status-kind: root.status-kind;
+                status-tone: root.status-tone;
+                status-pid: root.status-pid;
+                status-message: root.status-message;
+                busy: root.busy;
+
+                runtime-start => {
+                    root.runtime-start();
+                }
+                runtime-stop => {
+                    root.runtime-stop();
+                }
+                runtime-restart => {
+                    root.runtime-restart();
+                }
+                open-ui => {
+                    root.open-harness();
+                }
+            }
+
+            if root.current-page == 2: DoctorPage {
+                checks: root.doctor-checks;
+                busy: root.busy;
+
+                run => {
+                    root.run-doctor();
+                }
+            }
+        }
+    }
+}

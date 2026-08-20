@@ -1,0 +1,17 @@
+import { Colors } from "../theme/Colors.slint";
+import { Metrics } from "../theme/Metrics.slint";
+
+// A muted panel container used by every page.
+export component Card inherits Rectangle {
+    background: Colors.panel;
+    border-radius: Metrics.radius;
+    border-width: 1px;
+    border-color: Colors.border;
+    clip: true;
+
+    VerticalLayout {
+        padding: Metrics.padding;
+        spacing: Metrics.spacing;
+        @children
+    }
+}

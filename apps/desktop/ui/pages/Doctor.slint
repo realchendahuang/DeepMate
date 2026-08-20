@@ -1,0 +1,101 @@
+import { Button, ScrollView } from "std-widgets.slint";
+import { Card } from "../components/Card.slint";
+import { Badge } from "../components/Badge.slint";
+import { Colors } from "../theme/Colors.slint";
+import { Metrics } from "../theme/Metrics.slint";
+import { Typography } from "../theme/Typography.slint";
+
+// One row of the doctor report, mirrored from the core DoctorCheck model.
+export struct CheckRow {
+    status: string,
+    summary: string,
+    details: string,
+    action: string,
+}
+
+// Diagnostics page: run the doctor and inspect structured checks.
+export component DoctorPage inherits Rectangle {
+    in property <[CheckRow]> checks: [];
+    in property <bool> busy: false;
+
+    callback run();
+
+    background: Colors.bg;
+
+    VerticalLayout {
+        padding: Metrics.padding;
+        spacing: Metrics.spacing;
+
+        HorizontalLayout {
+            spacing: Metrics.spacing;
+
+            Text {
+                text: "Doctor";
+                color: Colors.text;
+                font-size: Typography.title;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+
+            Rectangle {
+                horizontal-stretch: 1;
+            }
+
+            Button {
+                text: root.busy ? "Running…" : "Run Doctor";
+                enabled: !root.busy;
+                clicked => {
+                    root.run();
+                }
+            }
+        }
+
+        sv := ScrollView {
+            VerticalLayout {
+                width: sv.visible-width;
+                spacing: Metrics.spacing;
+                alignment: start;
+
+                if root.checks.length == 0: Text {
+                    text: "Run Doctor to diagnose the environment.";
+                    color: Colors.text-dim;
+                    font-size: Typography.body;
+                }
+
+                for check in root.checks: Card {
+                    HorizontalLayout {
+                        spacing: Metrics.spacing;
+                        alignment: start;
+
+                        Badge {
+                            text: check.status;
+                            kind: check.status;
+                        }
+
+                        Text {
+                            text: check.summary;
+                            color: Colors.text;
+                            font-size: Typography.body;
+                            vertical-alignment: center;
+                            wrap: word-wrap;
+                        }
+                    }
+
+                    if check.details != "": Text {
+                        text: check.details;
+                        color: Colors.text-dim;
+                        font-size: Typography.body;
+                        wrap: word-wrap;
+                    }
+
+                    if check.action != "": Text {
+                        text: "Suggested action: " + check.action;
+                        color: Colors.accent;
+                        font-size: Typography.small;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+        }
+    }
+}

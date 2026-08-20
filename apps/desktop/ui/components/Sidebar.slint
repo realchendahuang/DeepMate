@@ -1,0 +1,52 @@
+import { Colors } from "../theme/Colors.slint";
+import { Metrics } from "../theme/Metrics.slint";
+import { Typography } from "../theme/Typography.slint";
+
+// Left-hand navigation rail.
+export component Sidebar inherits Rectangle {
+    in property <[string]> items: [];
+    in-out property <int> selected: 0;
+    callback activated(int);
+
+    width: Metrics.sidebar-width;
+    background: Colors.panel-alt;
+
+    VerticalLayout {
+        padding: Metrics.padding;
+        spacing: 4px;
+        alignment: start;
+
+        Text {
+            text: "DeepMate";
+            color: Colors.text;
+            font-size: Typography.heading;
+            font-weight: 700;
+        }
+
+        Rectangle {
+            height: Metrics.spacing;
+        }
+
+        for item[index] in root.items: Rectangle {
+            height: 34px;
+            border-radius: Metrics.radius-small;
+            background: index == root.selected ? Colors.selection : (touch.has-hover ? Colors.hover : transparent);
+
+            touch := TouchArea {
+                clicked => {
+                    root.selected = index;
+                    root.activated(index);
+                }
+            }
+
+            Text {
+                x: 12px;
+                height: 100%;
+                vertical-alignment: center;
+                text: item;
+                color: index == root.selected ? Colors.text : Colors.text-dim;
+                font-size: Typography.body;
+            }
+        }
+    }
+}

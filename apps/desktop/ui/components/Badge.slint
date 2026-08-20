@@ -1,0 +1,33 @@
+import { Colors } from "../theme/Colors.slint";
+import { Typography } from "../theme/Typography.slint";
+
+// Small status pill.
+//
+// kind: pass | warn | fail | skip | accent | neutral
+export component Badge inherits Rectangle {
+    in property <string> text: "";
+    in property <string> kind: "neutral";
+
+    property <color> tone:
+        kind == "pass" ? Colors.pass :
+        kind == "warn" ? Colors.warn :
+        kind == "fail" ? Colors.fail :
+        kind == "skip" ? Colors.skip :
+        kind == "accent" ? Colors.accent :
+        Colors.neutral;
+
+    height: 22px;
+    width: label.preferred-width + 18px;
+    border-radius: self.height / 2;
+    background: tone.with-alpha(0.16);
+
+    label := Text {
+        x: 9px;
+        height: 100%;
+        vertical-alignment: center;
+        text: root.text;
+        color: root.tone;
+        font-size: Typography.small;
+        font-weight: 600;
+    }
+}
