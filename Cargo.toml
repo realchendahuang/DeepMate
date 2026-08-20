@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/deepmate-core",
     "crates/deepmate-platform",
+    "crates/deepmate-app",
     "crates/adapters/deepseek-harness",
     "apps/cli",
 ]

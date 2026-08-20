@@ -1,0 +1,15 @@
+[package]
+name = "deepmate-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+deepmate-core = { path = "../deepmate-core" }
+deepmate-platform = { path = "../deepmate-platform" }
+deepseek-harness = { path = "../adapters/deepseek-harness" }
+anyhow.workspace = true
+tracing.workspace = true
+tracing-appender.workspace = true
+tracing-subscriber.workspace = true

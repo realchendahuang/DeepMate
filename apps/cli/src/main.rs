@@ -1,18 +1,14 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
 use clap::{Parser, Subcommand};
-use deepmate_core::adapter::{AdapterCapabilities, HarnessAdapter};
+use deepmate_app::{build_registry, init_tracing, load_config_or_default, record_action};
+use deepmate_core::adapter::HarnessAdapter;
 use deepmate_core::model::{Model, Plugin, Profile, Provider};
 use deepmate_core::registry::AdapterRegistry;
-use deepmate_core::testkit::FakeAdapter;
-use deepmate_core::{ActionRecord, Config, DataLayout};
+use deepmate_core::DataLayout;
 use deepmate_platform::{PlatformService, SystemPlatform};
-use deepseek_harness::DeepSeekHarnessAdapter;
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{EnvFilter, Layer};
 
 #[derive(Debug, Parser)]
 #[command(name = "deepmate", version, about = "DeepMate control plane CLI")]
@@ -113,18 +109,7 @@ async fn main() -> anyhow::Result<()> {
         .ensure()
         .context("failed to initialize the DeepMate data directory")?;
 
-    let config = match Config::load(&layout.config_path()) {
-        Ok(config) => config,
-        Err(err) => {
-            eprintln!("warning: {err}; using default configuration");
-            Config::default()
-        }
-    };
-    if !layout.config_path().exists() {
-        if let Err(err) = config.save(&layout.config_path()) {
-            eprintln!("warning: failed to write default config: {err}");
-        }
-    }
+    let config = load_config_or_default(&layout);
 
     let _guard = init_tracing(&layout.logs_dir());
     tracing::debug!(
@@ -140,10 +125,7 @@ async fn main() -> anyhow::Result<()> {
 
     // History recording is best-effort: a read-only data directory must not
     // break the command itself.
-    let record = ActionRecord::new(action).with_adapter(cli.adapter.clone());
-    if let Err(err) = layout.history().record(&record) {
-        tracing::warn!(error = %err, "failed to record action history");
-    }
+    record_action(&layout, &cli.adapter, action);
     Ok(())
 }
 
@@ -291,56 +273,6 @@ fn require_capability(
             adapter.metadata().id
         ))
     }
-}
-
-fn init_tracing(logs_dir: &Path) -> tracing_appender::non_blocking::WorkerGuard {
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    let file_appender = tracing_appender::rolling::daily(logs_dir, "deepmate.log");
-    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
-    tracing_subscriber::registry()
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_writer(std::io::stderr)
-                .with_filter(filter.clone()),
-        )
-        .with(
-            tracing_subscriber::fmt::layer()
-                .with_writer(non_blocking)
-                .with_ansi(false)
-                .with_filter(filter),
-        )
-        .init();
-    guard
-}
-
-fn build_registry(adapter_id: &str, layout: &DataLayout) -> anyhow::Result<AdapterRegistry> {
-    let mut registry = AdapterRegistry::new();
-    match adapter_id {
-        "test" => {
-            registry.register(Box::new(FakeAdapter::healthy()));
-        }
-        // A fake adapter with only runtime support, for exercising the
-        // capability gate without a real harness.
-        "minimal" => {
-            let mut adapter = FakeAdapter::new("minimal");
-            adapter.capabilities = AdapterCapabilities {
-                runtime: true,
-                ..Default::default()
-            };
-            registry.register(Box::new(adapter));
-        }
-        "deepseek-harness" => {
-            let platform = Arc::new(SystemPlatform);
-            let mut adapter = DeepSeekHarnessAdapter::new(platform);
-            if let Ok(url) = std::env::var("DEEPMATE_HARNESS_UI_URL") {
-                adapter = adapter.with_ui_url(url);
-            }
-            adapter = adapter.with_data_dir(layout.root().to_path_buf());
-            registry.register(Box::new(adapter));
-        }
-        other => return Err(anyhow!("unknown adapter: {other}")),
-    }
-    Ok(registry)
 }
 
 fn print_adapters(registry: &AdapterRegistry, json: bool) -> anyhow::Result<()> {
