@@ -692,7 +692,7 @@ Design tokens should be centralized so visual consistency does not depend on pag
 
 ## Initial implementation order
 
-### Stage 1 — Foundation
+### Stage 1 — Foundation (implemented in v0.1.0)
 
 - Rust workspace
 - `deepmate-core`
@@ -704,7 +704,7 @@ Design tokens should be centralized so visual consistency does not depend on pag
 - `deepmate doctor`
 - system browser open
 
-### Stage 2 — Desktop shell
+### Stage 2 — Desktop shell (implemented in v0.2.0)
 
 - Slint application shell
 - system tray

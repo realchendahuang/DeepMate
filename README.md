@@ -151,9 +151,22 @@ cargo build --workspace
 cargo run -- --adapter test status
 cargo run -- --adapter test doctor
 
+# Run the desktop shell
+cargo run -p deepmate-desktop
+
 # Full workspace gate (formatting, clippy, tests)
 make ci
 ```
+
+Prebuilt `deepmate` and `deepmate-desktop` binaries for Linux (x86_64),
+macOS (Apple Silicon and Intel) and Windows (x86_64) are published on
+[GitHub Releases](https://github.com/realchendahuang/DeepMate/releases).
+
+Both the CLI and the desktop app accept `--adapter` (default
+`deepseek-harness`, use `test` for the deterministic fake adapter) and
+`--data-dir` to override the data directory. On Linux, building the desktop
+app requires `libgtk-3-dev` and `libayatana-appindicator3-dev` for the
+system tray icon.
 
 CLI command surface:
 
@@ -245,7 +258,7 @@ Harness-owned state remains owned by the active harness and is accessed through 
 ## Project status
 
 DeepMate is currently in **early development**, with a working Stage 1
-foundation:
+foundation and a Stage 2 desktop shell:
 
 - Rust workspace with `deepmate-core`, `deepmate-platform` and the
   `deepseek-harness` adapter
@@ -261,6 +274,15 @@ foundation:
   `runtime stop`, profile discovery, plugin inventory, and provider/model
   catalogs through the documented `$DSH_HOME` file contracts
   (`profiles/*/package.json` and `settings.yaml`)
+- `deepmate-desktop` Slint shell with a system tray (close-to-tray honoring
+  `ui.close_to_tray`) and Overview, Runtime and Doctor pages built on
+  centralized design tokens
+- Tokio-backed command/event bridge between the desktop UI and the core,
+  unit-tested against the fake adapter
+- Shared `deepmate-app` service crate hosting the registry, config, logging
+  and history helpers used by both the CLI and the desktop app
+- Tag-triggered release workflow publishing `deepmate` and
+  `deepmate-desktop` binaries for Linux, macOS and Windows
 - Cross-platform CI (fmt, clippy, tests) with a core purity gate
 
 The first goal is to build a solid, minimal foundation for DeepSeek Harness
