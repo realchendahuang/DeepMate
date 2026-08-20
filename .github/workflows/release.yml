@@ -3,7 +3,6 @@ name: Release
 on:
   push:
     tags: ['v*']
-  workflow_dispatch:
 
 permissions:
   contents: write
@@ -22,7 +21,8 @@ jobs:
             target: x86_64-unknown-linux-gnu
           - os: macos-latest
             target: aarch64-apple-darwin
-          - os: macos-13
+          # macos-13 is retired; macos-15-intel is the Intel x86_64 runner.
+          - os: macos-15-intel
             target: x86_64-apple-darwin
           - os: windows-latest
             target: x86_64-pc-windows-msvc
@@ -52,8 +52,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME:-${{ github.ref_name }}}"
-          version="${version#v}"
+          version="${GITHUB_REF_NAME#v}"
           name="deepmate-${version}-${{ matrix.target }}"
           staging="dist/${name}"
           mkdir -p "${staging}"
@@ -76,15 +75,31 @@ jobs:
           Copy-Item README.md, LICENSE-MIT, LICENSE-APACHE $staging
           Compress-Archive -Path $staging -DestinationPath "dist/$name.zip"
           $hash = (Get-FileHash -Algorithm SHA256 "dist/$name.zip").Hash.ToLower()
-          "$hash  $name.zip" | Out-File -Encoding ascii "dist/$name.zip.sha256"
+          # LF-only checksum file so `sha256sum -c` works for Unix consumers.
+          [IO.File]::WriteAllText("$PWD/dist/$name.zip.sha256", "$hash  $name.zip`n")
 
-      - name: Publish GitHub release
+      # The file patterns are per-OS: with fail_on_unmatched_files each
+      # pattern must match, and a single job only ever produces one archive
+      # family.
+      - name: Publish GitHub release (Unix)
+        if: runner.os != 'Windows'
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/**/*.tar.gz
             dist/**/*.tar.gz.sha256
+          # Tags containing a suffix (v0.2.0-rc.1) publish as prereleases.
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+
+      - name: Publish GitHub release (Windows)
+        if: runner.os == 'Windows'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
             dist/**/*.zip
             dist/**/*.zip.sha256
+          prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
           fail_on_unmatched_files: true
