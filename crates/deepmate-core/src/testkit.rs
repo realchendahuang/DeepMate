@@ -6,12 +6,13 @@
 
 use async_trait::async_trait;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 
 use crate::adapter::{AdapterCapabilities, AdapterMetadata, Detection, HarnessAdapter};
 use crate::error::{CoreError, CoreResult};
 use crate::model::{
-    CheckStatus, DoctorCheck, DoctorReport, HarnessInfo, Model, Plugin, Profile, Provider,
-    RuntimeStatus, RuntimeStatusKind,
+    CheckStatus, DoctorCheck, DoctorReport, HarnessInfo, MarketEntry, MarketSource,
+    MarketSourceInfo, Model, Plugin, Profile, Provider, RuntimeStatus, RuntimeStatusKind,
 };
 
 static NEXT_PID: AtomicU32 = AtomicU32::new(4200);
@@ -33,6 +34,18 @@ pub struct FakeAdapter {
     pub stop_error: Option<String>,
     pub restart_error: Option<String>,
     pub open_error: Option<String>,
+    pub install_error: Option<String>,
+    pub remove_error: Option<String>,
+    pub update_error: Option<String>,
+    pub search_error: Option<String>,
+    // Call recordings for plugin lifecycle operations, as
+    // "<profile>:<spec-or-id>" lines (update without an id records the bare
+    // profile). Shared so the tests can inspect them through &self.
+    pub installed: Arc<Mutex<Vec<String>>>,
+    pub removed: Arc<Mutex<Vec<String>>>,
+    pub updated: Arc<Mutex<Vec<String>>>,
+    pub market_entries: Vec<MarketEntry>,
+    pub market_sources: Vec<MarketSourceInfo>,
 }
 
 impl FakeAdapter {
@@ -49,6 +62,7 @@ impl FakeAdapter {
                 providers: true,
                 models: true,
                 plugins: true,
+                marketplace: true,
                 ..Default::default()
             },
             doctor: DoctorReport {
@@ -65,6 +79,37 @@ impl FakeAdapter {
             stop_error: None,
             restart_error: None,
             open_error: None,
+            install_error: None,
+            remove_error: None,
+            update_error: None,
+            search_error: None,
+            installed: Arc::new(Mutex::new(Vec::new())),
+            removed: Arc::new(Mutex::new(Vec::new())),
+            updated: Arc::new(Mutex::new(Vec::new())),
+            market_entries: vec![MarketEntry {
+                id: "fake-market-plugin".to_string(),
+                name: "Fake Market Plugin".to_string(),
+                description: Some("A fake market entry".to_string()),
+                version: Some("2.0.0".to_string()),
+                source: MarketSource::Community,
+                repository: Some("https://example.com/repo".to_string()),
+                publisher: Some("fake-publisher".to_string()),
+                updated: None,
+            }],
+            market_sources: vec![
+                MarketSourceInfo {
+                    id: "curated".to_string(),
+                    name: "Curated".to_string(),
+                    description: "fake curated source".to_string(),
+                    source: MarketSource::Curated,
+                },
+                MarketSourceInfo {
+                    id: "community".to_string(),
+                    name: "Community".to_string(),
+                    description: "fake community source".to_string(),
+                    source: MarketSource::Community,
+                },
+            ],
         }
     }
 
@@ -197,7 +242,56 @@ impl HarnessAdapter for FakeAdapter {
             name: "Fake Plugin".to_string(),
             version: Some("1.0.0".to_string()),
             enabled: true,
+            profile: "default".to_string(),
+            latest: None,
+            outdated: false,
         }])
+    }
+
+    async fn install_plugin(&self, profile: &str, spec: &str) -> CoreResult<()> {
+        if let Some(message) = &self.install_error {
+            return Err(CoreError::InvalidState(message.clone()));
+        }
+        self.installed
+            .lock()
+            .unwrap()
+            .push(format!("{profile}:{spec}"));
+        Ok(())
+    }
+
+    async fn remove_plugin(&self, profile: &str, id: &str) -> CoreResult<()> {
+        if let Some(message) = &self.remove_error {
+            return Err(CoreError::InvalidState(message.clone()));
+        }
+        self.removed.lock().unwrap().push(format!("{profile}:{id}"));
+        Ok(())
+    }
+
+    async fn update_plugin(&self, profile: &str, id: Option<&str>) -> CoreResult<()> {
+        if let Some(message) = &self.update_error {
+            return Err(CoreError::InvalidState(message.clone()));
+        }
+        match id {
+            Some(id) => self.updated.lock().unwrap().push(format!("{profile}:{id}")),
+            None => self.updated.lock().unwrap().push(profile.to_string()),
+        }
+        Ok(())
+    }
+
+    async fn search_plugins(&self, query: &str) -> CoreResult<Vec<MarketEntry>> {
+        if let Some(message) = &self.search_error {
+            return Err(CoreError::InvalidState(message.clone()));
+        }
+        Ok(self
+            .market_entries
+            .iter()
+            .filter(|entry| entry.id.contains(query))
+            .cloned()
+            .collect())
+    }
+
+    async fn market_sources(&self) -> CoreResult<Vec<MarketSourceInfo>> {
+        Ok(self.market_sources.clone())
     }
 
     async fn doctor(&self) -> CoreResult<DoctorReport> {

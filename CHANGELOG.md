@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Plugin lifecycle in the CLI and DeepSeek Harness adapter: `plugin install`,
+  `plugin remove` and `plugin update` forward to the harness's own
+  `dsh plugin` workflow so profile, package and bundle reconciliation stay
+  owned by the harness.
+- Marketplace discovery: `market list` (curated vs community sources) and
+  `market search <query>` backed by the npm registry, with results normalized
+  into `MarketEntry` records carrying provenance metadata (publisher,
+  repository, last-updated).
+- Outdated-plugin detection: `plugin list --check-updates` consults the market
+  in parallel and marks plugins with a newer available version.
+- On-disk market query cache (`cache/marketplace.json`, single most-recent
+  query, one-hour TTL) so repeated searches and offline reruns stay cheap.
+- `MarketSourceInfo` model and `HarnessAdapter::market_sources()` so market
+  sources are adapter-reported instead of hardcoded in the CLI.
+
+### Changed
+
+- `Plugin` now carries `profile`, `latest` and `outdated` fields instead of
+  profile-qualified ids.
+- Market HTTP requests reuse a single `reqwest::Client` per adapter instead of
+  building one per search.
+
 ## [0.2.0] - 2026-08-20
 
 Stage 2 desktop shell.

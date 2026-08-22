@@ -5,7 +5,9 @@ use anyhow::{anyhow, Context};
 use clap::{Parser, Subcommand};
 use deepmate_app::{build_registry, init_tracing, load_config_or_default, record_action};
 use deepmate_core::adapter::HarnessAdapter;
-use deepmate_core::model::{Model, Plugin, Profile, Provider};
+use deepmate_core::model::{
+    is_outdated, MarketEntry, MarketSourceInfo, Model, Plugin, Profile, Provider,
+};
 use deepmate_core::registry::AdapterRegistry;
 use deepmate_core::DataLayout;
 use deepmate_platform::{PlatformService, SystemPlatform};
@@ -61,10 +63,15 @@ enum Command {
         #[command(subcommand)]
         action: ModelAction,
     },
-    /// List installed plugins.
+    /// Manage harness plugins.
     Plugin {
         #[command(subcommand)]
         action: PluginAction,
+    },
+    /// Discover plugins from market sources.
+    Market {
+        #[command(subcommand)]
+        action: MarketAction,
     },
 }
 
@@ -92,7 +99,49 @@ enum ModelAction {
 
 #[derive(Debug, Subcommand)]
 enum PluginAction {
+    /// List installed plugins. Append --check-updates to consult the market
+    /// for newer versions and mark outdated plugins.
+    List {
+        /// Check the market for newer versions and mark outdated plugins.
+        #[arg(long)]
+        check_updates: bool,
+    },
+    /// Install a plugin into a profile
+    /// (e.g. `deepmate plugin install dsh-mnemon --profile web`).
+    Install {
+        /// Package name, optionally with a version range.
+        spec: String,
+        /// Target profile.
+        #[arg(long, default_value = "web")]
+        profile: String,
+    },
+    /// Remove a plugin from a profile.
+    Remove {
+        /// Installed package name.
+        id: String,
+        /// Target profile.
+        #[arg(long, default_value = "web")]
+        profile: String,
+    },
+    /// Update the plugins of a profile, or a single plugin when named.
+    Update {
+        /// Package name to update; every plugin when omitted.
+        id: Option<String>,
+        /// Target profile.
+        #[arg(long, default_value = "web")]
+        profile: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum MarketAction {
+    /// List the market sources DeepMate knows about.
     List,
+    /// Search the market for plugins.
+    Search {
+        /// Search terms, matched against package names and descriptions.
+        query: String,
+    },
 }
 
 #[tokio::main]
@@ -250,12 +299,109 @@ async fn run(cli: &Cli, registry: &AdapterRegistry) -> anyhow::Result<String> {
         Command::Plugin { action } => {
             require_capability(adapter, adapter.capabilities().plugins, "plugins")?;
             match action {
-                PluginAction::List => print_list("plugins", adapter.plugins().await?, cli.json)?,
+                PluginAction::List { check_updates } => {
+                    let mut plugins = adapter.plugins().await?;
+                    if *check_updates {
+                        require_capability(
+                            adapter,
+                            adapter.capabilities().marketplace,
+                            "marketplace",
+                        )?;
+                        plugins = check_for_updates(adapter, plugins).await;
+                    }
+                    print_list("plugins", plugins, cli.json)?;
+                    "cli.plugin.list".to_string()
+                }
+                PluginAction::Install { spec, profile } => {
+                    adapter.install_plugin(profile, spec).await?;
+                    if cli.json {
+                        println!("{}", serde_json::json!({ "ok": true }));
+                    } else {
+                        println!("installed {spec} into profile {profile}");
+                    }
+                    "cli.plugin.install".to_string()
+                }
+                PluginAction::Remove { id, profile } => {
+                    adapter.remove_plugin(profile, id).await?;
+                    if cli.json {
+                        println!("{}", serde_json::json!({ "ok": true }));
+                    } else {
+                        println!("removed {id} from profile {profile}");
+                    }
+                    "cli.plugin.remove".to_string()
+                }
+                PluginAction::Update { id, profile } => {
+                    adapter.update_plugin(profile, id.as_deref()).await?;
+                    if cli.json {
+                        println!("{}", serde_json::json!({ "ok": true }));
+                    } else {
+                        match id {
+                            Some(id) => println!("updated {id} in profile {profile}"),
+                            None => println!("updated all plugins in profile {profile}"),
+                        }
+                    }
+                    "cli.plugin.update".to_string()
+                }
             }
-            "cli.plugin.list".to_string()
+        }
+        Command::Market { action } => {
+            require_capability(adapter, adapter.capabilities().marketplace, "marketplace")?;
+            match action {
+                MarketAction::List => {
+                    let sources = adapter.market_sources().await?;
+                    print_list("sources", sources, cli.json)?;
+                    "cli.market.list".to_string()
+                }
+                MarketAction::Search { query } => {
+                    let entries = adapter.search_plugins(query).await?;
+                    print_list("market", entries, cli.json)?;
+                    "cli.market.search".to_string()
+                }
+            }
         }
     };
     Ok(action)
+}
+
+// Ask the market for the latest version of every listed plugin and mark the
+// outdated ones. Failures are per-plugin: a network error for one package
+// must not fail the whole listing.
+//
+// The market lookups run concurrently so checking N plugins costs one round
+// trip rather than N sequential ones.
+async fn check_for_updates(adapter: &dyn HarnessAdapter, plugins: Vec<Plugin>) -> Vec<Plugin> {
+    let lookups = plugins.iter().map(|plugin| {
+        let id = plugin.id.clone();
+        let installed = plugin.version.clone();
+        async move {
+            match adapter.search_plugins(&id).await {
+                Ok(entries) => {
+                    let latest = entries
+                        .iter()
+                        .find(|entry| entry.id == id)
+                        .or_else(|| entries.first())
+                        .and_then(|entry| entry.version.clone())?;
+                    let outdated = installed
+                        .as_deref()
+                        .is_some_and(|installed| is_outdated(installed, &latest));
+                    Some((latest, outdated))
+                }
+                Err(err) => {
+                    tracing::warn!(plugin = %id, error = %err, "update check failed");
+                    None
+                }
+            }
+        }
+    });
+    let results: Vec<Option<(String, bool)>> = futures::future::join_all(lookups).await;
+    let mut enriched = plugins;
+    for (plugin, result) in enriched.iter_mut().zip(results) {
+        if let Some((latest, outdated)) = result {
+            plugin.latest = Some(latest);
+            plugin.outdated = outdated;
+        }
+    }
+    enriched
 }
 
 // Reject commands the active adapter does not declare support for, instead
@@ -341,9 +487,47 @@ impl HumanLine for Model {
 impl HumanLine for Plugin {
     fn line(&self) -> String {
         let state = if self.enabled { "enabled" } else { "disabled" };
-        match &self.version {
-            Some(version) => format!("{} — {} (v{version}, {state})", self.id, self.name),
-            None => format!("{} — {} ({state})", self.id, self.name),
+        let version = match &self.version {
+            Some(version) => format!("v{version}"),
+            None => "not installed".to_string(),
+        };
+        let mut line = format!(
+            "{}/{} — {} ({version}, {state})",
+            self.profile, self.id, self.name
+        );
+        if self.outdated {
+            let latest = self.latest.as_deref().unwrap_or("?");
+            line.push_str(&format!(" [outdated: latest {latest}]"));
         }
+        line
+    }
+}
+
+impl HumanLine for MarketEntry {
+    fn line(&self) -> String {
+        let source = match self.source {
+            deepmate_core::model::MarketSource::Curated => "curated",
+            deepmate_core::model::MarketSource::Community => "community",
+        };
+        let version = self.version.as_deref().unwrap_or("?");
+        let mut line = match &self.description {
+            Some(description) => {
+                format!("{} — {description} (v{version}, {source})", self.id)
+            }
+            None => format!("{} (v{version}, {source})", self.id),
+        };
+        if let Some(publisher) = &self.publisher {
+            line.push_str(&format!(" [by {publisher}]"));
+        }
+        if let Some(repository) = &self.repository {
+            line.push_str(&format!(" [repo {repository}]"));
+        }
+        line
+    }
+}
+
+impl HumanLine for MarketSourceInfo {
+    fn line(&self) -> String {
+        format!("{} — {}", self.id, self.description)
     }
 }

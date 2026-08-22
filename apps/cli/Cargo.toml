@@ -15,6 +15,7 @@ deepmate-core = { path = "../../crates/deepmate-core" }
 deepmate-platform = { path = "../../crates/deepmate-platform" }
 anyhow.workspace = true
 clap.workspace = true
+futures.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

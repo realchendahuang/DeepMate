@@ -120,4 +120,62 @@ pub struct Plugin {
     pub name: String,
     pub version: Option<String>,
     pub enabled: bool,
+    // The harness profile the plugin belongs to. Empty when the adapter
+    // cannot attribute the plugin to a profile.
+    pub profile: String,
+    // Latest version known from a marketplace check; `None` when no check
+    // has been performed for this plugin.
+    pub latest: Option<String>,
+    // True when a marketplace check found a newer version than the one
+    // currently installed.
+    pub outdated: bool,
+}
+
+// A marketplace search result (normalized representation).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarketEntry {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub version: Option<String>,
+    pub source: MarketSource,
+    // Trust/provenance signals surfaced before installation. All optional:
+    // a source may not expose any of them.
+    pub repository: Option<String>,
+    pub publisher: Option<String>,
+    pub updated: Option<String>,
+}
+
+// Where a market entry came from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MarketSource {
+    // Official, vetted sources (e.g. the harness vendor's npm scope).
+    Curated,
+    // Any other community-published source.
+    Community,
+}
+
+// A market source DeepMate knows about (normalized representation).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarketSourceInfo {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub source: MarketSource,
+}
+
+// Compare an installed version against a latest version.
+//
+// Falls back to plain string inequality when either side is not a valid
+// semantic version, so prerelease and loose ranges still get a conservative
+// signal instead of an error.
+pub fn is_outdated(installed: &str, latest: &str) -> bool {
+    match (
+        semver::Version::parse(installed),
+        semver::Version::parse(latest),
+    ) {
+        (Ok(a), Ok(b)) => b > a,
+        _ => installed != latest,
+    }
 }

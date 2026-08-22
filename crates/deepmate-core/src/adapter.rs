@@ -2,7 +2,9 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use crate::error::CoreResult;
-use crate::model::{DoctorReport, Model, Plugin, Profile, Provider, RuntimeStatus};
+use crate::model::{
+    DoctorReport, MarketEntry, MarketSourceInfo, Model, Plugin, Profile, Provider, RuntimeStatus,
+};
 
 // Static metadata for an adapter.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,6 +94,45 @@ pub trait HarnessAdapter: Send + Sync {
     }
 
     async fn plugins(&self) -> CoreResult<Vec<Plugin>> {
+        Ok(Vec::new())
+    }
+
+    // Install one plugin into a profile. `spec` is a package name with an
+    // optional version range, in the harness's own plugin-install syntax.
+    async fn install_plugin(&self, _profile: &str, _spec: &str) -> CoreResult<()> {
+        Err(crate::error::CoreError::Unsupported(format!(
+            "{} does not implement install_plugin()",
+            self.metadata().id
+        )))
+    }
+
+    // Remove one installed plugin from a profile.
+    async fn remove_plugin(&self, _profile: &str, _id: &str) -> CoreResult<()> {
+        Err(crate::error::CoreError::Unsupported(format!(
+            "{} does not implement remove_plugin()",
+            self.metadata().id
+        )))
+    }
+
+    // Update the plugins of a profile; a single package when `id` is given,
+    // every plugin otherwise.
+    async fn update_plugin(&self, _profile: &str, _id: Option<&str>) -> CoreResult<()> {
+        Err(crate::error::CoreError::Unsupported(format!(
+            "{} does not implement update_plugin()",
+            self.metadata().id
+        )))
+    }
+
+    // Search the market for plugins matching `query`.
+    async fn search_plugins(&self, _query: &str) -> CoreResult<Vec<MarketEntry>> {
+        Err(crate::error::CoreError::Unsupported(format!(
+            "{} does not implement search_plugins()",
+            self.metadata().id
+        )))
+    }
+
+    // List the market sources this adapter can discover plugins from.
+    async fn market_sources(&self) -> CoreResult<Vec<MarketSourceInfo>> {
         Ok(Vec::new())
     }
 

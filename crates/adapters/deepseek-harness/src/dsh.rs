@@ -143,7 +143,13 @@ fn installed_version(dir: &Path) -> Option<String> {
 }
 
 // Build one plugin record for a bundle or dependency.
-fn plugin_for(profile_dir: &Path, shared: &Path, id: &str, declared: Option<String>) -> Plugin {
+fn plugin_for(
+    profile_dir: &Path,
+    shared: &Path,
+    profile_id: &str,
+    id: &str,
+    declared: Option<String>,
+) -> Plugin {
     let installed = module_dir(profile_dir, shared, id);
     Plugin {
         id: id.to_string(),
@@ -155,6 +161,9 @@ fn plugin_for(profile_dir: &Path, shared: &Path, id: &str, declared: Option<Stri
             .and_then(installed_version)
             .or(declared),
         enabled: installed.is_some(),
+        profile: profile_id.to_string(),
+        latest: None,
+        outdated: false,
     }
 }
 
@@ -176,28 +185,25 @@ pub fn list_plugins(profile_id: &str) -> CoreResult<Vec<Plugin>> {
         .and_then(|profile| profile.bundles)
     {
         for bundle in bundles {
-            plugins.push(plugin_for(&dir, &shared, &bundle, None));
+            plugins.push(plugin_for(&dir, &shared, profile_id, &bundle, None));
         }
     }
     for (name, version) in manifest.dependencies.unwrap_or_default() {
-        plugins.push(plugin_for(&dir, &shared, &name, Some(version)));
+        plugins.push(plugin_for(&dir, &shared, profile_id, &name, Some(version)));
     }
     plugins.sort_by(|a, b| a.id.cmp(&b.id));
     Ok(plugins)
 }
 
-// List plugins across all profiles, with profile-qualified ids.
+// List plugins across all profiles.
 pub fn list_all_plugins() -> CoreResult<Vec<Plugin>> {
     let mut plugins = Vec::new();
     for profile in discover_profiles()? {
-        for plugin in list_plugins(&profile.id)? {
-            plugins.push(Plugin {
-                id: format!("{}/{}", profile.id, plugin.id),
-                ..plugin
-            });
-        }
+        plugins.extend(list_plugins(&profile.id)?);
     }
-    plugins.sort_by(|a, b| a.id.cmp(&b.id));
+    plugins.sort_by(|a, b| {
+        (a.profile.as_str(), a.id.as_str()).cmp(&(b.profile.as_str(), b.id.as_str()))
+    });
     Ok(plugins)
 }
 

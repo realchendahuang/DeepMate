@@ -23,18 +23,19 @@ use async_trait::async_trait;
 use deepmate_core::adapter::{AdapterCapabilities, AdapterMetadata, Detection, HarnessAdapter};
 use deepmate_core::error::{CoreError, CoreResult};
 use deepmate_core::model::{
-    CheckStatus, DoctorCheck, DoctorReport, HarnessInfo, Model, Plugin, Profile, Provider,
-    RuntimeStatus, RuntimeStatusKind,
+    CheckStatus, DoctorCheck, DoctorReport, HarnessInfo, MarketEntry, MarketSourceInfo, Model,
+    Plugin, Profile, Provider, RuntimeStatus, RuntimeStatusKind,
 };
 use deepmate_platform::PlatformService;
 
 mod dsh;
+mod market;
 
 use dsh::{discover_profiles, list_all_plugins, list_models, list_providers};
 
 const ADAPTER_ID: &str = "deepseek-harness";
 const ADAPTER_NAME: &str = "DeepSeek Harness";
-const ADAPTER_VERSION: &str = "0.1.0";
+const ADAPTER_VERSION: &str = "0.2.0";
 const DEFAULT_UI_URL: &str = "http://127.0.0.1:3080";
 const UI_PROBE_TIMEOUT: Duration = Duration::from_millis(500);
 
@@ -45,6 +46,7 @@ pub struct DeepSeekHarnessAdapter {
     cli_names: Vec<String>,
     data_dir: Option<PathBuf>,
     cli_cache: OnceLock<Option<String>>,
+    http: reqwest::Client,
 }
 
 impl DeepSeekHarnessAdapter {
@@ -55,6 +57,7 @@ impl DeepSeekHarnessAdapter {
             cli_names: vec!["dsh".to_string(), "deepseek-harness".to_string()],
             data_dir: None,
             cli_cache: OnceLock::new(),
+            http: market::build_http_client(),
         }
     }
 
@@ -252,6 +255,38 @@ impl DeepSeekHarnessAdapter {
         }
         Ok(())
     }
+
+    // Run one `dsh plugin` forwarding command against the profile's pnpm and
+    // fail loudly with the captured output when the command exits non-zero.
+    //
+    // Commands are always run with an explicit forwarded pnpm verb (`add`,
+    // `remove`, `update`); a bare `dsh plugin --profile <name>` would run a
+    // full pnpm install, which is a side effect callers here never intend.
+    async fn run_plugin(&self, profile: &str, forwarded: &[&str]) -> CoreResult<()> {
+        let cli = self.find_cli().ok_or_else(|| {
+            CoreError::InvalidState("harness CLI was not found on PATH".to_string())
+        })?;
+        let output = tokio::process::Command::new(&cli)
+            .arg("plugin")
+            .arg("--profile")
+            .arg(profile)
+            .args(forwarded)
+            .output()
+            .await
+            .map_err(|err| CoreError::InvalidState(format!("failed to run `dsh plugin`: {err}")))?;
+        if !output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(CoreError::InvalidState(format!(
+                "`dsh plugin` failed with exit {:?}: {} {}",
+                output.status.code(),
+                stdout.trim(),
+                stderr.trim()
+            )));
+        }
+        tracing::info!(cli = %cli, profile, forwarded = ?forwarded, "plugin command completed");
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -271,6 +306,7 @@ impl HarnessAdapter for DeepSeekHarnessAdapter {
             providers: true,
             models: true,
             plugins: true,
+            marketplace: true,
             ..Default::default()
         }
     }
@@ -385,6 +421,31 @@ impl HarnessAdapter for DeepSeekHarnessAdapter {
         list_all_plugins()
     }
 
+    async fn install_plugin(&self, profile: &str, spec: &str) -> CoreResult<()> {
+        self.run_plugin(profile, &["add", spec]).await
+    }
+
+    async fn remove_plugin(&self, profile: &str, id: &str) -> CoreResult<()> {
+        self.run_plugin(profile, &["remove", id]).await
+    }
+
+    async fn update_plugin(&self, profile: &str, id: Option<&str>) -> CoreResult<()> {
+        match id {
+            Some(id) => self.run_plugin(profile, &["update", id]).await,
+            None => self.run_plugin(profile, &["update"]).await,
+        }
+    }
+
+    async fn search_plugins(&self, query: &str) -> CoreResult<Vec<MarketEntry>> {
+        market::Market::new(self.data_dir.clone(), self.http.clone())
+            .search(query)
+            .await
+    }
+
+    async fn market_sources(&self) -> CoreResult<Vec<MarketSourceInfo>> {
+        Ok(market::market_sources())
+    }
+
     async fn doctor(&self) -> CoreResult<DoctorReport> {
         let cli = self.find_cli();
         let mut checks = Vec::new();
@@ -483,6 +544,119 @@ mod tests {
         let adapter =
             DeepSeekHarnessAdapter::new(Arc::new(SystemPlatform)).with_ui_url("not a url");
         assert_eq!(adapter.ui_endpoint(), None);
+    }
+
+    // Install a fake `dsh` launcher script that answers `--version` and
+    // records the forwarded plugin arguments to a file, so run_plugin can be
+    // tested without a real harness.
+    #[cfg(unix)]
+    fn fake_plugin_cli(dir: &std::path::Path, exit_code: i32) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::create_dir_all(dir).unwrap();
+        let recorded = dir.join("recorded-args");
+        let script = dir.join("fake-dsh-plugin");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\n\
+                 [ \"$1\" = \"--version\" ] && exit 0\n\
+                 if [ \"$1\" = \"plugin\" ]; then\n\
+                   printf '%s\\n' \"$@\" > \"{}\"\n\
+                   exit {}\n\
+                 fi\n\
+                 exit 1\n",
+                recorded.display(),
+                exit_code
+            ),
+        )
+        .unwrap();
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+        script
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn install_plugin_forwards_pnpm_add() {
+        let dir = std::env::temp_dir().join(format!(
+            "deepmate-plugin-forward-test-{}",
+            std::process::id()
+        ));
+        let cli = fake_plugin_cli(&dir, 0);
+        let recorded = dir.join("recorded-args");
+        let adapter = DeepSeekHarnessAdapter::new(Arc::new(SystemPlatform))
+            .with_cli_names(vec![cli.to_string_lossy().into_owned()]);
+        adapter.install_plugin("web", "dsh-mnemon").await.unwrap();
+        let args = std::fs::read_to_string(&recorded).unwrap();
+        assert_eq!(
+            args.lines().collect::<Vec<_>>(),
+            ["plugin", "--profile", "web", "add", "dsh-mnemon"]
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn remove_and_update_forward_correct_verbs() {
+        let dir =
+            std::env::temp_dir().join(format!("deepmate-plugin-verbs-test-{}", std::process::id()));
+        let cli = fake_plugin_cli(&dir, 0);
+        let recorded = dir.join("recorded-args");
+        let adapter = DeepSeekHarnessAdapter::new(Arc::new(SystemPlatform))
+            .with_cli_names(vec![cli.to_string_lossy().into_owned()]);
+
+        adapter.remove_plugin("headless", "old-pkg").await.unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&recorded)
+                .unwrap()
+                .lines()
+                .collect::<Vec<_>>(),
+            ["plugin", "--profile", "headless", "remove", "old-pkg"]
+        );
+
+        adapter.update_plugin("web", None).await.unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&recorded)
+                .unwrap()
+                .lines()
+                .collect::<Vec<_>>(),
+            ["plugin", "--profile", "web", "update"]
+        );
+
+        adapter
+            .update_plugin("web", Some("dsh-mnemon"))
+            .await
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&recorded)
+                .unwrap()
+                .lines()
+                .collect::<Vec<_>>(),
+            ["plugin", "--profile", "web", "update", "dsh-mnemon"]
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn plugin_command_failure_propagates_output() {
+        let dir =
+            std::env::temp_dir().join(format!("deepmate-plugin-fail-test-{}", std::process::id()));
+        let cli = fake_plugin_cli(&dir, 7);
+        let recorded = dir.join("recorded-args");
+        std::fs::write(&recorded, "").unwrap();
+        let adapter = DeepSeekHarnessAdapter::new(Arc::new(SystemPlatform))
+            .with_cli_names(vec![cli.to_string_lossy().into_owned()]);
+        let err = adapter.install_plugin("web", "bad-pkg").await.unwrap_err();
+        let message = err.to_string();
+        assert!(
+            message.contains("Some(7)"),
+            "exit code must be surfaced in the error: {message}"
+        );
+
+        // A missing CLI surfaces the not-found error before any forwarding.
+        let missing = DeepSeekHarnessAdapter::new(Arc::new(SystemPlatform))
+            .with_cli_names(vec!["definitely-not-a-command-xyz".to_string()]);
+        assert!(missing.install_plugin("web", "pkg").await.is_err());
     }
 
     #[cfg(unix)]

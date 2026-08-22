@@ -721,13 +721,18 @@ Design tokens should be centralized so visual consistency does not depend on pag
 - adapter capability detection
 - configuration editing through supported Harness interfaces
 
-### Stage 4 — Plugins and marketplace
+### Stage 4 — Plugins and marketplace (implemented, unreleased)
 
 - plugin inventory
 - install / update / remove
 - market source abstraction
 - plugin search
 - trust and compatibility metadata
+
+The trust/compatibility signals are currently lightweight (curated vs
+community source, publisher, repository and last-updated from the npm
+registry); richer risk flags from the architecture's plugin trust section are
+a later refinement.
 
 ### Stage 5 — Portability
 

@@ -181,14 +181,24 @@ deepmate runtime start|stop|restart
 deepmate profile list          List harness profiles
 deepmate provider list         List configured providers
 deepmate model list            List available models
-deepmate plugin list           List installed plugins
+deepmate plugin list [--check-updates]
+                                List installed plugins (optionally marking
+                                outdated ones from the market)
+deepmate plugin install <spec> [--profile <name>]
+                                Install a plugin into a profile
+deepmate plugin remove <id> [--profile <name>]
+                                Remove a plugin from a profile
+deepmate plugin update [id] [--profile <name>]
+                                Update one plugin, or all plugins
+deepmate market list           List known market sources
+deepmate market search <query> Search the market for plugins
 ```
 
 Commands that the active adapter does not declare support for are rejected
 with a clear error instead of returning empty results. `--adapter test`
 supports the full surface; the DeepSeek Harness adapter currently supports
 runtime control, detect, status, open, doctor, profile list, provider list,
-model list and plugin list.
+model list, plugin list/install/remove/update and market list/search.
 
 Append `--json` to any command for machine-readable output. Logs go to
 stderr and to `logs/deepmate.log` in the data directory, so JSON on stdout
@@ -258,12 +268,12 @@ Harness-owned state remains owned by the active harness and is accessed through 
 ## Project status
 
 DeepMate is currently in **early development**, with a working Stage 1
-foundation and a Stage 2 desktop shell:
+foundation, a Stage 2 desktop shell and Stage 4 plugin/marketplace support:
 
 - Rust workspace with `deepmate-core`, `deepmate-platform` and the
   `deepseek-harness` adapter
 - `deepmate` CLI with `adapters`, `detect`, `status`, `open`, `doctor`,
-  `runtime`, `profile`, `provider`, `model` and `plugin` commands
+  `runtime`, `profile`, `provider`, `model`, `plugin` and `market` commands
 - Deterministic `test` adapter for development and CI
 - File-based data layer: OS-convention data directory, TOML config, JSONL
   action history and file logging
@@ -274,6 +284,12 @@ foundation and a Stage 2 desktop shell:
   `runtime stop`, profile discovery, plugin inventory, and provider/model
   catalogs through the documented `$DSH_HOME` file contracts
   (`profiles/*/package.json` and `settings.yaml`)
+- Plugin lifecycle (install / remove / update) forwarded to the harness's own
+  `dsh plugin` workflow, so profile and bundle reconciliation stay owned by
+  the harness
+- Marketplace search backed by the npm registry, with curated (`@deepseek-ai`)
+  vs community source classification, provenance metadata (publisher,
+  repository, last-updated) and an on-disk query cache
 - `deepmate-desktop` Slint shell with a system tray (close-to-tray honoring
   `ui.close_to_tray`) and Overview, Runtime and Doctor pages built on
   centralized design tokens

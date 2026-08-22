@@ -94,6 +94,20 @@ fn plugin_list_returns_fake_plugin() {
 }
 
 #[test]
+fn market_list_returns_known_sources() {
+    let stdout = deepmate_ok(&["--adapter", "test", "market", "list"]);
+    assert!(stdout.contains("curated"));
+    assert!(stdout.contains("community"));
+}
+
+#[test]
+fn market_search_returns_fake_entry() {
+    let stdout = deepmate_ok(&["--adapter", "test", "market", "search", "fake-market"]);
+    assert!(stdout.contains("fake-market-plugin"));
+    assert!(stdout.contains("fake-publisher"));
+}
+
+#[test]
 fn unknown_adapter_is_an_error() {
     let output = deepmate(&["--adapter", "nope", "status"]);
     assert!(!output.status.success());
