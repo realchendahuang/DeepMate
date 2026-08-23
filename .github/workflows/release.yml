@@ -86,9 +86,28 @@ jobs:
           # LF-only checksum file so `sha256sum -c` works for Unix consumers.
           [IO.File]::WriteAllText("$PWD/dist/$name.zip.sha256", "$hash  $name.zip`n")
 
+      # Extract this version's section from CHANGELOG.md as the release body,
+      # so the GitHub release carries the curated changelog instead of
+      # auto-generated "Full Changelog" boilerplate. Fails loudly if the
+      # version is missing from the changelog (so a release is never published
+      # with an empty body).
+      - name: Extract release notes
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          marker="## [$version]"
+          mkdir -p dist
+          awk -v marker="$marker" '
+            index($0, marker) == 1 { found=1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > dist/release-notes.md
+          test -s dist/release-notes.md
+
       # The file patterns are per-OS: with fail_on_unmatched_files each
       # pattern must match, and a single job only ever produces one archive
-      # family.
+      # family. The body is the same curated changelog section for every job,
+      # so concurrent publishes overwrite it identically (no duplication).
       - name: Publish GitHub release (Linux)
         if: runner.os == 'Linux'
         uses: softprops/action-gh-release@v3
@@ -96,9 +115,9 @@ jobs:
           files: |
             dist/**/*.tar.gz
             dist/**/*.tar.gz.sha256
+          body_path: dist/release-notes.md
           # Tags containing a suffix (v0.2.0-rc.1) publish as prereleases.
           prerelease: ${{ contains(github.ref_name, '-') }}
-          generate_release_notes: true
           fail_on_unmatched_files: true
 
       - name: Publish GitHub release (macOS)
@@ -110,8 +129,8 @@ jobs:
             dist/**/*.dmg.sha256
             dist/**/*.tar.gz
             dist/**/*.tar.gz.sha256
+          body_path: dist/release-notes.md
           prerelease: ${{ contains(github.ref_name, '-') }}
-          generate_release_notes: true
           fail_on_unmatched_files: true
 
       - name: Publish GitHub release (Windows)
@@ -121,6 +140,6 @@ jobs:
           files: |
             dist/**/*.zip
             dist/**/*.zip.sha256
+          body_path: dist/release-notes.md
           prerelease: ${{ contains(github.ref_name, '-') }}
-          generate_release_notes: true
           fail_on_unmatched_files: true
