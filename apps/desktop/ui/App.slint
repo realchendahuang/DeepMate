@@ -7,6 +7,11 @@
 import { Sidebar } from "components/Sidebar.slint";
 import { OverviewPage } from "pages/Overview.slint";
 import { RuntimePage } from "pages/Runtime.slint";
+import { ProfilesPage, ProfileRow } from "pages/Profiles.slint";
+import { ProvidersPage, ProviderRow } from "pages/Providers.slint";
+import { ModelsPage, ModelRow } from "pages/Models.slint";
+import { PluginsPage, PluginRow } from "pages/Plugins.slint";
+import { MarketPage, MarketSourceRow, MarketEntryRow } from "pages/Market.slint";
 import { DoctorPage, CheckRow } from "pages/Doctor.slint";
 import { Colors } from "theme/Colors.slint";
 import { Typography } from "theme/Typography.slint";
@@ -44,6 +49,16 @@ export component AppWindow inherits Window {
     in property <int> counts-models: -1;
     in property <int> counts-plugins: -1;
 
+    // Inventory rows.
+    in property <[ProfileRow]> profiles: [];
+    in property <[ProviderRow]> providers: [];
+    in property <[ModelRow]> models: [];
+    in property <[PluginRow]> plugins: [];
+
+    // Market rows.
+    in property <[MarketSourceRow]> market-sources: [];
+    in property <[MarketEntryRow]> market-entries: [];
+
     // Doctor report rows.
     in property <[CheckRow]> doctor-checks: [];
 
@@ -57,10 +72,19 @@ export component AppWindow inherits Window {
     callback runtime-restart();
     callback open-harness();
     callback run-doctor();
+    callback refresh-profiles();
+    callback refresh-providers();
+    callback refresh-models();
+    callback refresh-plugins();
+    callback plugin-install(string, string);
+    callback plugin-remove(string, string);
+    callback plugin-update(string, string);
+    callback refresh-market-sources();
+    callback market-search(string);
 
     HorizontalLayout {
         Sidebar {
-            items: ["Overview", "Runtime", "Doctor"];
+            items: ["Overview", "Runtime", "Profiles", "Providers", "Models", "Plugins", "Market", "Doctor"];
             selected <=> root.current-page;
         }
 
@@ -129,7 +153,62 @@ export component AppWindow inherits Window {
                 }
             }
 
-            if root.current-page == 2: DoctorPage {
+            if root.current-page == 2: ProfilesPage {
+                profiles: root.profiles;
+
+                refresh => {
+                    root.refresh-profiles();
+                }
+            }
+
+            if root.current-page == 3: ProvidersPage {
+                providers: root.providers;
+
+                refresh => {
+                    root.refresh-providers();
+                }
+            }
+
+            if root.current-page == 4: ModelsPage {
+                models: root.models;
+
+                refresh => {
+                    root.refresh-models();
+                }
+            }
+
+            if root.current-page == 5: PluginsPage {
+                plugins: root.plugins;
+                busy: root.busy;
+
+                refresh => {
+                    root.refresh-plugins();
+                }
+                install(profile, spec) => {
+                    root.plugin-install(profile, spec);
+                }
+                remove(profile, id) => {
+                    root.plugin-remove(profile, id);
+                }
+                update(profile, id) => {
+                    root.plugin-update(profile, id);
+                }
+            }
+
+            if root.current-page == 6: MarketPage {
+                sources: root.market-sources;
+                entries: root.market-entries;
+                busy: root.busy;
+
+                refresh => {
+                    root.refresh-market-sources();
+                }
+                search(query) => {
+                    root.market-search(query);
+                }
+            }
+
+            if root.current-page == 7: DoctorPage {
                 checks: root.doctor-checks;
                 busy: root.busy;
 

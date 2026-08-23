@@ -5,10 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.0] - 2026-08-23
 
 ### Added
 
+- Desktop management pages: Profiles, Providers, Models, Plugins and Market,
+  exposing the same inventory and plugin-lifecycle capabilities as the CLI
+  through the shared bridge.
+- Plugin lifecycle in the desktop app: install, remove and update a plugin
+  from the Plugins page, with install/remove/update history recording mirroring
+  CLI semantics.
+- Market page in the desktop app: browse curated vs community sources and
+  search the market, with provenance (publisher, repository, version) shown
+  per result.
 - macOS DMG packaging: the desktop app is now bundled as a `DeepMate.app`
   with `Info.plist` (LSUIElement menu-bar app), a generated `.icns` icon and
   an ad-hoc signature, wrapped in a drag-to-install DMG alongside a CLI
@@ -16,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The desktop bridge now carries inventory, plugin-lifecycle and market
+  commands/events; capability-gated commands report "unsupported" instead of
+  an empty list.
 - Release workflow now packages macOS separately (`scripts/package-macos.sh`)
   from Linux, so macOS produces a DMG instead of a bare-binary tarball.
 
@@ -97,6 +109,7 @@ Initial Stage 1 foundation.
 - Cross-platform CI (formatting, clippy, tests) with a core purity gate that
   keeps harness-specific names out of `deepmate-core`.
 
+[0.4.0]: https://github.com/realchendahuang/DeepMate/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/realchendahuang/DeepMate/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/realchendahuang/DeepMate/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/realchendahuang/DeepMate/releases/tag/v0.1.0

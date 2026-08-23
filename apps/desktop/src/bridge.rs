@@ -10,12 +10,17 @@
 use std::sync::mpsc as std_mpsc;
 
 use deepmate_core::adapter::{Detection, HarnessAdapter};
-use deepmate_core::model::{DoctorReport, RuntimeStatus};
+use deepmate_core::model::{
+    DoctorReport, MarketEntry, MarketSourceInfo, Model, Plugin, Profile, Provider, RuntimeStatus,
+};
 use deepmate_core::CoreResult;
 use tokio::sync::mpsc as tokio_mpsc;
 
 // Commands the UI can send to the core.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+//
+// Inventory and market commands mirror the CLI command surface so the desktop
+// app exposes the same management capabilities as the CLI.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UiCommand {
     RefreshAll,
     RuntimeStart,
@@ -23,6 +28,15 @@ pub enum UiCommand {
     RuntimeRestart,
     OpenHarness,
     RunDoctor,
+    ListProfiles,
+    ListProviders,
+    ListModels,
+    ListPlugins,
+    PluginInstall { profile: String, spec: String },
+    PluginRemove { profile: String, id: String },
+    PluginUpdate { profile: String, id: Option<String> },
+    ListMarketSources,
+    MarketSearch { query: String },
 }
 
 // Per-entity inventory counts. `None` means the active adapter does not
@@ -47,6 +61,12 @@ pub enum UiEvent {
     },
     Status(RuntimeStatus),
     Doctor(Box<DoctorReport>),
+    Profiles(Vec<Profile>),
+    Providers(Vec<Provider>),
+    Models(Vec<Model>),
+    Plugins(Vec<Plugin>),
+    MarketSources(Vec<MarketSourceInfo>),
+    MarketEntries(Vec<MarketEntry>),
     // A user-triggered action completed successfully; carries the history
     // action name so the UI layer can record it (mirroring CLI semantics:
     // only successful actions are recorded).
@@ -151,6 +171,139 @@ async fn handle(adapter: &dyn HarnessAdapter, cmd: &UiCommand) -> Vec<UiEvent> {
             ],
             Err(err) => vec![UiEvent::Error(err.to_string())],
         },
+        UiCommand::ListProfiles => {
+            list_entity(
+                adapter,
+                "profiles",
+                adapter.capabilities().profiles,
+                adapter.profiles(),
+                UiEvent::Profiles,
+            )
+            .await
+        }
+        UiCommand::ListProviders => {
+            list_entity(
+                adapter,
+                "providers",
+                adapter.capabilities().providers,
+                adapter.providers(),
+                UiEvent::Providers,
+            )
+            .await
+        }
+        UiCommand::ListModels => {
+            list_entity(
+                adapter,
+                "models",
+                adapter.capabilities().models,
+                adapter.models(),
+                UiEvent::Models,
+            )
+            .await
+        }
+        UiCommand::ListPlugins => {
+            list_entity(
+                adapter,
+                "plugins",
+                adapter.capabilities().plugins,
+                adapter.plugins(),
+                UiEvent::Plugins,
+            )
+            .await
+        }
+        UiCommand::PluginInstall { profile, spec } => {
+            plugin_command(
+                adapter,
+                adapter.install_plugin(profile, spec),
+                "desktop.plugin.install",
+            )
+            .await
+        }
+        UiCommand::PluginRemove { profile, id } => {
+            plugin_command(
+                adapter,
+                adapter.remove_plugin(profile, id),
+                "desktop.plugin.remove",
+            )
+            .await
+        }
+        UiCommand::PluginUpdate { profile, id } => {
+            plugin_command(
+                adapter,
+                adapter.update_plugin(profile, id.as_deref()),
+                "desktop.plugin.update",
+            )
+            .await
+        }
+        UiCommand::ListMarketSources => {
+            list_entity(
+                adapter,
+                "marketplace",
+                adapter.capabilities().marketplace,
+                adapter.market_sources(),
+                UiEvent::MarketSources,
+            )
+            .await
+        }
+        UiCommand::MarketSearch { query } => {
+            if !adapter.capabilities().marketplace {
+                return vec![UiEvent::Error(format!(
+                    "adapter '{}' does not support marketplace",
+                    adapter.metadata().id
+                ))];
+            }
+            match adapter.search_plugins(query).await {
+                Ok(entries) => vec![UiEvent::MarketEntries(entries)],
+                Err(err) => vec![UiEvent::Error(err.to_string())],
+            }
+        }
+    }
+}
+
+// Fetch one capability-gated entity list and wrap it into the matching event.
+// An adapter that does not declare the capability yields an Error event
+// instead of an empty list, mirroring the CLI's capability gate.
+async fn list_entity<T, M>(
+    adapter: &dyn HarnessAdapter,
+    what: &str,
+    supported: bool,
+    list: impl std::future::Future<Output = CoreResult<Vec<T>>>,
+    wrap: M,
+) -> Vec<UiEvent>
+where
+    M: FnOnce(Vec<T>) -> UiEvent,
+{
+    if !supported {
+        return vec![UiEvent::Error(format!(
+            "adapter '{}' does not support {what}",
+            adapter.metadata().id
+        ))];
+    }
+    match list.await {
+        Ok(items) => vec![wrap(items)],
+        Err(err) => vec![UiEvent::Error(err.to_string())],
+    }
+}
+
+// Run one plugin lifecycle operation and report completion for history
+// recording. Like the CLI, only successful operations are recorded.
+async fn plugin_command<F>(
+    adapter: &dyn HarnessAdapter,
+    action: F,
+    history: &'static str,
+) -> Vec<UiEvent>
+where
+    F: std::future::Future<Output = CoreResult<()>>,
+{
+    if !adapter.capabilities().plugins {
+        return vec![UiEvent::Error(format!(
+            "adapter '{}' does not support plugins",
+            adapter.metadata().id
+        ))];
+    }
+    match action.await {
+        Ok(()) => vec![UiEvent::ActionCompleted(history)],
+        Err(err) => vec![UiEvent::Error(err.to_string())],
     }
 }
 
@@ -401,5 +554,116 @@ mod tests {
             }
         }
         panic!("expected an Overview event for the minimal adapter: {events:?}");
+    }
+
+    #[tokio::test]
+    async fn list_profiles_yields_profiles_event() {
+        let bridge = spawn(Box::new(FakeAdapter::healthy()));
+        let events = run_command(&bridge, UiCommand::ListProfiles);
+        let profiles: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                UiEvent::Profiles(items) => Some(items),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(profiles.len(), 1, "expected one Profiles event: {events:?}");
+        assert_eq!(profiles[0][0].id, "default");
+    }
+
+    #[tokio::test]
+    async fn list_plugins_yields_plugins_event() {
+        let bridge = spawn(Box::new(FakeAdapter::healthy()));
+        let events = run_command(&bridge, UiCommand::ListPlugins);
+        let plugins: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                UiEvent::Plugins(items) => Some(items),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(plugins.len(), 1, "expected one Plugins event: {events:?}");
+        assert_eq!(plugins[0][0].id, "fake-plugin");
+    }
+
+    #[tokio::test]
+    async fn plugin_install_records_completion() {
+        let bridge = spawn(Box::new(FakeAdapter::healthy()));
+        let events = run_command(
+            &bridge,
+            UiCommand::PluginInstall {
+                profile: "web".to_string(),
+                spec: "dsh-mnemon".to_string(),
+            },
+        );
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, UiEvent::ActionCompleted("desktop.plugin.install"))),
+            "expected ActionCompleted after install: {events:?}"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, UiEvent::Error(_))),
+            "install must not error on the healthy fake: {events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn market_search_and_sources_yield_events() {
+        let bridge = spawn(Box::new(FakeAdapter::healthy()));
+
+        let sources = run_command(&bridge, UiCommand::ListMarketSources);
+        assert!(
+            sources
+                .iter()
+                .any(|event| matches!(event, UiEvent::MarketSources(_))),
+            "expected MarketSources event: {sources:?}"
+        );
+
+        let search = run_command(
+            &bridge,
+            UiCommand::MarketSearch {
+                query: "fake-market".to_string(),
+            },
+        );
+        let entries: Vec<_> = search
+            .iter()
+            .filter_map(|event| match event {
+                UiEvent::MarketEntries(items) => Some(items),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            entries.len(),
+            1,
+            "expected one MarketEntries event: {search:?}"
+        );
+        assert_eq!(entries[0][0].id, "fake-market-plugin");
+    }
+
+    #[tokio::test]
+    async fn minimal_adapter_gates_inventory_and_market() {
+        let mut adapter = FakeAdapter::new("minimal");
+        adapter.capabilities = AdapterCapabilities::default();
+        let bridge = spawn(Box::new(adapter));
+
+        for cmd in [
+            UiCommand::ListProfiles,
+            UiCommand::ListPlugins,
+            UiCommand::ListMarketSources,
+            UiCommand::MarketSearch {
+                query: "x".to_string(),
+            },
+        ] {
+            let events = run_command(&bridge, cmd);
+            assert!(
+                events
+                    .iter()
+                    .any(|event| matches!(event, UiEvent::Error(_))),
+                "expected an Error event for a gated command: {events:?}"
+            );
+        }
     }
 }

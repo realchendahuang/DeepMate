@@ -1,0 +1,154 @@
+import { Button, LineEdit, ScrollView } from "std-widgets.slint";
+import { Card } from "../components/Card.slint";
+import { Badge } from "../components/Badge.slint";
+import { Colors } from "../theme/Colors.slint";
+import { Metrics } from "../theme/Metrics.slint";
+import { Typography } from "../theme/Typography.slint";
+
+// One market source row, mirrored from the core MarketSourceInfo model.
+export struct MarketSourceRow {
+    id: string,
+    description: string,
+}
+
+// One market entry row, mirrored from the core MarketEntry model.
+export struct MarketEntryRow {
+    id: string,
+    description: string,
+    version: string,
+    source: string,
+    publisher: string,
+    repository: string,
+}
+
+// Market page: discover plugins from curated and community sources.
+export component MarketPage inherits Rectangle {
+    in property <[MarketSourceRow]> sources: [];
+    in property <[MarketEntryRow]> entries: [];
+    in property <bool> busy: false;
+
+    callback refresh();
+    callback search(string);
+
+    in-out property <string> query: "";
+
+    background: Colors.bg;
+
+    sv := ScrollView {
+        VerticalLayout {
+            width: sv.visible-width;
+            padding: Metrics.padding;
+            spacing: Metrics.spacing;
+            alignment: start;
+
+            Text {
+                text: "Market";
+                color: Colors.text;
+                font-size: Typography.title;
+                font-weight: 700;
+            }
+
+            Card {
+                Text {
+                    text: "Sources";
+                    color: Colors.text;
+                    font-size: Typography.heading;
+                    font-weight: 600;
+                }
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: start;
+
+                    for source in root.sources: Badge {
+                        text: source.id;
+                        kind: source.id == "curated" ? "accent" : "neutral";
+                    }
+                }
+
+                if root.sources.length == 0: Text {
+                    text: "No market sources for this adapter.";
+                    color: Colors.text-dim;
+                    font-size: Typography.body;
+                }
+            }
+
+            Card {
+                Text {
+                    text: "Search";
+                    color: Colors.text;
+                    font-size: Typography.heading;
+                    font-weight: 600;
+                }
+
+                HorizontalLayout {
+                    spacing: Metrics.spacing;
+                    alignment: start;
+
+                    LineEdit {
+                        text <=> root.query;
+                        placeholder-text: "search terms";
+                    }
+
+                    Button {
+                        text: "Search";
+                        enabled: !root.busy && root.query != "";
+                        clicked => {
+                            root.search(root.query);
+                        }
+                    }
+                }
+            }
+
+            if root.entries.length == 0: Text {
+                text: "Search the market to discover plugins.";
+                color: Colors.text-dim;
+                font-size: Typography.body;
+            }
+
+            for entry in root.entries: Card {
+                HorizontalLayout {
+                    spacing: Metrics.spacing;
+                    alignment: start;
+
+                    Text {
+                        text: entry.id;
+                        color: Colors.text;
+                        font-size: Typography.heading;
+                        font-weight: 600;
+                        vertical-alignment: center;
+                    }
+
+                    Badge {
+                        text: entry.source;
+                        kind: entry.source == "curated" ? "accent" : "neutral";
+                    }
+
+                    if entry.version != "": Badge {
+                        text: "v" + entry.version;
+                        kind: "skip";
+                    }
+                }
+
+                if entry.description != "": Text {
+                    text: entry.description;
+                    color: Colors.text-dim;
+                    font-size: Typography.body;
+                    wrap: word-wrap;
+                }
+
+                if entry.publisher != "": Text {
+                    text: "by " + entry.publisher;
+                    color: Colors.text-dim;
+                    font-size: Typography.small;
+                }
+
+                if entry.repository != "": Text {
+                    text: entry.repository;
+                    color: Colors.accent;
+                    font-size: Typography.small;
+                }
+            }
+        }
+    }
+}

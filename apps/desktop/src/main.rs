@@ -22,6 +22,7 @@ use anyhow::Context;
 use clap::Parser;
 use deepmate_app::{build_registry, init_tracing, load_config_or_default, record_action};
 use deepmate_core::adapter::AdapterCapabilities;
+use deepmate_core::model::MarketSource;
 use deepmate_core::{CheckStatus, DataLayout, RuntimeStatus, RuntimeStatusKind};
 use deepmate_platform::{PlatformService, SystemPlatform};
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
@@ -107,10 +108,12 @@ fn main() -> anyhow::Result<()> {
 // later, when the bridge reports the action as completed (UiEvent::
 // ActionCompleted), mirroring the CLI which records only successful commands.
 fn wire_commands(window: &AppWindow, bridge: &bridge::Bridge) {
+    // `UiCommand` is Clone but not Copy (some variants carry owned strings),
+    // so the command is cloned on each invocation to keep the callback FnMut.
     let sender = |command: UiCommand| {
         let cmd = bridge.cmd.clone();
         move || {
-            let _ = cmd.send(command);
+            let _ = cmd.send(command.clone());
         }
     };
     window.on_refresh_all(sender(UiCommand::RefreshAll));
@@ -119,6 +122,39 @@ fn wire_commands(window: &AppWindow, bridge: &bridge::Bridge) {
     window.on_runtime_restart(sender(UiCommand::RuntimeRestart));
     window.on_open_harness(sender(UiCommand::OpenHarness));
     window.on_run_doctor(sender(UiCommand::RunDoctor));
+    window.on_refresh_profiles(sender(UiCommand::ListProfiles));
+    window.on_refresh_providers(sender(UiCommand::ListProviders));
+    window.on_refresh_models(sender(UiCommand::ListModels));
+    window.on_refresh_plugins(sender(UiCommand::ListPlugins));
+    window.on_refresh_market_sources(sender(UiCommand::ListMarketSources));
+
+    let cmd = bridge.cmd.clone();
+    window.on_plugin_install(move |profile, spec| {
+        let _ = cmd.send(UiCommand::PluginInstall {
+            profile: profile.to_string(),
+            spec: spec.to_string(),
+        });
+    });
+    let cmd = bridge.cmd.clone();
+    window.on_plugin_remove(move |profile, id| {
+        let _ = cmd.send(UiCommand::PluginRemove {
+            profile: profile.to_string(),
+            id: id.to_string(),
+        });
+    });
+    let cmd = bridge.cmd.clone();
+    window.on_plugin_update(move |profile, id| {
+        let _ = cmd.send(UiCommand::PluginUpdate {
+            profile: profile.to_string(),
+            id: Some(id.to_string()),
+        });
+    });
+    let cmd = bridge.cmd.clone();
+    window.on_market_search(move |query| {
+        let _ = cmd.send(UiCommand::MarketSearch {
+            query: query.to_string(),
+        });
+    });
 }
 
 // Drain bridge events on the UI thread with a repeating timer and apply them
@@ -213,6 +249,85 @@ fn apply_event(window: &AppWindow, event: UiEvent, layout: &DataLayout, adapter_
                 .collect();
             window.set_doctor_checks(ModelRc::new(VecModel::from(rows)));
         }
+        UiEvent::Profiles(items) => {
+            let rows: Vec<ProfileRow> = items
+                .iter()
+                .map(|item| ProfileRow {
+                    id: item.id.clone().into(),
+                    name: item.name.clone().into(),
+                    description: item.description.clone().unwrap_or_default().into(),
+                })
+                .collect();
+            window.set_profiles(ModelRc::new(VecModel::from(rows)));
+        }
+        UiEvent::Providers(items) => {
+            let rows: Vec<ProviderRow> = items
+                .iter()
+                .map(|item| ProviderRow {
+                    id: item.id.clone().into(),
+                    name: item.name.clone().into(),
+                    kind: item.kind.clone().into(),
+                })
+                .collect();
+            window.set_providers(ModelRc::new(VecModel::from(rows)));
+        }
+        UiEvent::Models(items) => {
+            let rows: Vec<ModelRow> = items
+                .iter()
+                .map(|item| ModelRow {
+                    id: item.id.clone().into(),
+                    name: item.name.clone().into(),
+                    provider: item.provider.clone().unwrap_or_default().into(),
+                })
+                .collect();
+            window.set_models(ModelRc::new(VecModel::from(rows)));
+        }
+        UiEvent::Plugins(items) => {
+            let rows: Vec<PluginRow> = items
+                .iter()
+                .map(|item| PluginRow {
+                    id: item.id.clone().into(),
+                    name: item.name.clone().into(),
+                    version: item.version.clone().unwrap_or_default().into(),
+                    enabled: item.enabled,
+                    profile: item.profile.clone().into(),
+                    outdated: item.outdated,
+                    latest: item.latest.clone().unwrap_or_default().into(),
+                })
+                .collect();
+            window.set_plugins(ModelRc::new(VecModel::from(rows)));
+        }
+        UiEvent::MarketSources(items) => {
+            let rows: Vec<MarketSourceRow> = items
+                .iter()
+                .map(|item| MarketSourceRow {
+                    id: item.id.clone().into(),
+                    description: item.description.clone().into(),
+                })
+                .collect();
+            window.set_market_sources(ModelRc::new(VecModel::from(rows)));
+        }
+        UiEvent::MarketEntries(items) => {
+            let rows: Vec<MarketEntryRow> = items
+                .iter()
+                .map(|item| MarketEntryRow {
+                    id: item.id.clone().into(),
+                    description: item.description.clone().unwrap_or_default().into(),
+                    version: item.version.clone().unwrap_or_default().into(),
+                    source: market_source_text(&item.source).into(),
+                    publisher: item.publisher.clone().unwrap_or_default().into(),
+                    repository: item.repository.clone().unwrap_or_default().into(),
+                })
+                .collect();
+            window.set_market_entries(ModelRc::new(VecModel::from(rows)));
+        }
+    }
+}
+
+fn market_source_text(source: &MarketSource) -> &'static str {
+    match source {
+        MarketSource::Curated => "curated",
+        MarketSource::Community => "community",
     }
 }
 

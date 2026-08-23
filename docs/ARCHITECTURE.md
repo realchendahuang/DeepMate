@@ -713,7 +713,7 @@ Design tokens should be centralized so visual consistency does not depend on pag
 - Doctor page
 - shared application state / event bridge
 
-### Stage 3 — Harness configuration
+### Stage 3 — Harness configuration (partially implemented)
 
 - profiles
 - providers
@@ -721,7 +721,10 @@ Design tokens should be centralized so visual consistency does not depend on pag
 - adapter capability detection
 - configuration editing through supported Harness interfaces
 
-### Stage 4 — Plugins and marketplace (implemented, unreleased)
+Profiles, providers and models are exposed in both the CLI and the desktop
+app (v0.4.0); configuration editing itself is not yet implemented.
+
+### Stage 4 — Plugins and marketplace (implemented in v0.3.0)
 
 - plugin inventory
 - install / update / remove

@@ -298,14 +298,16 @@ foundation, a Stage 2 desktop shell and Stage 4 plugin/marketplace support:
   vs community source classification, provenance metadata (publisher,
   repository, last-updated) and an on-disk query cache
 - `deepmate-desktop` Slint shell with a system tray (close-to-tray honoring
-  `ui.close_to_tray`) and Overview, Runtime and Doctor pages built on
-  centralized design tokens
+  `ui.close_to_tray`) and Overview, Runtime, Profiles, Providers, Models,
+  Plugins, Market and Doctor pages built on centralized design tokens
 - Tokio-backed command/event bridge between the desktop UI and the core,
-  unit-tested against the fake adapter
+  unit-tested against the fake adapter, exposing the same inventory and
+  plugin-lifecycle capabilities as the CLI
 - Shared `deepmate-app` service crate hosting the registry, config, logging
   and history helpers used by both the CLI and the desktop app
 - Tag-triggered release workflow publishing `deepmate` and
-  `deepmate-desktop` binaries for Linux, macOS and Windows
+  `deepmate-desktop` for Linux, macOS and Windows; macOS ships the desktop
+  app as a DMG
 - Cross-platform CI (fmt, clippy, tests) with a core purity gate
 
 The first goal is to build a solid, minimal foundation for DeepSeek Harness

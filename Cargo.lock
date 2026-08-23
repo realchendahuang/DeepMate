@@ -1176,7 +1176,7 @@ checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 
 [[package]]
 name = "deepmate-app"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "deepmate-core",
@@ -1189,7 +1189,7 @@ dependencies = [
 
 [[package]]
 name = "deepmate-cli"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1205,7 +1205,7 @@ dependencies = [
 
 [[package]]
 name = "deepmate-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1219,7 +1219,7 @@ dependencies = [
 
 [[package]]
 name = "deepmate-desktop"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1237,14 +1237,14 @@ dependencies = [
 
 [[package]]
 name = "deepmate-platform"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "thiserror 2.0.20",
 ]
 
 [[package]]
 name = "deepseek-harness"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "async-trait",
  "chrono",

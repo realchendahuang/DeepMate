@@ -1,0 +1,84 @@
+import { Button, ScrollView } from "std-widgets.slint";
+import { Card } from "../components/Card.slint";
+import { Colors } from "../theme/Colors.slint";
+import { Metrics } from "../theme/Metrics.slint";
+import { Typography } from "../theme/Typography.slint";
+
+// One model row, mirrored from the core Model model.
+export struct ModelRow {
+    id: string,
+    name: string,
+    provider: string,
+}
+
+// Models page: list the available models.
+export component ModelsPage inherits Rectangle {
+    in property <[ModelRow]> models: [];
+
+    callback refresh();
+
+    background: Colors.bg;
+
+    VerticalLayout {
+        padding: Metrics.padding;
+        spacing: Metrics.spacing;
+
+        HorizontalLayout {
+            spacing: Metrics.spacing;
+
+            Text {
+                text: "Models";
+                color: Colors.text;
+                font-size: Typography.title;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+
+            Rectangle {
+                horizontal-stretch: 1;
+            }
+
+            Button {
+                text: "Refresh";
+                clicked => {
+                    root.refresh();
+                }
+            }
+        }
+
+        sv := ScrollView {
+            VerticalLayout {
+                width: sv.visible-width;
+                spacing: Metrics.spacing;
+                alignment: start;
+
+                if root.models.length == 0: Text {
+                    text: "No models found.";
+                    color: Colors.text-dim;
+                    font-size: Typography.body;
+                }
+
+                for model in root.models: Card {
+                    Text {
+                        text: model.name;
+                        color: Colors.text;
+                        font-size: Typography.heading;
+                        font-weight: 600;
+                    }
+
+                    Text {
+                        text: "id: " + model.id;
+                        color: Colors.text-dim;
+                        font-size: Typography.small;
+                    }
+
+                    if model.provider != "": Text {
+                        text: "provider: " + model.provider;
+                        color: Colors.text-dim;
+                        font-size: Typography.body;
+                    }
+                }
+            }
+        }
+    }
+}
