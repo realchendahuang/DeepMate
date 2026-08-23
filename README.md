@@ -158,9 +158,16 @@ cargo run -p deepmate-desktop
 make ci
 ```
 
-Prebuilt `deepmate` and `deepmate-desktop` binaries for Linux (x86_64),
-macOS (Apple Silicon and Intel) and Windows (x86_64) are published on
+Prebuilt binaries for Linux (x86_64), macOS (Apple Silicon and Intel) and
+Windows (x86_64) are published on
 [GitHub Releases](https://github.com/realchendahuang/DeepMate/releases).
+
+On macOS the desktop app ships as a `DeepMate.app` bundle inside a DMG
+(`deepmate-<version>-<target>.dmg`), with a `/Applications` shortcut for
+drag-to-install. The DMG is ad-hoc signed, so the first launch after a
+download needs a right-click "Open" (or `xattr -dr com.apple.quarantine`) to
+clear Gatekeeper; it is not notarized. The CLI is also available as a plain
+`tar.gz` on every platform.
 
 Both the CLI and the desktop app accept `--adapter` (default
 `deepseek-harness`, use `test` for the deterministic fake adapter) and

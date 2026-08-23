@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- macOS DMG packaging: the desktop app is now bundled as a `DeepMate.app`
+  with `Info.plist` (LSUIElement menu-bar app), a generated `.icns` icon and
+  an ad-hoc signature, wrapped in a drag-to-install DMG alongside a CLI
+  tarball.
+
+### Changed
+
+- Release workflow now packages macOS separately (`scripts/package-macos.sh`)
+  from Linux, so macOS produces a DMG instead of a bare-binary tarball.
+
 ## [0.3.0] - 2026-08-23
 
 ### Added
