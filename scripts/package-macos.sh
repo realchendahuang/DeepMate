@@ -88,10 +88,15 @@ rm -rf "${DMG_STAGING}"
 mkdir -p "${DMG_STAGING}"
 cp -R "${APP_ROOT}" "${DMG_STAGING}/"
 ln -s /Applications "${DMG_STAGING}/Applications"
-diskutil image create from \
-    --volumeName "${APP_NAME}" \
-    --format UDZO \
-    "${DMG_STAGING}" \
+# `hdiutil create` is deprecated on recent macOS in favour of `diskutil image
+# create from`, but the newer form's `--volumeName` flag is not available on
+# the older macOS runners (macos-15-intel). hdiutil stays compatible across
+# all supported macOS versions, so it is the right tool for CI.
+hdiutil create \
+    -volname "${APP_NAME}" \
+    -srcfolder "${DMG_STAGING}" \
+    -ov \
+    -format UDZO \
     "${DIST}/${DMG_NAME}.dmg"
 rm -rf "${DMG_STAGING}"
 
