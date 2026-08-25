@@ -64,9 +64,15 @@ jobs:
         run: cargo build --release --workspace --locked --target ${{ matrix.target }}
 
       # src-tauri is intentionally outside the root workspace (it has its own
-      # Node-based build), so the desktop binary is built separately.
+      # Node-based build), so the desktop binary is built separately. It has
+      # no target-dir of its own, so CARGO_TARGET_DIR points at the root
+      # target/ — that is where the packaging steps expect
+      # target/<triple>/release/deepmate-desktop.
       - name: Build desktop (Tauri)
-        run: cargo build --release --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --target ${{ matrix.target }}
+        run: cargo build --release --locked --target ${{ matrix.target }}
+        working-directory: apps/desktop/src-tauri
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target
 
       - name: Package (Linux)
         if: runner.os == 'Linux'
