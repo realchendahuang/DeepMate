@@ -124,7 +124,9 @@ DeepMate-owned configuration and state use portable file formats that are easy t
 The current planned stack is:
 
 - **Rust** — control core, adapters, runtime management and shared domain logic
-- **Slint** — lightweight cross-platform desktop UI
+- **Tauri 2** — cross-platform desktop shell (Rust backend + system WebView)
+- **React + TypeScript** — desktop frontend
+- **TailwindCSS + shadcn/ui** — desktop styling and component library
 - **Tokio** — asynchronous runtime and background work
 - **reqwest + rustls** — network access
 - **Serde** — serialization foundation
@@ -141,18 +143,21 @@ The desktop app and CLI are both consumers of the same Rust control core.
 
 ## Getting started
 
-Requirements: a recent stable Rust toolchain.
+Requirements: a recent stable Rust toolchain, and Node.js 20+ (for the desktop
+app's frontend).
 
 ```bash
-# Build everything
+# Build the core + CLI
 cargo build --workspace
 
 # Run the CLI against the built-in deterministic test adapter
 cargo run -- --adapter test status
 cargo run -- --adapter test doctor
 
-# Run the desktop shell
-cargo run -p deepmate-desktop
+# Run the desktop shell (Tauri): installs frontend deps, then opens the app
+cd apps/desktop
+npm install
+npm run tauri dev
 
 # Full workspace gate (formatting, clippy, tests)
 make ci
@@ -172,8 +177,8 @@ clear Gatekeeper; it is not notarized. The CLI is also available as a plain
 Both the CLI and the desktop app accept `--adapter` (default
 `deepseek-harness`, use `test` for the deterministic fake adapter) and
 `--data-dir` to override the data directory. On Linux, building the desktop
-app requires `libgtk-3-dev`, `libayatana-appindicator3-dev` and `libxdo-dev`
-for the system tray icon.
+app requires the Tauri system dependencies (`libwebkit2gtk-4.1-dev`,
+`libgtk-3-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`).
 
 CLI command surface:
 
@@ -297,18 +302,21 @@ foundation, a Stage 2 desktop shell and Stage 4 plugin/marketplace support:
 - Marketplace search backed by the npm registry, with curated (`@deepseek-ai`)
   vs community source classification, provenance metadata (publisher,
   repository, last-updated) and an on-disk query cache
-- `deepmate-desktop` Slint shell with a system tray (close-to-tray honoring
-  `ui.close_to_tray`) and Overview, Runtime, Profiles, Providers, Models,
-  Plugins, Market and Doctor pages built on centralized design tokens
-- Tokio-backed command/event bridge between the desktop UI and the core,
-  unit-tested against the fake adapter, exposing the same inventory and
-  plugin-lifecycle capabilities as the CLI
+- `deepmate-desktop` Tauri shell (React + TypeScript + Tailwind + shadcn/ui)
+  with a top navigation bar and a shallow three-page layout — Overview
+  (status, runtime controls and diagnostics), Plugins (installed + market) and
+  Settings (configuration + preferences) — with responsive breakpoints and
+  en/zh i18n
+- Tauri command surface mirroring the CLI: inventory, plugin lifecycle,
+  runtime control, doctor, and config (language/theme) persistence, with
+  capability gating and action-history recording
 - Shared `deepmate-app` service crate hosting the registry, config, logging
   and history helpers used by both the CLI and the desktop app
 - Tag-triggered release workflow publishing `deepmate` and
   `deepmate-desktop` for Linux, macOS and Windows; macOS ships the desktop
   app as a DMG
-- Cross-platform CI (fmt, clippy, tests) with a core purity gate
+- Cross-platform CI (fmt, clippy, tests) with a core purity gate and a
+  separate Tauri desktop build job
 
 The first goal is to build a solid, minimal foundation for DeepSeek Harness
 rather than rush into a large feature set.

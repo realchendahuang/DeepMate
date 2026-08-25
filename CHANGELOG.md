@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-08-25
+
+### Changed
+
+- Desktop rewritten from the Slint shell to Tauri 2 + React + Tailwind: the
+  shared core is reached through a typed command bridge, and the UI ships as a
+  Vite-built React app with i18next translations (English / 简体中文).
+- The desktop shell now uses a left navigation rail (200px) with Overview,
+  Plugins and a pinned Settings entry, replacing the top-bar navigation; below
+  768px the rail collapses into a compact top bar with a drawer.
+- Plugins was promoted from a Settings tab to its own top-level page
+  (Installed / Market), so install, update, remove and market search have a
+  dedicated workspace; Settings now holds only Configuration (Profiles,
+  Providers, Models) and Preferences.
+- DataList detail columns now appear at 1024px (`lg`) instead of 768px, so
+  inventory tables stay comfortable once the sidebar takes its width.
+- Release workflow builds the desktop app through its own Tauri manifest
+  (frontend + `deepmate-desktop`) instead of the workspace binary.
+
 ## [0.4.0] - 2026-08-23
 
 ### Added

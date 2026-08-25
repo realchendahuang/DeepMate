@@ -13,7 +13,6 @@
 // The launcher has no `--version` flag, so version detection is best-effort
 // and usually yields None for the real CLI.
 
-use std::net::ToSocketAddrs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, OnceLock};
@@ -84,33 +83,20 @@ impl DeepSeekHarnessAdapter {
             .unwrap_or_else(|| DEFAULT_UI_URL.to_string())
     }
 
-    // Parse "http://host:port" into (host, port). Returns None for
-    // unparseable URLs so reachability checks can be skipped.
-    fn ui_endpoint(&self) -> Option<(String, u16)> {
-        let url = self.ui_url();
-        let rest = url
-            .strip_prefix("http://")
-            .or_else(|| url.strip_prefix("https://"))?;
-        let rest = rest.trim_end_matches('/');
-        let (host, port) = match rest.split_once(':') {
-            Some((host, port)) => (host.to_string(), port.parse().ok()?),
-            None => (rest.to_string(), 80),
-        };
-        Some((host, port))
-    }
-
-    // True when the harness web UI accepts TCP connections.
-    fn ui_reachable(&self) -> bool {
-        let Some((host, port)) = self.ui_endpoint() else {
+    // True when the harness web UI answers HTTP. A real HTTP response (even a
+    // 404) means a web server is serving the endpoint; a refused connection or
+    // a probe timeout means nothing is actually there. This is stricter than a
+    // raw TCP connect, which would also succeed against a stray socket holding
+    // the port.
+    async fn ui_reachable(&self) -> bool {
+        let Ok(url) = self.ui_url().parse::<reqwest::Url>() else {
             return false;
         };
-        let Ok(mut addrs) = (host.as_str(), port).to_socket_addrs() else {
-            return false;
-        };
-        let Some(addr) = addrs.next() else {
-            return false;
-        };
-        std::net::TcpStream::connect_timeout(&addr, UI_PROBE_TIMEOUT).is_ok()
+        let probe = self.http.get(url).send();
+        matches!(
+            tokio::time::timeout(UI_PROBE_TIMEOUT, probe).await,
+            Ok(Ok(_response))
+        )
     }
 
     // Candidate launcher commands, most specific first:
@@ -333,7 +319,7 @@ impl HarnessAdapter for DeepSeekHarnessAdapter {
                 message: Some("harness CLI was not found on PATH".to_string()),
             });
         }
-        if self.ui_reachable() {
+        if self.ui_reachable().await {
             return Ok(RuntimeStatus {
                 kind: RuntimeStatusKind::Running,
                 pid: self.read_pid(),
@@ -351,7 +337,7 @@ impl HarnessAdapter for DeepSeekHarnessAdapter {
         let cli = self.find_cli().ok_or_else(|| {
             CoreError::InvalidState("harness CLI was not found on PATH".to_string())
         })?;
-        if self.ui_reachable() {
+        if self.ui_reachable().await {
             return Ok(());
         }
         let mut command = Command::new(&cli);
@@ -399,6 +385,11 @@ impl HarnessAdapter for DeepSeekHarnessAdapter {
     }
 
     async fn open_ui(&self) -> CoreResult<()> {
+        if !self.ui_reachable().await {
+            return Err(CoreError::InvalidState(
+                "harness web UI is not running; start it first".to_string(),
+            ));
+        }
         let url = self.ui_url();
         self.platform
             .open_url(&url)
@@ -479,7 +470,7 @@ impl HarnessAdapter for DeepSeekHarnessAdapter {
             suggested_action: None,
         });
 
-        if self.ui_reachable() {
+        if self.ui_reachable().await {
             checks.push(DoctorCheck {
                 id: "ui.reachable".to_string(),
                 status: CheckStatus::Pass,
@@ -529,21 +520,23 @@ mod tests {
     fn ui_url_defaults_to_local_web_ui() {
         let adapter = DeepSeekHarnessAdapter::new(Arc::new(SystemPlatform));
         assert_eq!(adapter.ui_url(), DEFAULT_UI_URL);
-        assert_eq!(adapter.ui_endpoint(), Some(("127.0.0.1".to_string(), 3080)));
     }
 
-    #[test]
-    fn ui_endpoint_parses_custom_url() {
-        let adapter = DeepSeekHarnessAdapter::new(Arc::new(SystemPlatform))
-            .with_ui_url("http://localhost:8080");
-        assert_eq!(adapter.ui_endpoint(), Some(("localhost".to_string(), 8080)));
-    }
-
-    #[test]
-    fn ui_endpoint_rejects_unparseable_url() {
+    #[tokio::test]
+    async fn ui_unreachable_when_nothing_listens() {
+        // Port 1 is never a listening harness; the HTTP probe must report it
+        // as unreachable rather than trusting a raw TCP connect.
         let adapter =
-            DeepSeekHarnessAdapter::new(Arc::new(SystemPlatform)).with_ui_url("not a url");
-        assert_eq!(adapter.ui_endpoint(), None);
+            DeepSeekHarnessAdapter::new(Arc::new(SystemPlatform)).with_ui_url("http://127.0.0.1:1");
+        assert!(!adapter.ui_reachable().await);
+    }
+
+    #[tokio::test]
+    async fn open_ui_fails_when_not_running() {
+        let adapter =
+            DeepSeekHarnessAdapter::new(Arc::new(SystemPlatform)).with_ui_url("http://127.0.0.1:1");
+        let err = adapter.open_ui().await.unwrap_err();
+        assert!(err.to_string().contains("not running"));
     }
 
     // Install a fake `dsh` launcher script that answers `--version` and

@@ -1,0 +1,69 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* DeepMate design tokens, ported from the Slint theme. Dark is the default;
+   the `.dark` class flips to light. Values are HSL triplets consumed by the
+   Tailwind config. */
+@layer base {
+  :root {
+    /* Dark theme (default). */
+    --bg: 222 20% 5%;
+    --sidebar: 222 25% 7%;
+    --panel: 222 20% 10%;
+    --panel-2: 222 20% 12%;
+    --inset: 222 25% 6%;
+    --hover: 222 20% 15%;
+    --raised: 222 20% 17%;
+    --border: 222 20% 18%;
+    --border-strong: 222 20% 23%;
+    --text: 220 15% 93%;
+    --text-dim: 222 12% 65%;
+    --text-faint: 222 10% 44%;
+    --accent: 231 100% 75%;
+    --accent-soft: 231 100% 75% / 0.16;
+    --on-accent: 0 0% 100%;
+    --pass: 158 50% 52%;
+    --warn: 40 70% 63%;
+    --fail: 0 70% 68%;
+    --skip: 222 10% 47%;
+    --neutral: 222 10% 55%;
+    --shadow: 0 0% 0% / 0;
+  }
+
+  .dark {
+    /* Light theme. */
+    --bg: 220 30% 97%;
+    --sidebar: 220 25% 94%;
+    --panel: 0 0% 100%;
+    --panel-2: 220 25% 95%;
+    --inset: 220 30% 94%;
+    --hover: 220 30% 92%;
+    --raised: 0 0% 100%;
+    --border: 220 20% 90%;
+    --border-strong: 220 20% 85%;
+    --text: 220 20% 13%;
+    --text-dim: 220 10% 40%;
+    --text-faint: 220 10% 58%;
+    --accent: 231 75% 58%;
+    --accent-soft: 231 75% 58% / 0.10;
+    --on-accent: 0 0% 100%;
+    --pass: 158 70% 36%;
+    --warn: 40 80% 38%;
+    --fail: 0 70% 54%;
+    --skip: 220 10% 65%;
+    --neutral: 220 10% 45%;
+    --shadow: 220 50% 8% / 0.06;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-bg text-text antialiased;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      "Helvetica Neue", Arial, sans-serif;
+    font-size: 13px;
+  }
+}

@@ -36,16 +36,37 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      # The desktop shell uses tray-icon, which needs system GTK/AppIndicator
-      # development packages on Linux.
-      - name: Install Linux tray dependencies
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      # The desktop app (Tauri) needs the system webkit/GTK dev packages on
+      # Linux; tray-icon pulls in AppIndicator on top.
+      - name: Install Linux desktop dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libayatana-appindicator3-dev libxdo-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev
 
-      - name: Build
+      # The frontend bundle is embedded into the desktop binary at compile
+      # time, so it must exist before the src-tauri build.
+      - name: Install frontend deps
+        run: npm ci
+        working-directory: apps/desktop
+
+      - name: Build frontend
+        run: npm run build
+        working-directory: apps/desktop
+
+      - name: Build CLI
         run: cargo build --release --workspace --locked --target ${{ matrix.target }}
+
+      # src-tauri is intentionally outside the root workspace (it has its own
+      # Node-based build), so the desktop binary is built separately.
+      - name: Build desktop (Tauri)
+        run: cargo build --release --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --target ${{ matrix.target }}
 
       - name: Package (Linux)
         if: runner.os == 'Linux'
