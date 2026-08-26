@@ -126,8 +126,10 @@ pub fn run() {
 
     app.run(|app_handle, event| {
         // macOS dock click while the window is hidden restores it.
-        if let RunEvent::Reopen { .. } = event {
-            show_main_window(app_handle);
+        match event {
+            #[cfg(target_os = "macos")]
+            RunEvent::Reopen { .. } => show_main_window(app_handle),
+            _ => {}
         }
     });
 }
