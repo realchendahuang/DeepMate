@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 /* DeepMate design tokens, ported from the Slint theme. Dark is the default;
-   the `.dark` class flips to light. Values are HSL triplets consumed by the
+   the `.light` class flips to light. Values are HSL triplets consumed by the
    Tailwind config. */
 @layer base {
   :root {
@@ -31,7 +31,7 @@
     --shadow: 0 0% 0% / 0;
   }
 
-  .dark {
+  .light {
     /* Light theme. */
     --bg: 220 30% 97%;
     --sidebar: 220 25% 94%;

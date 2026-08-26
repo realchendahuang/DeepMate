@@ -175,7 +175,8 @@ clear Gatekeeper; it is not notarized. The CLI is also available as a plain
 `tar.gz` on every platform.
 
 Both the CLI and the desktop app accept `--adapter` (default
-`deepseek-harness`, use `test` for the deterministic fake adapter) and
+`deepseek-harness`, use `test` for the deterministic fake adapter and
+`pi-agent` for Pi Agent inventory) and
 `--data-dir` to override the data directory. On Linux, building the desktop
 app requires the Tauri system dependencies (`libwebkit2gtk-4.1-dev`,
 `libgtk-3-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`).
@@ -204,13 +205,22 @@ deepmate plugin update [id] [--profile <name>]
                                 Update one plugin, or all plugins
 deepmate market list           List known market sources
 deepmate market search <query> Search the market for plugins
+deepmate snapshot export <name>
+                                Capture the current setup as a portable snapshot
+deepmate snapshot import <name>
+                                Apply a snapshot to the active adapter (merge-style)
+deepmate snapshot list          List stored snapshots
 ```
 
 Commands that the active adapter does not declare support for are rejected
 with a clear error instead of returning empty results. `--adapter test`
 supports the full surface; the DeepSeek Harness adapter currently supports
 runtime control, detect, status, open, doctor, profile list, provider list,
-model list, plugin list/install/remove/update and market list/search.
+model list, plugin list/install/remove/update, market list/search and
+snapshots. A second real adapter, `pi-agent`, exposes read-only inventory
+(providers, models, plugins) for Pi Agent and reports profiles, runtime,
+marketplace and snapshots as unsupported — a live demonstration of the
+capability gate.
 
 Append `--json` to any command for machine-readable output. Logs go to
 stderr and to `logs/deepmate.log` in the data directory, so JSON on stdout
@@ -267,25 +277,30 @@ Harness-owned state remains owned by the active harness and is accessed through 
 
 ### Phase 3 — Portable setups
 
-- Export / import configuration
-- Environment snapshots
+- Environment snapshots (implemented in v0.6.0: `snapshot export / import /
+  list` in the CLI and the desktop app)
+- Export / import of DeepMate's own configuration
 - Profile portability
 - Private registries
 
 ### Phase 4 — More harnesses
 
+- Additional harness / agent runtime adapters (the Pi Agent adapter shipped
+  in v0.6.0)
 - Stable public adapter protocol
-- Additional harness / agent runtime adapters
 
 ## Project status
 
 DeepMate is currently in **early development**, with a working Stage 1
-foundation, a Stage 2 desktop shell and Stage 4 plugin/marketplace support:
+foundation, a Stage 2 desktop shell, Stage 3 configuration editing,
+Stage 4 plugin/marketplace support, Stage 5 snapshots and the first steps of
+Stage 6 (a second adapter):
 
 - Rust workspace with `deepmate-core`, `deepmate-platform` and the
   `deepseek-harness` adapter
 - `deepmate` CLI with `adapters`, `detect`, `status`, `open`, `doctor`,
-  `runtime`, `profile`, `provider`, `model`, `plugin` and `market` commands
+  `runtime`, `profile`, `provider`, `model`, `plugin`, `market` and
+  `snapshot` commands
 - Deterministic `test` adapter for development and CI
 - File-based data layer: OS-convention data directory, TOML config, JSONL
   action history and file logging
@@ -296,20 +311,36 @@ foundation, a Stage 2 desktop shell and Stage 4 plugin/marketplace support:
   `runtime stop`, profile discovery, plugin inventory, and provider/model
   catalogs through the documented `$DSH_HOME` file contracts
   (`profiles/*/package.json` and `settings.yaml`)
+- Configuration editing through the adapter boundary: providers, models and
+  profiles can be created, edited and removed (upsert-style) from the
+  desktop Settings page, with the harness-owned files staying authoritative
 - Plugin lifecycle (install / remove / update) forwarded to the harness's own
   `dsh plugin` workflow, so profile and bundle reconciliation stay owned by
   the harness
 - Marketplace search backed by the npm registry, with curated (`@deepseek-ai`)
   vs community source classification, provenance metadata (publisher,
   repository, last-updated) and an on-disk query cache
+- Portable snapshots: `snapshot export / import / list` capture a normalized
+  inventory (profiles, providers, models, plugins — never secrets) to JSON
+  and apply it merge-style to the same adapter, from both the CLI and the
+  desktop Settings page
+- A `pi-agent` adapter exposing read-only inventory for Pi Agent — the
+  second real adapter and a live exercise of the capability gate
 - `deepmate-desktop` Tauri shell (React + TypeScript + Tailwind + shadcn/ui)
-  with a top navigation bar and a shallow three-page layout — Overview
-  (status, runtime controls and diagnostics), Plugins (installed + market) and
-  Settings (configuration + preferences) — with responsive breakpoints and
-  en/zh i18n
-- Tauri command surface mirroring the CLI: inventory, plugin lifecycle,
-  runtime control, doctor, and config (language/theme) persistence, with
-  capability gating and action-history recording
+  with a left navigation rail and a shallow three-page layout — Overview
+  (status, runtime controls, diagnostics and the update banner), Plugins
+  (installed + market) and Settings (configuration + preferences) — with
+  responsive breakpoints and en/zh i18n
+- Tauri command surface mirroring the CLI: inventory, configuration editing,
+  plugin lifecycle, runtime control, snapshots, doctor, and config
+  (language/theme/preferences) persistence, with capability gating and
+  action-history recording
+- System tray with close-to-tray behavior (hide instead of quit, restore
+  from the tray menu or a macOS dock click) and an opt-in start-at-login
+  preference backed by OS login items
+- Update checking against the GitHub releases API (on by default, fails
+  quiet when offline), surfaced as a banner on Overview and a check in
+  Settings Preferences
 - Shared `deepmate-app` service crate hosting the registry, config, logging
   and history helpers used by both the CLI and the desktop app
 - Tag-triggered release workflow publishing `deepmate` and

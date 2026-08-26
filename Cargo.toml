@@ -5,11 +5,12 @@ members = [
     "crates/deepmate-platform",
     "crates/deepmate-app",
     "crates/adapters/deepseek-harness",
+    "crates/adapters/pi-agent",
     "apps/cli",
 ]
 
 [workspace.package]
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/realchendahuang/DeepMate"

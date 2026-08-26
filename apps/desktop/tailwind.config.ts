@@ -2,7 +2,7 @@ import type { Config } from "tailwindcss";
 import animate from "tailwindcss-animate";
 
 // DeepMate design tokens, ported from the Slint theme (ui/theme/Colors.slint).
-// Dark is the default; the `.dark` class flips to light, driven by the theme
+// Dark is the default; the `.light` class flips to light, driven by the theme
 // preference (system / light / dark).
 export default {
   darkMode: "class",

@@ -38,12 +38,26 @@ pub struct FakeAdapter {
     pub remove_error: Option<String>,
     pub update_error: Option<String>,
     pub search_error: Option<String>,
+    pub upsert_provider_error: Option<String>,
+    pub remove_provider_error: Option<String>,
+    pub upsert_model_error: Option<String>,
+    pub remove_model_error: Option<String>,
+    pub create_profile_error: Option<String>,
+    pub remove_profile_error: Option<String>,
     // Call recordings for plugin lifecycle operations, as
     // "<profile>:<spec-or-id>" lines (update without an id records the bare
     // profile). Shared so the tests can inspect them through &self.
     pub installed: Arc<Mutex<Vec<String>>>,
     pub removed: Arc<Mutex<Vec<String>>>,
     pub updated: Arc<Mutex<Vec<String>>>,
+    // Call recordings for configuration edits, as "<profile>:<name>" or
+    // "<provider>:<model-or-id>". Shared so the tests can inspect them.
+    pub created_profiles: Arc<Mutex<Vec<String>>>,
+    pub removed_profiles: Arc<Mutex<Vec<String>>>,
+    pub upserted_providers: Arc<Mutex<Vec<String>>>,
+    pub removed_providers: Arc<Mutex<Vec<String>>>,
+    pub upserted_models: Arc<Mutex<Vec<String>>>,
+    pub removed_models: Arc<Mutex<Vec<String>>>,
     pub market_entries: Vec<MarketEntry>,
     pub market_sources: Vec<MarketSourceInfo>,
 }
@@ -63,6 +77,7 @@ impl FakeAdapter {
                 models: true,
                 plugins: true,
                 marketplace: true,
+                snapshots: true,
                 ..Default::default()
             },
             doctor: DoctorReport {
@@ -83,9 +98,21 @@ impl FakeAdapter {
             remove_error: None,
             update_error: None,
             search_error: None,
+            upsert_provider_error: None,
+            remove_provider_error: None,
+            upsert_model_error: None,
+            remove_model_error: None,
+            create_profile_error: None,
+            remove_profile_error: None,
             installed: Arc::new(Mutex::new(Vec::new())),
             removed: Arc::new(Mutex::new(Vec::new())),
             updated: Arc::new(Mutex::new(Vec::new())),
+            created_profiles: Arc::new(Mutex::new(Vec::new())),
+            removed_profiles: Arc::new(Mutex::new(Vec::new())),
+            upserted_providers: Arc::new(Mutex::new(Vec::new())),
+            removed_providers: Arc::new(Mutex::new(Vec::new())),
+            upserted_models: Arc::new(Mutex::new(Vec::new())),
+            removed_models: Arc::new(Mutex::new(Vec::new())),
             market_entries: vec![MarketEntry {
                 id: "fake-market-plugin".to_string(),
                 name: "Fake Market Plugin".to_string(),
@@ -225,6 +252,10 @@ impl HarnessAdapter for FakeAdapter {
             id: "demo".to_string(),
             name: "Demo".to_string(),
             kind: "openai-compatible".to_string(),
+            api: Some("openai-completions".to_string()),
+            base_url: Some("https://example.com/v1".to_string()),
+            api_key_env: Some("DEMO_API_KEY".to_string()),
+            compat: None,
         }])
     }
 
@@ -233,7 +264,69 @@ impl HarnessAdapter for FakeAdapter {
             id: "demo-chat".to_string(),
             name: "Demo Chat".to_string(),
             provider: Some("demo".to_string()),
+            context_window: Some(8192),
+            max_tokens: Some(2048),
+            input: None,
+            reasoning_efforts: None,
+            compat: None,
         }])
+    }
+
+    async fn upsert_provider(&self, provider: Provider) -> CoreResult<()> {
+        if let Some(message) = &self.upsert_provider_error {
+            return Err(CoreError::InvalidState(message.clone()));
+        }
+        self.upserted_providers
+            .lock()
+            .unwrap()
+            .push(format!("{}:{}", provider.id, provider.name));
+        Ok(())
+    }
+
+    async fn remove_provider(&self, id: &str) -> CoreResult<()> {
+        if let Some(message) = &self.remove_provider_error {
+            return Err(CoreError::InvalidState(message.clone()));
+        }
+        self.removed_providers.lock().unwrap().push(id.to_string());
+        Ok(())
+    }
+
+    async fn upsert_model(&self, provider: &str, model: Model) -> CoreResult<()> {
+        if let Some(message) = &self.upsert_model_error {
+            return Err(CoreError::InvalidState(message.clone()));
+        }
+        self.upserted_models
+            .lock()
+            .unwrap()
+            .push(format!("{provider}:{}", model.id));
+        Ok(())
+    }
+
+    async fn remove_model(&self, provider: &str, id: &str) -> CoreResult<()> {
+        if let Some(message) = &self.remove_model_error {
+            return Err(CoreError::InvalidState(message.clone()));
+        }
+        self.removed_models
+            .lock()
+            .unwrap()
+            .push(format!("{provider}:{id}"));
+        Ok(())
+    }
+
+    async fn create_profile(&self, name: &str) -> CoreResult<()> {
+        if let Some(message) = &self.create_profile_error {
+            return Err(CoreError::InvalidState(message.clone()));
+        }
+        self.created_profiles.lock().unwrap().push(name.to_string());
+        Ok(())
+    }
+
+    async fn remove_profile(&self, name: &str) -> CoreResult<()> {
+        if let Some(message) = &self.remove_profile_error {
+            return Err(CoreError::InvalidState(message.clone()));
+        }
+        self.removed_profiles.lock().unwrap().push(name.to_string());
+        Ok(())
     }
 
     async fn plugins(&self) -> CoreResult<Vec<Plugin>> {

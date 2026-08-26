@@ -13,6 +13,7 @@ import type {
   Plugin,
   Profile,
   Provider,
+  UpdateInfo,
 } from "./types";
 
 interface AppState {
@@ -26,11 +27,17 @@ interface AppState {
   marketSources: MarketSourceInfo[];
   marketEntries: MarketEntry[];
   doctor: DoctorReport | null;
+  snapshots: string[];
   // UI.
   busy: boolean;
   error: string | null;
   language: string;
   theme: string;
+  checkUpdates: boolean;
+  closeToTray: boolean;
+  autostart: boolean;
+  updateInfo: UpdateInfo | null;
+  updateChecked: boolean;
 
   // Actions.
   refreshAll: () => Promise<void>;
@@ -42,6 +49,12 @@ interface AppState {
   loadProfiles: () => Promise<void>;
   loadProviders: () => Promise<void>;
   loadModels: () => Promise<void>;
+  upsertProvider: (provider: Provider) => Promise<void>;
+  removeProvider: (id: string) => Promise<void>;
+  upsertModel: (provider: string, model: Model) => Promise<void>;
+  removeModel: (provider: string, id: string) => Promise<void>;
+  createProfile: (name: string) => Promise<void>;
+  removeProfile: (name: string) => Promise<void>;
   loadPlugins: () => Promise<void>;
   loadMarketSources: () => Promise<void>;
   searchMarket: (query: string) => Promise<void>;
@@ -50,7 +63,15 @@ interface AppState {
   updatePlugin: (profile: string, id: string) => Promise<void>;
   setLanguage: (language: string) => Promise<void>;
   setTheme: (theme: string) => Promise<void>;
+  setCloseToTray: (enabled: boolean) => Promise<void>;
+  setCheckUpdates: (enabled: boolean) => Promise<void>;
+  setAutostart: (enabled: boolean) => Promise<void>;
+  checkUpdate: () => Promise<void>;
+  openRelease: (url: string) => Promise<void>;
   loadPrefs: () => Promise<void>;
+  snapshotExport: (name: string) => Promise<void>;
+  snapshotImport: (name: string) => Promise<void>;
+  loadSnapshots: () => Promise<void>;
 }
 
 // Wrap a command with busy/error handling.
@@ -78,10 +99,16 @@ export const useStore = create<AppState>((set) => ({
   marketSources: [],
   marketEntries: [],
   doctor: null,
+  snapshots: [],
   busy: false,
   error: null,
   language: "en",
   theme: "system",
+  checkUpdates: true,
+  closeToTray: true,
+  autostart: false,
+  updateInfo: null,
+  updateChecked: false,
 
   refreshAll: async () => {
     const overview = await run(set, () => api.refreshAll());
@@ -118,6 +145,31 @@ export const useStore = create<AppState>((set) => ({
     const models = await run(set, () => api.listModels());
     set({ models });
   },
+  upsertProvider: async (provider: Provider) => {
+    await run(set, () => api.upsertProvider(provider));
+    await useStore.getState().loadProviders();
+  },
+  removeProvider: async (id: string) => {
+    await run(set, () => api.removeProvider(id));
+    await useStore.getState().loadProviders();
+    await useStore.getState().loadModels();
+  },
+  upsertModel: async (provider: string, model: Model) => {
+    await run(set, () => api.upsertModel(provider, model));
+    await useStore.getState().loadModels();
+  },
+  removeModel: async (provider: string, id: string) => {
+    await run(set, () => api.removeModel(provider, id));
+    await useStore.getState().loadModels();
+  },
+  createProfile: async (name: string) => {
+    await run(set, () => api.createProfile(name));
+    await useStore.getState().loadProfiles();
+  },
+  removeProfile: async (name: string) => {
+    await run(set, () => api.removeProfile(name));
+    await useStore.getState().loadProfiles();
+  },
   loadPlugins: async () => {
     const plugins = await run(set, () => api.listPlugins());
     set({ plugins });
@@ -151,9 +203,52 @@ export const useStore = create<AppState>((set) => ({
     await run(set, () => api.setTheme(theme));
     set({ theme });
   },
+  setCloseToTray: async (enabled: boolean) => {
+    await run(set, () => api.setCloseToTray(enabled));
+    set({ closeToTray: enabled });
+  },
+  setCheckUpdates: async (enabled: boolean) => {
+    await run(set, () => api.setCheckUpdates(enabled));
+    set({ checkUpdates: enabled });
+  },
+  setAutostart: async (enabled: boolean) => {
+    await run(set, () => api.autostartSet(enabled));
+    set({ autostart: enabled });
+  },
+  checkUpdate: async () => {
+    const updateInfo = await run(set, () => api.checkUpdate());
+    set({ updateInfo, updateChecked: true });
+  },
+  openRelease: async (url: string) => {
+    await run(set, () => api.openUrl(url));
+  },
   loadPrefs: async () => {
     const prefs = await run(set, () => api.getConfig());
-    set({ language: prefs.language, theme: prefs.theme });
+    let autostart = false;
+    try {
+      autostart = await api.autostartGet();
+    } catch {
+      // Auto-start state is cosmetic on startup; the toggle re-syncs it.
+    }
+    set({
+      language: prefs.language,
+      theme: prefs.theme,
+      checkUpdates: prefs.check_updates,
+      closeToTray: prefs.close_to_tray,
+      autostart,
+    });
     (await import("./i18n")).default.changeLanguage(prefs.language);
+  },
+  snapshotExport: async (name: string) => {
+    await run(set, () => api.snapshotExport(name));
+    await useStore.getState().loadSnapshots();
+  },
+  snapshotImport: async (name: string) => {
+    await run(set, () => api.snapshotImport(name));
+    await useStore.getState().refreshAll();
+  },
+  loadSnapshots: async () => {
+    const snapshots = await run(set, () => api.snapshotList());
+    set({ snapshots });
   },
 }));

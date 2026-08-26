@@ -73,6 +73,11 @@ enum Command {
         #[command(subcommand)]
         action: MarketAction,
     },
+    /// Export, import and list portable setup snapshots.
+    Snapshot {
+        #[command(subcommand)]
+        action: SnapshotAction,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -85,16 +90,85 @@ enum RuntimeAction {
 #[derive(Debug, Subcommand)]
 enum ProfileAction {
     List,
+    /// Create a new profile.
+    Create {
+        /// Profile name.
+        name: String,
+    },
+    /// Remove a profile.
+    Remove {
+        /// Profile name.
+        name: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
 enum ProviderAction {
     List,
+    /// Create or update a provider.
+    Set {
+        /// Provider id (route name). Use `deepseek-official` to edit the
+        /// built-in DeepSeek route.
+        id: String,
+        /// Display name.
+        name: Option<String>,
+        /// Wire protocol (`openai-responses`, `openai-completions`, ...).
+        #[arg(long)]
+        api: Option<String>,
+        /// Base URL.
+        #[arg(long)]
+        base_url: Option<String>,
+        /// The environment variable that holds the provider's secret.
+        #[arg(long)]
+        api_key_env: Option<String>,
+        /// Raw JSON capability block (e.g. `{"supportsStore":false}`).
+        #[arg(long)]
+        compat: Option<String>,
+    },
+    /// Remove a provider.
+    Remove {
+        /// Provider id (route name).
+        id: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
 enum ModelAction {
     List,
+    /// Create or update a model within a provider's catalog.
+    Set {
+        /// Provider id (route name) the model belongs to.
+        #[arg(long)]
+        provider: String,
+        /// Model id.
+        id: String,
+        /// Display name.
+        #[arg(long)]
+        name: Option<String>,
+        /// Context window size.
+        #[arg(long)]
+        context_window: Option<u64>,
+        /// Maximum output tokens.
+        #[arg(long)]
+        max_tokens: Option<u64>,
+        /// Comma-separated input modalities (e.g. `text,image`).
+        #[arg(long)]
+        input: Option<String>,
+        /// Raw JSON reasoning-efforts block (e.g. `{"max":"max"}`).
+        #[arg(long)]
+        reasoning_efforts: Option<String>,
+        /// Raw JSON compat block.
+        #[arg(long)]
+        compat: Option<String>,
+    },
+    /// Remove a model from a provider's catalog.
+    Remove {
+        /// Provider id (route name).
+        #[arg(long)]
+        provider: String,
+        /// Model id.
+        id: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -144,6 +218,22 @@ enum MarketAction {
     },
 }
 
+#[derive(Debug, Subcommand)]
+enum SnapshotAction {
+    /// Capture the current setup into a named snapshot.
+    Export {
+        /// Snapshot name (stored as `snapshots/<name>.json`).
+        name: String,
+    },
+    /// Apply a snapshot to the active adapter (merge-style).
+    Import {
+        /// Snapshot name to import.
+        name: String,
+    },
+    /// List stored snapshots.
+    List,
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -170,7 +260,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let registry = build_registry(&cli.adapter, &layout)?;
-    let action = run(&cli, &registry).await?;
+    let action = run(&cli, &registry, &layout).await?;
 
     // History recording is best-effort: a read-only data directory must not
     // break the command itself.
@@ -179,7 +269,7 @@ async fn main() -> anyhow::Result<()> {
 }
 
 // Dispatch the command and return the history action name on success.
-async fn run(cli: &Cli, registry: &AdapterRegistry) -> anyhow::Result<String> {
+async fn run(cli: &Cli, registry: &AdapterRegistry, layout: &DataLayout) -> anyhow::Result<String> {
     if matches!(cli.command, Command::Adapters) {
         print_adapters(registry, cli.json)?;
         return Ok("cli.adapters".to_string());
@@ -275,26 +365,134 @@ async fn run(cli: &Cli, registry: &AdapterRegistry) -> anyhow::Result<String> {
         }
         Command::Profile { action } => {
             require_capability(adapter, adapter.capabilities().profiles, "profiles")?;
-            match action {
-                ProfileAction::List => print_list("profiles", adapter.profiles().await?, cli.json)?,
-            }
-            "cli.profile.list".to_string()
+            let action_name = match action {
+                ProfileAction::List => {
+                    print_list("profiles", adapter.profiles().await?, cli.json)?;
+                    "list"
+                }
+                ProfileAction::Create { name } => {
+                    adapter.create_profile(name).await?;
+                    if cli.json {
+                        println!("{}", serde_json::json!({ "ok": true }));
+                    } else {
+                        println!("created profile {name}");
+                    }
+                    "create"
+                }
+                ProfileAction::Remove { name } => {
+                    adapter.remove_profile(name).await?;
+                    if cli.json {
+                        println!("{}", serde_json::json!({ "ok": true }));
+                    } else {
+                        println!("removed profile {name}");
+                    }
+                    "remove"
+                }
+            };
+            format!("cli.profile.{action_name}")
         }
         Command::Provider { action } => {
             require_capability(adapter, adapter.capabilities().providers, "providers")?;
-            match action {
+            let action_name = match action {
                 ProviderAction::List => {
-                    print_list("providers", adapter.providers().await?, cli.json)?
+                    print_list("providers", adapter.providers().await?, cli.json)?;
+                    "list"
                 }
-            }
-            "cli.provider.list".to_string()
+                ProviderAction::Set {
+                    id,
+                    name,
+                    api,
+                    base_url,
+                    api_key_env,
+                    compat,
+                } => {
+                    let provider = Provider {
+                        id: id.clone(),
+                        name: name.clone().unwrap_or_else(|| id.clone()),
+                        kind: if id == "deepseek-official" {
+                            "deepseek".to_string()
+                        } else {
+                            "pi-ai".to_string()
+                        },
+                        api: api.clone(),
+                        base_url: base_url.clone(),
+                        api_key_env: api_key_env.clone(),
+                        compat: compat.clone(),
+                    };
+                    adapter.upsert_provider(provider).await?;
+                    if cli.json {
+                        println!("{}", serde_json::json!({ "ok": true }));
+                    } else {
+                        println!("saved provider {id}");
+                    }
+                    "set"
+                }
+                ProviderAction::Remove { id } => {
+                    adapter.remove_provider(id).await?;
+                    if cli.json {
+                        println!("{}", serde_json::json!({ "ok": true }));
+                    } else {
+                        println!("removed provider {id}");
+                    }
+                    "remove"
+                }
+            };
+            format!("cli.provider.{action_name}")
         }
         Command::Model { action } => {
             require_capability(adapter, adapter.capabilities().models, "models")?;
-            match action {
-                ModelAction::List => print_list("models", adapter.models().await?, cli.json)?,
-            }
-            "cli.model.list".to_string()
+            let action_name = match action {
+                ModelAction::List => {
+                    print_list("models", adapter.models().await?, cli.json)?;
+                    "list"
+                }
+                ModelAction::Set {
+                    provider,
+                    id,
+                    name,
+                    context_window,
+                    max_tokens,
+                    input,
+                    reasoning_efforts,
+                    compat,
+                } => {
+                    let model = Model {
+                        id: id.clone(),
+                        name: name.clone().unwrap_or_else(|| id.clone()),
+                        provider: Some(provider.clone()),
+                        context_window: *context_window,
+                        max_tokens: *max_tokens,
+                        input: input
+                            .as_ref()
+                            .map(|value| {
+                                value
+                                    .split(',')
+                                    .map(|part| part.trim().to_string())
+                                    .collect()
+                            })
+                            .filter(|parts: &Vec<String>| !parts.is_empty()),
+                        reasoning_efforts: reasoning_efforts.clone(),
+                        compat: compat.clone(),
+                    };
+                    adapter.upsert_model(provider, model).await?;
+                    if cli.json {
+                        println!("{}", serde_json::json!({ "ok": true }));
+                    } else {
+                        println!("saved model {id} under provider {provider}");
+                    }
+                    "set"
+                }
+                ModelAction::Remove { provider, id } => {
+                    adapter.remove_model(provider, id).await?;
+                    if cli.json {
+                        println!("{}", serde_json::json!({ "ok": true }));
+                    } else {
+                        println!("removed model {id} from provider {provider}");
+                    }
+                    "remove"
+                }
+            };
+            format!("cli.model.{action_name}")
         }
         Command::Plugin { action } => {
             require_capability(adapter, adapter.capabilities().plugins, "plugins")?;
@@ -356,6 +554,52 @@ async fn run(cli: &Cli, registry: &AdapterRegistry) -> anyhow::Result<String> {
                     let entries = adapter.search_plugins(query).await?;
                     print_list("market", entries, cli.json)?;
                     "cli.market.search".to_string()
+                }
+            }
+        }
+        Command::Snapshot { action } => {
+            require_capability(adapter, adapter.capabilities().snapshots, "snapshots")?;
+            let store = deepmate_core::SnapshotStore::new(layout.snapshots_dir());
+            match action {
+                SnapshotAction::Export { name } => {
+                    let snapshot = deepmate_core::Snapshot::capture(adapter).await?;
+                    store.save(name, &snapshot)?;
+                    if cli.json {
+                        println!("{}", serde_json::to_string_pretty(&snapshot)?);
+                    } else {
+                        println!(
+                            "exported snapshot {name} ({} profiles, {} providers, {} models, {} plugins)",
+                            snapshot.profiles.len(),
+                            snapshot.providers.len(),
+                            snapshot.models.len(),
+                            snapshot.plugins.len()
+                        );
+                    }
+                    "cli.snapshot.export".to_string()
+                }
+                SnapshotAction::Import { name } => {
+                    let snapshot = store.load(name)?;
+                    let report = snapshot.apply(adapter).await?;
+                    if cli.json {
+                        println!("{}", serde_json::to_string_pretty(&report)?);
+                    } else {
+                        println!(
+                            "imported snapshot {name}: {} profiles, {} providers, {} models, {} plugins",
+                            report.profiles, report.providers, report.models, report.plugins
+                        );
+                    }
+                    "cli.snapshot.import".to_string()
+                }
+                SnapshotAction::List => {
+                    let names = store.list()?;
+                    if cli.json {
+                        println!("{}", serde_json::to_string_pretty(&names)?);
+                    } else {
+                        for name in names {
+                            println!("{name}");
+                        }
+                    }
+                    "cli.snapshot.list".to_string()
                 }
             }
         }

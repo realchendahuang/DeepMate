@@ -93,6 +93,57 @@ pub trait HarnessAdapter: Send + Sync {
         Ok(Vec::new())
     }
 
+    // Create or update a provider. When a provider with the same id already
+    // exists its fields are overwritten; otherwise it is added.
+    async fn upsert_provider(&self, _provider: Provider) -> CoreResult<()> {
+        Err(crate::error::CoreError::Unsupported(format!(
+            "{} does not implement upsert_provider()",
+            self.metadata().id
+        )))
+    }
+
+    // Remove a provider by id.
+    async fn remove_provider(&self, _id: &str) -> CoreResult<()> {
+        Err(crate::error::CoreError::Unsupported(format!(
+            "{} does not implement remove_provider()",
+            self.metadata().id
+        )))
+    }
+
+    // Create or update a model within `provider`'s catalog. When a model with
+    // the same id already exists its fields are overwritten; otherwise it is
+    // added.
+    async fn upsert_model(&self, _provider: &str, _model: Model) -> CoreResult<()> {
+        Err(crate::error::CoreError::Unsupported(format!(
+            "{} does not implement upsert_model()",
+            self.metadata().id
+        )))
+    }
+
+    // Remove a model by id from `provider`'s catalog.
+    async fn remove_model(&self, _provider: &str, _id: &str) -> CoreResult<()> {
+        Err(crate::error::CoreError::Unsupported(format!(
+            "{} does not implement remove_model()",
+            self.metadata().id
+        )))
+    }
+
+    // Create a new profile with the given name.
+    async fn create_profile(&self, _name: &str) -> CoreResult<()> {
+        Err(crate::error::CoreError::Unsupported(format!(
+            "{} does not implement create_profile()",
+            self.metadata().id
+        )))
+    }
+
+    // Remove a profile by name.
+    async fn remove_profile(&self, _name: &str) -> CoreResult<()> {
+        Err(crate::error::CoreError::Unsupported(format!(
+            "{} does not implement remove_profile()",
+            self.metadata().id
+        )))
+    }
+
     async fn plugins(&self) -> CoreResult<Vec<Plugin>> {
         Ok(Vec::new())
     }

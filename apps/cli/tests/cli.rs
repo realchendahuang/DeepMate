@@ -286,3 +286,316 @@ fn default_config_is_written_on_first_run() {
         std::fs::read_to_string(dir.join("config.toml")).expect("config should be written");
     assert!(config.contains("auto_start"));
 }
+
+// Runs a deepseek-harness command against a caller-owned DSH_HOME and returns
+// (stdout, stderr), so write-then-read steps within one test share the same
+// harness state.
+fn dsh_in(home: &Path, args: &[&str]) -> (String, String) {
+    let dir = test_data_dir();
+    std::fs::create_dir_all(home).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_deepmate"))
+        .args(["--adapter", "deepseek-harness"])
+        .args(args)
+        .env("DEEPMATE_DATA_DIR", &dir)
+        .env("DSH_HOME", home)
+        .output()
+        .expect("failed to run deepmate binary");
+    (
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )
+}
+
+#[test]
+fn provider_set_writes_settings_and_reads_back() {
+    let home = test_data_dir();
+    let (_, stderr) = dsh_in(
+        &home,
+        &[
+            "provider",
+            "set",
+            "ollama",
+            "Ollama",
+            "--api",
+            "openai-completions",
+            "--base-url",
+            "http://localhost:11434/v1",
+            "--api-key-env",
+            "OLLAMA_KEY",
+        ],
+    );
+    assert!(stderr.is_empty(), "stderr: {stderr}");
+
+    let (stdout, _) = dsh_in(&home, &["provider", "list"]);
+    assert!(
+        stdout.contains("ollama — Ollama (pi-ai)"),
+        "stdout: {stdout}"
+    );
+}
+
+#[test]
+fn provider_remove_deletes_route() {
+    let home = test_data_dir();
+    let (_, stderr) = dsh_in(
+        &home,
+        &["provider", "set", "temp", "Temp", "--api-key-env", "TMP"],
+    );
+    assert!(stderr.is_empty(), "stderr: {stderr}");
+    let (_, stderr) = dsh_in(&home, &["provider", "remove", "temp"]);
+    assert!(stderr.is_empty(), "stderr: {stderr}");
+    let (stdout, _) = dsh_in(&home, &["provider", "list"]);
+    assert!(
+        !stdout.contains("temp"),
+        "provider should be removed: {stdout}"
+    );
+}
+
+#[test]
+fn model_set_and_remove_roundtrip() {
+    let home = test_data_dir();
+    let (_, stderr) = dsh_in(
+        &home,
+        &["provider", "set", "demo", "Demo", "--api-key-env", "DKEY"],
+    );
+    assert!(stderr.is_empty(), "stderr: {stderr}");
+    let (_, stderr) = dsh_in(
+        &home,
+        &[
+            "model",
+            "set",
+            "--provider",
+            "demo",
+            "my-model",
+            "--name",
+            "My Model",
+            "--context-window",
+            "8192",
+            "--max-tokens",
+            "4096",
+            "--input",
+            "text,image",
+        ],
+    );
+    assert!(stderr.is_empty(), "stderr: {stderr}");
+
+    let (stdout, _) = dsh_in(&home, &["model", "list"]);
+    assert!(stdout.contains("my-model"), "stdout: {stdout}");
+
+    let (_, stderr) = dsh_in(
+        &home,
+        &["model", "remove", "--provider", "demo", "my-model"],
+    );
+    assert!(stderr.is_empty(), "stderr: {stderr}");
+    let (stdout, _) = dsh_in(&home, &["model", "list"]);
+    assert!(
+        !stdout.contains("my-model"),
+        "model should be removed: {stdout}"
+    );
+}
+
+#[test]
+fn deepseek_official_route_edits_llm_deepseek() {
+    let home = test_data_dir();
+    let (_, stderr) = dsh_in(
+        &home,
+        &[
+            "provider",
+            "set",
+            "deepseek-official",
+            "DeepSeek",
+            "--base-url",
+            "https://api.deepseek.com",
+        ],
+    );
+    assert!(stderr.is_empty(), "stderr: {stderr}");
+
+    let (stdout, _) = dsh_in(&home, &["provider", "list"]);
+    assert!(stdout.contains("deepseek-official"));
+
+    // The built-in route cannot be removed.
+    let (_, stderr) = dsh_in(&home, &["provider", "remove", "deepseek-official"]);
+    assert!(
+        !stderr.is_empty(),
+        "deepseek-official removal must be rejected"
+    );
+}
+
+#[test]
+fn profile_create_and_remove_via_cli() {
+    let home = test_data_dir();
+    let (_, stderr) = dsh_in(&home, &["profile", "create", "tui"]);
+    assert!(stderr.is_empty(), "stderr: {stderr}");
+    let (stdout, _) = dsh_in(&home, &["profile", "list"]);
+    assert!(stdout.contains("tui"), "stdout: {stdout}");
+
+    let (_, stderr) = dsh_in(&home, &["profile", "remove", "tui"]);
+    assert!(stderr.is_empty(), "stderr: {stderr}");
+    let (stdout, _) = dsh_in(&home, &["profile", "list"]);
+    assert!(
+        !stdout.contains("tui"),
+        "profile should be removed: {stdout}"
+    );
+}
+
+#[test]
+fn config_edit_commands_are_capability_gated() {
+    // The `minimal` fake adapter only supports runtime; every config edit
+    // must be rejected rather than silently succeeding.
+    for (command, what) in [
+        (vec!["profile", "create", "x"], "profiles"),
+        (vec!["provider", "set", "x", "X"], "providers"),
+        (vec!["provider", "remove", "x"], "providers"),
+        (vec!["model", "set", "--provider", "p", "m"], "models"),
+        (vec!["model", "remove", "--provider", "p", "m"], "models"),
+    ] {
+        let output = deepmate_with_minimal(&command);
+        assert!(!output.status.success(), "{command:?} should be gated");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains(&format!("does not support {what}")),
+            "stderr: {stderr}"
+        );
+    }
+}
+
+fn deepmate_with_minimal(args: &[&str]) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_deepmate"))
+        .args(["--adapter", "minimal"])
+        .args(args)
+        .output()
+        .expect("failed to run deepmate binary")
+}
+
+// Runs a pi-agent command against an isolated PI_HOME.
+fn pi_in(home: &Path, args: &[&str]) -> std::process::Output {
+    let dir = test_data_dir();
+    std::fs::create_dir_all(home).unwrap();
+    Command::new(env!("CARGO_BIN_EXE_deepmate"))
+        .args(["--adapter", "pi-agent"])
+        .args(args)
+        .env("DEEPMATE_DATA_DIR", &dir)
+        .env("PI_HOME", home)
+        .output()
+        .expect("failed to run deepmate binary")
+}
+
+fn write_pi_models(home: &Path) {
+    let agent = home.join("agent");
+    std::fs::create_dir_all(&agent).unwrap();
+    std::fs::write(
+        agent.join("models.json"),
+        r#"{
+  "providers": {
+    "ds": {
+      "name": "DeepSeek Official",
+      "baseUrl": "https://api.deepseek.com",
+      "api": "openai-responses",
+      "apiKey": "sk-secret",
+      "models": [
+        { "id": "deepseek-v4-flash", "name": "DeepSeek V4 Flash", "contextWindow": 1000000, "maxTokens": 131072 }
+      ]
+    }
+  }
+}"#,
+    )
+    .unwrap();
+}
+
+fn write_pi_settings(home: &Path) {
+    let agent = home.join("agent");
+    std::fs::create_dir_all(&agent).unwrap();
+    std::fs::write(
+        agent.join("settings.json"),
+        r#"{"packages": ["npm:pi-subagents"]}"#,
+    )
+    .unwrap();
+}
+
+#[test]
+fn pi_agent_lists_providers_models_plugins() {
+    let home = test_data_dir();
+    write_pi_models(&home);
+    write_pi_settings(&home);
+
+    let providers = pi_in(&home, &["provider", "list"]);
+    assert!(providers.status.success());
+    let stdout = String::from_utf8_lossy(&providers.stdout);
+    assert!(
+        stdout.contains("ds — DeepSeek Official (pi)"),
+        "stdout: {stdout}"
+    );
+    // The plaintext apiKey must never leak into output.
+    assert!(!stdout.contains("sk-secret"), "secret leaked: {stdout}");
+
+    let models = pi_in(&home, &["model", "list"]);
+    assert!(models.status.success());
+    assert!(String::from_utf8_lossy(&models.stdout).contains("deepseek-v4-flash"));
+
+    let plugins = pi_in(&home, &["plugin", "list"]);
+    assert!(plugins.status.success());
+    assert!(String::from_utf8_lossy(&plugins.stdout).contains("npm:pi-subagents"));
+}
+
+#[test]
+fn pi_agent_capability_gate_rejects_runtime_and_profiles() {
+    let home = test_data_dir();
+    write_pi_models(&home);
+
+    for (args, what) in [
+        (vec!["runtime", "start"], "runtime control"),
+        (vec!["profile", "list"], "profiles"),
+    ] {
+        let output = pi_in(&home, &args);
+        assert!(!output.status.success(), "{args:?} should be gated");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains(&format!("does not support {what}")),
+            "stderr: {stderr}"
+        );
+    }
+}
+
+#[test]
+fn snapshot_export_list_import_roundtrip() {
+    let dir = test_data_dir();
+    let export = deepmate_in(&dir, &["--adapter", "test", "snapshot", "export", "coding"]);
+    assert!(
+        export.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&export.stderr)
+    );
+    assert!(dir.join("snapshots").join("coding.json").exists());
+
+    let list = deepmate_in(&dir, &["--adapter", "test", "snapshot", "list"]);
+    assert!(list.status.success());
+    assert!(String::from_utf8_lossy(&list.stdout).contains("coding"));
+
+    let import = deepmate_in(&dir, &["--adapter", "test", "snapshot", "import", "coding"]);
+    assert!(
+        import.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&import.stderr)
+    );
+    assert!(String::from_utf8_lossy(&import.stdout).contains("imported snapshot coding"));
+}
+
+#[test]
+fn snapshot_import_rejects_mismatched_adapter() {
+    let dir = test_data_dir();
+    // Export from the fake adapter, then try to import into pi-agent using
+    // the same data dir (so the snapshot is found) but a different adapter.
+    let export = deepmate_in(&dir, &["--adapter", "test", "snapshot", "export", "coding"]);
+    assert!(export.status.success());
+
+    let home = test_data_dir();
+    write_pi_models(&home);
+    let import = Command::new(env!("CARGO_BIN_EXE_deepmate"))
+        .args(["--adapter", "pi-agent", "snapshot", "import", "coding"])
+        .env("DEEPMATE_DATA_DIR", &dir)
+        .env("PI_HOME", &home)
+        .output()
+        .expect("failed to run deepmate binary");
+    assert!(!import.status.success());
+    let stderr = String::from_utf8_lossy(&import.stderr);
+    assert!(stderr.contains("adapter 'test'"), "stderr: {stderr}");
+}

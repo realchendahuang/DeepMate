@@ -30,7 +30,10 @@ use deepmate_platform::PlatformService;
 mod dsh;
 mod market;
 
-use dsh::{discover_profiles, list_all_plugins, list_models, list_providers};
+use dsh::{
+    create_profile, discover_profiles, list_all_plugins, list_models, list_providers,
+    remove_profile, SettingsEditor,
+};
 
 const ADAPTER_ID: &str = "deepseek-harness";
 const ADAPTER_NAME: &str = "DeepSeek Harness";
@@ -293,6 +296,7 @@ impl HarnessAdapter for DeepSeekHarnessAdapter {
             models: true,
             plugins: true,
             marketplace: true,
+            snapshots: true,
             ..Default::default()
         }
     }
@@ -406,6 +410,30 @@ impl HarnessAdapter for DeepSeekHarnessAdapter {
 
     async fn models(&self) -> CoreResult<Vec<Model>> {
         list_models()
+    }
+
+    async fn upsert_provider(&self, provider: Provider) -> CoreResult<()> {
+        SettingsEditor::upsert_provider(&provider)
+    }
+
+    async fn remove_provider(&self, id: &str) -> CoreResult<()> {
+        SettingsEditor::remove_provider(id)
+    }
+
+    async fn upsert_model(&self, provider: &str, model: Model) -> CoreResult<()> {
+        SettingsEditor::upsert_model(provider, &model)
+    }
+
+    async fn remove_model(&self, provider: &str, id: &str) -> CoreResult<()> {
+        SettingsEditor::remove_model(provider, id)
+    }
+
+    async fn create_profile(&self, name: &str) -> CoreResult<()> {
+        create_profile(name)
+    }
+
+    async fn remove_profile(&self, name: &str) -> CoreResult<()> {
+        remove_profile(name)
     }
 
     async fn plugins(&self) -> CoreResult<Vec<Plugin>> {

@@ -8,7 +8,9 @@ pub mod data;
 pub mod error;
 pub mod model;
 pub mod registry;
+pub mod snapshot;
 pub mod testkit;
+pub mod update;
 
 pub use adapter::{AdapterCapabilities, AdapterMetadata, Detection, HarnessAdapter};
 pub use data::{ActionRecord, Config, DataLayout, History};
@@ -18,3 +20,5 @@ pub use model::{
     RuntimeStatus, RuntimeStatusKind,
 };
 pub use registry::AdapterRegistry;
+pub use snapshot::{Snapshot, SnapshotReport, SnapshotStore};
+pub use update::is_newer_version;

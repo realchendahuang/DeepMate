@@ -5,6 +5,51 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-08-26
+
+### Added
+
+- Portable snapshots: `deepmate snapshot export|import|list` and a Snapshots
+  section in the desktop Settings page capture a normalized inventory
+  (profiles, providers, models, plugins — never secrets) as JSON and apply it
+  merge-style to the same adapter, so a setup can move between machines.
+- Configuration editing in the desktop app: providers, models and profiles
+  can be created, edited and removed through the adapter boundary (upsert
+  semantics), with the DeepSeek Harness adapter writing the harness-owned
+  files (`settings.yaml` and the profile directories).
+- Pi Agent adapter (`--adapter pi-agent`): read-only inventory (providers,
+  models, plugins) from the documented `~/.pi/agent` files — the second real
+  adapter and a live demonstration of the capability gate.
+- System tray: closing the window hides DeepMate to the tray, with a
+  localized show/quit menu and macOS dock-click restore; close-to-tray is
+  now a Settings preference.
+- Start at login: an opt-in preference backed by OS login items, carrying
+  the active `--adapter` flag.
+- Update checking: the desktop app queries the GitHub releases API (on by
+  default, fails quiet when offline) and surfaces a release banner on
+  Overview plus a check status in Settings Preferences.
+
+### Changed
+
+- `general.auto_start` now defaults to `false`: registering the app with OS
+  login items is opt-in and only happens through the Settings toggle.
+- The light-theme class was renamed from the Slint-era inverted `.dark` to
+  `.light` (dark remains the default), so Tailwind `dark:` variants can no
+  longer be silently misapplied.
+- The workspace `.gitignore` now ignores `target/` everywhere, including the
+  Tauri dev build directory under `apps/`.
+
+### Fixed
+
+- Close-to-tray was broken: the close handler prevented closing without ever
+  hiding the window, and no tray icon existed to restore it, so the close
+  button did nothing. Closing now hides to the tray (with `close_to_tray`
+  enabled) or quits, and the tray menu restores the window.
+- Docs drift: `docs/ARCHITECTURE.md` and `docs/DESIGN_SYSTEM.md` still
+  described the retired Slint shell; both now describe the Tauri 2 + React
+  implementation, and the README documents the snapshot commands and the
+  Pi Agent adapter.
+
 ## [0.5.0] - 2026-08-25
 
 ### Changed

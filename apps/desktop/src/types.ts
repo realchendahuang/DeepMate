@@ -52,12 +52,21 @@ export interface Provider {
   id: string;
   name: string;
   kind: string;
+  api: string | null;
+  base_url: string | null;
+  api_key_env: string | null;
+  compat: string | null;
 }
 
 export interface Model {
   id: string;
   name: string;
   provider: string | null;
+  context_window: number | null;
+  max_tokens: number | null;
+  input: string[] | null;
+  reasoning_efforts: string | null;
+  compat: string | null;
 }
 
 export interface Plugin {
@@ -113,4 +122,12 @@ export interface AdapterCapabilities {
   skills: boolean;
   mcp: boolean;
   snapshots: boolean;
+}
+
+// A newer DeepMate release found by the update check.
+export interface UpdateInfo {
+  current_version: string;
+  latest_version: string;
+  url: string;
+  published_at: string;
 }

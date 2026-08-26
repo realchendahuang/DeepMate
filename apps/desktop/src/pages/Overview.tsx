@@ -14,6 +14,7 @@ import {
   AlertTriangle,
   XCircle,
   MinusCircle,
+  Sparkles,
 } from "lucide-react";
 import { useStore } from "../store";
 import { Button } from "../components/ui/button";
@@ -57,6 +58,8 @@ export function OverviewPage() {
   const runtimeRestart = useStore((s) => s.runtimeRestart);
   const openHarness = useStore((s) => s.openHarness);
   const runDoctor = useStore((s) => s.runDoctor);
+  const updateInfo = useStore((s) => s.updateInfo);
+  const openRelease = useStore((s) => s.openRelease);
 
   useEffect(() => {
     refreshAll();
@@ -88,6 +91,26 @@ export function OverviewPage() {
           </Button>
         }
       />
+
+      {updateInfo && (
+        <Card className="border-accent/40">
+          <CardContent className="flex flex-col gap-2 p-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-center gap-2 text-body text-text">
+              <Sparkles className="h-4 w-4 shrink-0 text-accent" />
+              {t("overview.updateAvailable", { version: updateInfo.latest_version })}
+            </div>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => openRelease(updateInfo.url)}
+              title={updateInfo.url}
+            >
+              <ExternalLink className="h-4 w-4" />
+              {t("overview.viewRelease")}
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardContent className="p-4 md:p-5">

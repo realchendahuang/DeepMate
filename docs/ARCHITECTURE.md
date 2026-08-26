@@ -27,9 +27,9 @@ DeepMate is designed around a few constraints:
               ┌────────────────────────┐
               │                        │
               │   Desktop       CLI    │
-              │   Slint       deepmate │
-              │      \         /       │
-              │       \       /        │
+              │  Tauri+React   deepmate │
+              │       \         /      │
+              │        \       /       │
               │        Control Core    │
               │           Rust         │
               │                        │
@@ -57,18 +57,21 @@ The control core, adapter interfaces, runtime management, configuration, marketp
 
 ### Desktop UI
 
-**Slint** is the planned desktop UI layer.
+**Tauri 2 + React + TypeScript** is the desktop UI layer, styled with Tailwind
+CSS and shadcn/ui-derived components.
 
-The UI should stay thin: it renders state from the core, sends commands to the core and reacts to events. Business rules should not live inside UI callbacks.
+The UI should stay thin: it renders state from the core, sends commands to the
+core and reacts to events. Business rules live in the Rust commands, never in
+UI callbacks.
 
 The desktop app should support:
 
 - Windows
 - macOS
 - Linux
-- system tray / menu bar operation
+- system tray / menu bar operation (close-to-tray, tray menu with show/quit)
 - a lightweight control-center window
-- system theme integration where practical
+- system theme integration (system / light / dark)
 
 ### Async runtime
 
@@ -82,7 +85,10 @@ The desktop app should support:
 - diagnostics
 - adapter communication
 
-The Slint event loop and Tokio runtime remain separate. Background work reports results back to the UI through a small application state / event boundary.
+The Tauri async runtime executes the command surface; background work
+(detection, health checks, plugin installation, marketplace requests,
+downloads, diagnostics, update checks) reports results back to the UI through
+typed Tauri commands and a small frontend store boundary.
 
 ### HTTP
 
@@ -520,7 +526,7 @@ Example:
 ```toml
 [general]
 language = "en"
-auto_start = true
+auto_start = false
 check_updates = true
 
 [ui]
@@ -657,38 +663,45 @@ The desktop app can render the report visually, while the CLI can print the same
 
 The UI should be componentized from the beginning.
 
-Planned structure:
+Structure:
 
 ```text
-apps/desktop/ui/
+apps/desktop/src/
 │
-├── App.slint
+├── App.tsx                    # shell + startup wiring (prefs, update check)
 │
 ├── components/
-│   ├── Sidebar.slint
-│   ├── Button.slint
-│   ├── Card.slint
-│   ├── Badge.slint
-│   ├── PluginCard.slint
-│   └── ModelRow.slint
+│   ├── layout/
+│   │   └── app-shell.tsx      # sidebar rail + content column + mobile drawer
+│   └── ui/
+│       ├── button.tsx         # Button (primary/secondary/ghost/danger)
+│       ├── badge.tsx          # Badge (tone vocabulary)
+│       ├── card.tsx           # Card / CardContent
+│       ├── input.tsx
+│       ├── segmented.tsx      # 2–3 option picker
+│       ├── switch.tsx         # boolean toggle
+│       ├── dialog.tsx         # modal editor shell
+│       ├── data-list.tsx      # DataList / DataListRow / EmptyState
+│       └── page.tsx           # PageBody / PageHeader / SectionHeader
 │
 ├── pages/
-│   ├── Overview.slint
-│   ├── Runtime.slint
-│   ├── Models.slint
-│   ├── Profiles.slint
-│   ├── Plugins.slint
-│   ├── Market.slint
-│   ├── Doctor.slint
-│   └── Settings.slint
+│   ├── Overview.tsx
+│   ├── Plugins.tsx
+│   └── Settings.tsx
 │
-└── theme/
-    ├── Colors.slint
-    ├── Typography.slint
-    └── Metrics.slint
+├── store.ts                   # zustand store (single source of truth)
+├── api.ts                     # typed wrappers over Tauri commands
+├── types.ts                   # mirrors of the core models
+├── i18n.ts                    # i18next setup
+├── styles.css                 # design token CSS variables (dark/light)
+└── locales/
+    ├── en.json
+    └── zh.json
 ```
 
-Design tokens should be centralized so visual consistency does not depend on page-level hard-coded values.
+Design tokens are centralized as CSS variables consumed by the Tailwind
+config (`tailwind.config.ts`); pages and components never hard-code colors,
+sizes, weights or radii (see docs/DESIGN_SYSTEM.md).
 
 ## Initial implementation order
 
@@ -704,16 +717,15 @@ Design tokens should be centralized so visual consistency does not depend on pag
 - `deepmate doctor`
 - system browser open
 
-### Stage 2 — Desktop shell (implemented in v0.2.0)
+### Stage 2 — Desktop shell (implemented in v0.2.0, Tauri in v0.5.0)
 
-- Slint application shell
-- system tray
+- application shell (Slint in v0.2.0, rewritten as Tauri 2 + React in v0.5.0)
+- system tray with close-to-tray and a show/quit menu (completed in v0.6.0)
 - Overview page
-- Runtime page
-- Doctor page
+- Doctor checks on the Overview page
 - shared application state / event bridge
 
-### Stage 3 — Harness configuration (partially implemented)
+### Stage 3 — Harness configuration (implemented in v0.6.0)
 
 - profiles
 - providers
@@ -722,7 +734,8 @@ Design tokens should be centralized so visual consistency does not depend on pag
 - configuration editing through supported Harness interfaces
 
 Profiles, providers and models are exposed in both the CLI and the desktop
-app (v0.4.0); configuration editing itself is not yet implemented.
+app (v0.4.0); configuration editing (create / edit / remove for providers,
+models and profiles) is implemented in the desktop Settings page (v0.6.0).
 
 ### Stage 4 — Plugins and marketplace (implemented in v0.3.0)
 
@@ -737,19 +750,20 @@ community source, publisher, repository and last-updated from the npm
 registry); richer risk flags from the architecture's plugin trust section are
 a later refinement.
 
-### Stage 5 — Portability
+### Stage 5 — Portability (snapshots implemented in v0.6.0)
 
-- snapshots
-- import / export
+- snapshots — export / import / list in the CLI and the desktop app
+  (implemented in v0.6.0)
 - private registries
 - portable setup workflows
 
-### Stage 6 — Adapter ecosystem
+### Stage 6 — Adapter ecosystem (in progress)
 
+- additional harness adapters — the Pi Agent adapter shipped in v0.6.0 as
+  the second first-party adapter
 - public adapter protocol
 - JSON-RPC stdio host
 - adapter manifests
-- additional harness adapters
 
 ## Architectural rules
 

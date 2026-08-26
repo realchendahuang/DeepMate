@@ -98,19 +98,42 @@ pub struct Profile {
 }
 
 // Provider configuration (normalized representation).
+//
+// `compat` is an opaque capability block (e.g. `supportsStore`,
+// `thinkingFormat`, `supportsReasoningEffort`) carried through untouched.
+// It is serialized as a JSON string so the UI can offer a raw advanced
+// editor without the core knowing every possible harness-specific flag.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Provider {
     pub id: String,
     pub name: String,
     pub kind: String,
+    // The wire protocol (`openai-responses`, `openai-completions`, ...).
+    pub api: Option<String>,
+    pub base_url: Option<String>,
+    // The environment variable that holds the provider's secret. Only the
+    // variable name is stored here; the secret itself lives in harness-owned
+    // storage and is never read or written by DeepMate.
+    pub api_key_env: Option<String>,
+    pub compat: Option<String>,
 }
 
 // Model entry (normalized representation).
+//
+// `reasoning_efforts` and `compat` are opaque capability blocks (e.g.
+// `{ "max": "max" }` / `{ "supportsStore": false, "thinkingFormat": ... }`)
+// carried through as raw JSON strings for the same reason as `Provider::compat`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Model {
     pub id: String,
     pub name: String,
     pub provider: Option<String>,
+    pub context_window: Option<u64>,
+    pub max_tokens: Option<u64>,
+    // The input modalities the model accepts, e.g. `["text", "image"]`.
+    pub input: Option<Vec<String>>,
+    pub reasoning_efforts: Option<String>,
+    pub compat: Option<String>,
 }
 
 // Plugin entry (normalized representation).

@@ -116,7 +116,10 @@ impl Default for GeneralConfig {
     fn default() -> Self {
         Self {
             language: "en".to_string(),
-            auto_start: true,
+            // Auto-start is opt-in: enabling it registers the app with the
+            // operating system's login items, which must never happen without
+            // an explicit user action.
+            auto_start: false,
             check_updates: true,
         }
     }

@@ -15,6 +15,7 @@ use deepmate_core::testkit::FakeAdapter;
 use deepmate_core::{ActionRecord, Config, DataLayout};
 use deepmate_platform::SystemPlatform;
 use deepseek_harness::DeepSeekHarnessAdapter;
+use pi_agent::PiAgentAdapter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer};
@@ -22,9 +23,9 @@ use tracing_subscriber::{EnvFilter, Layer};
 // Assemble the adapter registry for the given adapter id.
 //
 // Supported ids: `test` (deterministic fake adapter), `minimal` (fake adapter
-// with only runtime support, for exercising the capability gate) and
-// `deepseek-harness` (the real adapter; `DEEPMATE_HARNESS_UI_URL` overrides
-// the harness UI URL).
+// with only runtime support, for exercising the capability gate),
+// `deepseek-harness` (the real harness; `DEEPMATE_HARNESS_UI_URL` overrides
+// the harness UI URL) and `pi-agent` (the Pi Agent coding assistant).
 pub fn build_registry(adapter_id: &str, layout: &DataLayout) -> anyhow::Result<AdapterRegistry> {
     let mut registry = AdapterRegistry::new();
     match adapter_id {
@@ -49,6 +50,9 @@ pub fn build_registry(adapter_id: &str, layout: &DataLayout) -> anyhow::Result<A
             }
             adapter = adapter.with_data_dir(layout.root().to_path_buf());
             registry.register(Box::new(adapter));
+        }
+        "pi-agent" => {
+            registry.register(Box::new(PiAgentAdapter::new()));
         }
         other => return Err(anyhow!("unknown adapter: {other}")),
     }
