@@ -343,9 +343,9 @@ Stage 6 (a second adapter):
   Settings Preferences
 - Shared `deepmate-app` service crate hosting the registry, config, logging
   and history helpers used by both the CLI and the desktop app
-- Tag-triggered release workflow publishing `deepmate` and
-  `deepmate-desktop` for Linux, macOS and Windows; macOS ships the desktop
-  app as a DMG
+- Releases are built and published locally (no CI publishing): the macOS
+  host produces the `DeepMate.app` DMG plus a CLI tar.gz with sha256
+  checksums, uploaded with `gh release create`
 - Cross-platform CI (fmt, clippy, tests) with a core purity gate and a
   separate Tauri desktop build job
 
