@@ -55,6 +55,7 @@ export function SettingsPage() {
   const setNotifyUpdates = useStore((s) => s.setNotifyUpdates);
   const setAutostart = useStore((s) => s.setAutostart);
   const checkUpdate = useStore((s) => s.checkUpdate);
+  const installUpdate = useStore((s) => s.installUpdate);
   const openRelease = useStore((s) => s.openRelease);
   const configExport = useStore((s) => s.configExport);
   const configImport = useStore((s) => s.configImport);
@@ -410,14 +411,24 @@ export function SettingsPage() {
                     {t("settings.checkNow")}
                   </Button>
                   {updateInfo && (
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      onClick={() => openRelease(updateInfo.url)}
-                      title={updateInfo.url}
-                    >
-                      {t("settings.updateAvailable", { version: updateInfo.latest_version })}
-                    </Button>
+                    <>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={installUpdate}
+                        disabled={busy}
+                      >
+                        {t("settings.installUpdate")}
+                      </Button>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={() => openRelease(updateInfo.url)}
+                        title={updateInfo.url}
+                      >
+                        {t("settings.updateAvailable", { version: updateInfo.latest_version })}
+                      </Button>
+                    </>
                   )}
                   {updateChecked && !updateInfo && (
                     <span className="text-small text-text-dim">{t("settings.upToDate")}</span>

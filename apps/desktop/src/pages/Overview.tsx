@@ -15,6 +15,7 @@ import {
   XCircle,
   MinusCircle,
   Sparkles,
+  Download,
 } from "lucide-react";
 import { useStore } from "../store";
 import { Button } from "../components/ui/button";
@@ -59,6 +60,7 @@ export function OverviewPage() {
   const openHarness = useStore((s) => s.openHarness);
   const runDoctor = useStore((s) => s.runDoctor);
   const updateInfo = useStore((s) => s.updateInfo);
+  const installUpdate = useStore((s) => s.installUpdate);
   const openRelease = useStore((s) => s.openRelease);
 
   useEffect(() => {
@@ -99,15 +101,27 @@ export function OverviewPage() {
               <Sparkles className="h-4 w-4 shrink-0 text-accent" />
               {t("overview.updateAvailable", { version: updateInfo.latest_version })}
             </div>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => openRelease(updateInfo.url)}
-              title={updateInfo.url}
-            >
-              <ExternalLink className="h-4 w-4" />
-              {t("overview.viewRelease")}
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={installUpdate}
+                disabled={busy}
+                title={t("overview.installUpdateHint")}
+              >
+                <Download className="h-4 w-4" />
+                {t("overview.installUpdate")}
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => openRelease(updateInfo.url)}
+                title={updateInfo.url}
+              >
+                <ExternalLink className="h-4 w-4" />
+                {t("overview.viewRelease")}
+              </Button>
+            </div>
           </CardContent>
         </Card>
       )}

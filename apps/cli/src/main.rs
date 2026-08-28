@@ -83,6 +83,8 @@ enum Command {
         #[command(subcommand)]
         action: ConfigAction,
     },
+    /// Update the CLI to the latest release (download, verify, self-replace).
+    Update,
 }
 
 #[derive(Debug, Subcommand)]
@@ -304,7 +306,13 @@ async fn run(cli: &Cli, registry: &AdapterRegistry, layout: &DataLayout) -> anyh
     }
 
     // DeepMate's own settings are adapter-independent, so the backup commands
-    // run before any adapter is resolved.
+    // run before any adapter is resolved. The self-update is the same: it
+    // replaces the running binary and has nothing to do with a harness.
+    if matches!(cli.command, Command::Update) {
+        update_self(cli.json).await?;
+        return Ok("cli.update".to_string());
+    }
+
     if let Command::Config { action } = &cli.command {
         return match action {
             ConfigAction::Export { path } => {
@@ -344,6 +352,7 @@ async fn run(cli: &Cli, registry: &AdapterRegistry, layout: &DataLayout) -> anyh
     let action = match &cli.command {
         Command::Adapters => unreachable!(),
         Command::Config { .. } => unreachable!(),
+        Command::Update => unreachable!(),
         Command::Detect => {
             let detection = adapter.detect().await?;
             if cli.json {
@@ -777,6 +786,180 @@ async fn check_for_updates(adapter: &dyn HarnessAdapter, plugins: Vec<Plugin>) -
         }
     }
     enriched
+}
+
+// The latest GitHub release, used by the self-update. `DEEPMATE_UPDATE_API_URL`
+// overrides the endpoint so the flow can be exercised against a test release.
+const UPDATE_API_URL: &str =
+    "https://api.github.com/repos/realchendahuang/DeepMate/releases/latest";
+
+#[derive(serde::Deserialize)]
+struct ReleaseResponse {
+    tag_name: String,
+    assets: Vec<ReleaseAssetResponse>,
+}
+
+#[derive(serde::Deserialize)]
+struct ReleaseAssetResponse {
+    name: String,
+    browser_download_url: String,
+}
+
+// Self-update: download the CLI archive for this platform, verify it against
+// the published sha256, extract the `deepmate` binary and replace the
+// running executable (rename-dance, safe on unix for a running binary).
+//
+// A no-op when the current version is already the latest.
+async fn update_self(json: bool) -> anyhow::Result<()> {
+    let current = env!("CARGO_PKG_VERSION");
+    let client = reqwest::Client::builder()
+        .user_agent(format!("deepmate/{current}"))
+        .timeout(std::time::Duration::from_secs(600))
+        .build()
+        .context("failed to build HTTP client")?;
+    let api =
+        std::env::var("DEEPMATE_UPDATE_API_URL").unwrap_or_else(|_| UPDATE_API_URL.to_string());
+
+    let release: ReleaseResponse = client
+        .get(&api)
+        .send()
+        .await
+        .context("update check failed")?
+        .error_for_status()
+        .context("update check failed")?
+        .json()
+        .await
+        .context("invalid release response")?;
+
+    if !deepmate_core::is_newer_version(&release.tag_name, current) {
+        if json {
+            println!(
+                "{}",
+                serde_json::json!({ "updated": false, "current": current })
+            );
+        } else {
+            println!("deepmate {current} is up to date");
+        }
+        return Ok(());
+    }
+
+    let assets: Vec<deepmate_core::ReleaseAsset> = release
+        .assets
+        .iter()
+        .map(|asset| deepmate_core::ReleaseAsset {
+            name: asset.name.clone(),
+            url: asset.browser_download_url.clone(),
+        })
+        .collect();
+    let triple = deepmate_core::target_triple();
+    let (tarball, checksum) =
+        deepmate_core::pick_release_asset(&assets, &triple, deepmate_core::AssetKind::Tarball)
+            .ok_or_else(|| {
+                anyhow!(
+                    "release {} has no CLI archive for {triple}",
+                    release.tag_name
+                )
+            })?;
+
+    let work = std::env::temp_dir().join(format!("deepmate-update-{}", std::process::id()));
+    std::fs::create_dir_all(&work).context("failed to create the update work directory")?;
+
+    let archive_path = work.join(&tarball.name);
+    let bytes = client
+        .get(&tarball.url)
+        .send()
+        .await
+        .context("failed to download the release archive")?
+        .error_for_status()
+        .context("failed to download the release archive")?
+        .bytes()
+        .await
+        .context("failed to download the release archive")?;
+    std::fs::write(&archive_path, &bytes).context("failed to write the release archive")?;
+
+    let sum_text = client
+        .get(&checksum.url)
+        .send()
+        .await
+        .context("failed to download the checksum")?
+        .error_for_status()
+        .context("failed to download the checksum")?
+        .text()
+        .await
+        .context("failed to download the checksum")?;
+    let expected = deepmate_core::parse_checksum_file(&sum_text)
+        .ok_or_else(|| anyhow!("the published checksum file is invalid"))?;
+    deepmate_core::verify_sha256(&archive_path, &expected)
+        .context("the downloaded archive failed verification")?;
+
+    let staged = work.join("deepmate.new");
+    extract_binary(&archive_path, "deepmate", &staged)
+        .context("failed to extract the binary from the archive")?;
+    let exe = replace_self(&staged)?;
+    let _ = std::fs::remove_dir_all(&work);
+
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "updated": true,
+                "from": current,
+                "to": release.tag_name.trim_start_matches('v'),
+                "path": exe.display().to_string(),
+            })
+        );
+    } else {
+        println!(
+            "updated deepmate {current} -> {}",
+            release.tag_name.trim_start_matches('v')
+        );
+        println!("installed at {}; re-run deepmate to use it", exe.display());
+    }
+    Ok(())
+}
+
+// Extract one file from a `.tar.gz` by its base name.
+fn extract_binary(
+    archive: &std::path::Path,
+    name: &str,
+    dest: &std::path::Path,
+) -> anyhow::Result<()> {
+    let file = std::fs::File::open(archive)?;
+    let gz = flate2::read::GzDecoder::new(file);
+    let mut tar = tar::Archive::new(gz);
+    for entry in tar.entries()? {
+        let mut entry = entry?;
+        let matches = entry
+            .path()?
+            .file_name()
+            .and_then(|part| part.to_str())
+            .is_some_and(|part| part == name);
+        if matches {
+            let mut out = std::fs::File::create(dest)?;
+            std::io::copy(&mut entry, &mut out)?;
+            return Ok(());
+        }
+    }
+    Err(anyhow!("the archive does not contain {name}"))
+}
+
+// Replace the running executable with `new_binary`, restoring the old file
+// if the copy fails.
+fn replace_self(new_binary: &std::path::Path) -> anyhow::Result<std::path::PathBuf> {
+    let exe = std::env::current_exe().context("cannot locate the running binary")?;
+    let backup = exe.with_extension("bak");
+    std::fs::rename(&exe, &backup).with_context(|| format!("cannot stage {}", exe.display()))?;
+    if let Err(err) = std::fs::copy(new_binary, &exe) {
+        let _ = std::fs::rename(&backup, &exe);
+        return Err(anyhow!("cannot install the new binary: {err}"));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755));
+    }
+    let _ = std::fs::remove_file(&backup);
+    Ok(exe)
 }
 
 // Reject commands the active adapter does not declare support for, instead

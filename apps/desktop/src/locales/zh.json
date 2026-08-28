@@ -30,7 +30,9 @@
     "runDoctorEmpty": "运行诊断以检查环境。",
     "suggestedAction": "建议操作：{{action}}",
     "updateAvailable": "DeepMate v{{version}} 已发布。",
-    "viewRelease": "查看发布"
+    "viewRelease": "查看发布",
+    "installUpdate": "下载并安装",
+    "installUpdateHint": "下载安装包、校验签名摘要并打开安装器。"
   },
   "plugins": {
     "title": "插件",
@@ -117,7 +119,8 @@
     "importSettings": "导入…",
     "checkNow": "立即检查",
     "upToDate": "已是最新版本。",
-    "updateAvailable": "新版本 v{{version}}"
+    "updateAvailable": "新版本 v{{version}}",
+    "installUpdate": "立即安装"
   },
   "status": {
     "running": "运行中",

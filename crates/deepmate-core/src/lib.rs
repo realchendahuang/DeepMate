@@ -23,4 +23,7 @@ pub use model::{
 };
 pub use registry::AdapterRegistry;
 pub use snapshot::{Snapshot, SnapshotReport, SnapshotStore};
-pub use update::is_newer_version;
+pub use update::{
+    is_newer_version, parse_checksum_file, pick_release_asset, target_triple, verify_sha256,
+    AssetKind, ReleaseAsset,
+};

@@ -216,6 +216,8 @@ deepmate snapshot import <name>
 deepmate snapshot list          List stored snapshots
 deepmate config export <path>  Write DeepMate's own settings to a portable file
 deepmate config import <path>  Replace DeepMate's own settings from a portable file
+deepmate update                Update the CLI: download the release archive,
+                               verify its sha256 and self-replace
 ```
 
 Commands that the active adapter does not declare support for are rejected
@@ -364,6 +366,10 @@ Stage 6 (a second adapter):
 - Update checking against the GitHub releases API (on by default, fails
   quiet when offline), surfaced as a banner on Overview and a check in
   Settings Preferences
+- Self-update loop: `deepmate update` downloads the release archive,
+  verifies its sha256 and replaces the running binary; the desktop app
+  downloads and checksum-verifies the release DMG and hands it to the OS
+  installer from the update banner
 - Shared `deepmate-app` service crate hosting the registry, config, logging
   and history helpers used by both the CLI and the desktop app
 - Releases are built and published locally (no CI publishing): the macOS

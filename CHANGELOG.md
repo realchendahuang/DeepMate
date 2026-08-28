@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Self-update loop:
+  - `deepmate update` — checks the latest release, downloads the CLI
+    archive for this platform, verifies it against the published sha256,
+    extracts the binary and replaces the running executable (a no-op when
+    already current).
+  - The desktop update banner and Settings gained "Download & install":
+    the release DMG is downloaded, checksum-verified and handed to the OS
+    installer; the drag-to-install step stays in the user's hands. A stale
+    banner clears itself when the install finds no newer release.
+  - Both flows can be exercised against a test release with
+    `DEEPMATE_UPDATE_API_URL`.
+- Update availability and asset selection (target-triple matching,
+  checksum parsing and verification) now live in the core's `update`
+  module, shared by the CLI and the desktop app.
+
 ## [0.7.0] - 2026-08-28
 
 ### Added

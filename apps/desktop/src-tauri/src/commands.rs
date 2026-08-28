@@ -741,10 +741,13 @@ const UPDATE_API_URL: &str =
 const UPDATE_TIMEOUT_SECS: u64 = 10;
 
 // Query the GitHub releases API for a newer DeepMate release. Shared by the
-// `check_update` command, the tray's check action and the startup
-// notification. `None` means the current version is the latest, or the check
-// could not complete (offline, rate limited, ...) — an update check must
-// fail quietly, never block the UI.
+// `check_update` command, the tray/startup notification and the install
+// flow. `None` means the current version is the latest, or the check could
+// not complete (offline, rate limited, ...) — an update check must fail
+// quietly, never block the UI.
+//
+// `DEEPMATE_UPDATE_API_URL` overrides the endpoint so the flow can be
+// exercised against a test release.
 pub(crate) async fn latest_release() -> Option<UpdateInfo> {
     let client = reqwest::Client::builder()
         .user_agent(format!("DeepMate/{}", env!("CARGO_PKG_VERSION")))
@@ -759,7 +762,8 @@ pub(crate) async fn latest_release() -> Option<UpdateInfo> {
         published_at: String,
     }
 
-    let release: Release = match client.get(UPDATE_API_URL).send().await {
+    let api = std::env::var("DEEPMATE_UPDATE_API_URL").unwrap_or_else(|_| UPDATE_API_URL.to_string());
+    let release: Release = match client.get(api).send().await {
         Ok(response) if response.status().is_success() => match response.json().await {
             Ok(release) => release,
             Err(err) => {
@@ -787,6 +791,141 @@ pub(crate) async fn latest_release() -> Option<UpdateInfo> {
         url: release.html_url,
         published_at: release.published_at,
     })
+}
+
+// The release document with its assets, for the install flow (richer than
+// `UpdateInfo`, which only feeds the banner).
+#[derive(Deserialize)]
+struct FullRelease {
+    tag_name: String,
+    assets: Vec<ReleaseAssetResponse>,
+}
+
+#[derive(Deserialize)]
+struct ReleaseAssetResponse {
+    name: String,
+    browser_download_url: String,
+}
+
+// What an install attempt ended up doing.
+#[derive(Serialize)]
+pub struct UpdateInstallOutcome {
+    // "up_to_date" or "downloaded".
+    pub status: String,
+    // The DMG that was verified and handed to the platform installer.
+    pub path: Option<String>,
+    pub version: Option<String>,
+}
+
+// The full install half of the update loop: fetch the latest release, pick
+// the DMG for this platform, download it, verify the published sha256 and
+// hand it to the OS installer. Downloaded installers are not run silently:
+// the DMG opens so the drag-to-install step stays in the user's hands.
+#[tauri::command]
+pub async fn update_install(state: State<'_, AppState>) -> Result<UpdateInstallOutcome, String> {
+    let client = reqwest::Client::builder()
+        .user_agent(format!("DeepMate/{}", env!("CARGO_PKG_VERSION")))
+        .timeout(std::time::Duration::from_secs(600))
+        .build()
+        .map_err(|e| format!("failed to build HTTP client: {e}"))?;
+    let api = std::env::var("DEEPMATE_UPDATE_API_URL").unwrap_or_else(|_| UPDATE_API_URL.to_string());
+
+    let release: FullRelease = client
+        .get(&api)
+        .send()
+        .await
+        .map_err(|e| format!("update check failed: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("update check failed: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("invalid release response: {e}"))?;
+
+    let current = env!("CARGO_PKG_VERSION");
+    let version = release.tag_name.trim_start_matches('v').to_string();
+    if !deepmate_core::is_newer_version(&release.tag_name, current) {
+        return Ok(UpdateInstallOutcome {
+            status: "up_to_date".to_string(),
+            path: None,
+            version: None,
+        });
+    }
+
+    let assets: Vec<deepmate_core::ReleaseAsset> = release
+        .assets
+        .iter()
+        .map(|asset| deepmate_core::ReleaseAsset {
+            name: asset.name.clone(),
+            url: asset.browser_download_url.clone(),
+        })
+        .collect();
+    let triple = deepmate_core::target_triple();
+    let (dmg, checksum) = deepmate_core::pick_release_asset(&assets, &triple, deepmate_core::AssetKind::Dmg)
+        .ok_or_else(|| format!("release {} has no desktop bundle for {triple}", version))?;
+
+    let work = std::env::temp_dir().join(format!("deepmate-update-{}", std::process::id()));
+    std::fs::create_dir_all(&work).map_err(|e| format!("failed to create the work directory: {e}"))?;
+    let dmg_path = work.join(&dmg.name);
+    let bytes = client
+        .get(&dmg.url)
+        .send()
+        .await
+        .map_err(|e| format!("failed to download the update: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("failed to download the update: {e}"))?
+        .bytes()
+        .await
+        .map_err(|e| format!("failed to download the update: {e}"))?;
+    std::fs::write(&dmg_path, &bytes).map_err(|e| format!("failed to write the update: {e}"))?;
+
+    let sum_text = client
+        .get(&checksum.url)
+        .send()
+        .await
+        .map_err(|e| format!("failed to download the checksum: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("failed to download the checksum: {e}"))?
+        .text()
+        .await
+        .map_err(|e| format!("failed to download the checksum: {e}"))?;
+    let expected = deepmate_core::parse_checksum_file(&sum_text)
+        .ok_or_else(|| "the published checksum file is invalid".to_string())?;
+    deepmate_core::verify_sha256(&dmg_path, &expected)
+        .map_err(|e| format!("the downloaded update failed verification: {e}"))?;
+
+    open_with_platform(&dmg_path).map_err(|e| format!("failed to open the installer: {e}"))?;
+    record_action(&state.layout, "app", "desktop.update.install".to_string());
+    Ok(UpdateInstallOutcome {
+        status: "downloaded".to_string(),
+        path: Some(dmg_path.display().to_string()),
+        version: Some(version),
+    })
+}
+
+// Hand a downloaded file to the platform's installer association.
+fn open_with_platform(path: &std::path::Path) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = std::process::Command::new("open");
+        command.arg(path);
+        command
+    };
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = std::process::Command::new("explorer");
+        command.arg(path);
+        command
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = {
+        let mut command = std::process::Command::new("xdg-open");
+        command.arg(path);
+        command
+    };
+    command
+        .status()
+        .map(|_| ())
+        .map_err(|e| format!("{e}"))
 }
 
 #[tauri::command]

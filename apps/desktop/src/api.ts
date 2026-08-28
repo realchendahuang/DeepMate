@@ -66,6 +66,10 @@ export const api = {
   autostartSet: (enabled: boolean) =>
     invoke<void>("autostart_set", { enabled }),
   checkUpdate: () => invoke<UpdateInfo | null>("check_update"),
+  updateInstall: () =>
+    invoke<{ status: string; path: string | null; version: string | null }>(
+      "update_install",
+    ),
   openUrl: (url: string) => invoke<void>("open_url", { url }),
   configExport: () => invoke<string | null>("config_export"),
   configImport: () => invoke<string | null>("config_import"),

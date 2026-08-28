@@ -30,7 +30,9 @@
     "runDoctorEmpty": "Run Doctor to diagnose the environment.",
     "suggestedAction": "Suggested action: {{action}}",
     "updateAvailable": "DeepMate v{{version}} is available.",
-    "viewRelease": "View release"
+    "viewRelease": "View release",
+    "installUpdate": "Download & install",
+    "installUpdateHint": "Downloads the release bundle, verifies its checksum and opens the installer."
   },
   "plugins": {
     "title": "Plugins",
@@ -117,7 +119,8 @@
     "importSettings": "Import…",
     "checkNow": "Check now",
     "upToDate": "You're on the latest version.",
-    "updateAvailable": "v{{version}} available"
+    "updateAvailable": "v{{version}} available",
+    "installUpdate": "Install now"
   },
   "status": {
     "running": "running",

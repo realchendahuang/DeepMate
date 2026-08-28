@@ -101,6 +101,7 @@ pub fn run() {
             commands::autostart_get,
             commands::autostart_set,
             commands::check_update,
+            commands::update_install,
             commands::open_url,
             commands::get_config,
         ])

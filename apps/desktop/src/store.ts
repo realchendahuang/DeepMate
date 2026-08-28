@@ -73,6 +73,9 @@ interface AppState {
   setNotifyUpdates: (enabled: boolean) => Promise<void>;
   setAutostart: (enabled: boolean) => Promise<void>;
   checkUpdate: () => Promise<void>;
+  // Download the desktop bundle for this platform, verify its checksum and
+  // hand it to the OS installer. A stale banner (already up to date) clears.
+  installUpdate: () => Promise<void>;
   openRelease: (url: string) => Promise<void>;
   configExport: () => Promise<void>;
   configImport: () => Promise<void>;
@@ -251,6 +254,12 @@ export const useStore = create<AppState>((set) => ({
   checkUpdate: async () => {
     const updateInfo = await run(set, () => api.checkUpdate());
     set({ updateInfo, updateChecked: true });
+  },
+  installUpdate: async () => {
+    const outcome = await run(set, () => api.updateInstall());
+    if (outcome.status === "up_to_date") {
+      set({ updateInfo: null, updateChecked: true });
+    }
   },
   openRelease: async (url: string) => {
     await run(set, () => api.openUrl(url));
