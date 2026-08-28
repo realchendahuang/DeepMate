@@ -52,12 +52,36 @@
     "search": "搜索",
     "searchTerms": "搜索词",
     "searchEmpty": "搜索市场以发现插件。",
+    "marketEmpty": "精选清单为空。搜索市场以发现插件。",
+    "all": "全部",
     "by": "来自 {{publisher}}",
     "installInto": "安装到配置文件 {{profile}}",
     "profileRequired": "请先填写配置文件。",
     "updated": "更新于 {{date}}",
     "popularity": "热度",
-    "quality": "质量"
+    "quality": "质量",
+    "trust": {
+      "official": "官方",
+      "vetted": "已收录",
+      "community": "社区"
+    },
+    "categories": {
+      "official": "官方",
+      "memory": "记忆",
+      "vision": "视觉",
+      "mcp": "MCP",
+      "chat": "聊天与消息",
+      "web": "网页",
+      "web-ui": "Web 界面",
+      "terminal": "终端",
+      "tui": "TUI",
+      "remote": "远程与 SSH",
+      "office": "办公与文档",
+      "dev": "开发工具",
+      "stats": "用量与成本",
+      "security": "安全与权限",
+      "automation": "自动化"
+    }
   },
   "settings": {
     "title": "设置",

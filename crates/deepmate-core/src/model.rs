@@ -167,6 +167,10 @@ pub struct MarketEntry {
     pub repository: Option<String>,
     pub publisher: Option<String>,
     pub updated: Option<String>,
+    // Functional category (e.g. "memory", "vision", "mcp"), when the source
+    // publishes one. Absent for raw npm search results.
+    #[serde(default)]
+    pub category: Option<String>,
     // Normalized trust scores in `0.0..=1.0`, when the source publishes them.
     // Popularity proxies adoption; quality proxies engineering hygiene.
     #[serde(default)]

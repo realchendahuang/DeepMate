@@ -125,6 +125,7 @@ impl FakeAdapter {
                 repository: Some("https://example.com/repo".to_string()),
                 publisher: Some("fake-publisher".to_string()),
                 updated: None,
+                category: None,
                 popularity: Some(0.72),
                 quality: Some(0.91),
             }],

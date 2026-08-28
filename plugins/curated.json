@@ -1,0 +1,686 @@
+{
+  "schema": 1,
+  "updated": "2026-08-28",
+  "plugins": [
+    {
+      "name": "@deepseek-ai/dsh-base",
+      "version": "^0.3",
+      "description": "Official base plugin bundle for DeepSeek Harness profiles",
+      "repository": "https://github.com/deepseek-ai/deepseek-harness",
+      "publisher": "deepseek-ai",
+      "added": "2026-08-28",
+      "trust": "official",
+      "category": "official"
+    },
+    {
+      "name": "@deepseek-ai/dsh-web-app",
+      "version": "^0.3",
+      "description": "Official web application plugin for DeepSeek Harness",
+      "repository": "https://github.com/deepseek-ai/deepseek-harness",
+      "publisher": "deepseek-ai",
+      "added": "2026-08-28",
+      "trust": "official",
+      "category": "official"
+    },
+    {
+      "name": "@aaravarr/dsh-subagent-max",
+      "version": "^0.1.4",
+      "description": "Subagent delegation with per-call model/provider override (host) + multi-panel live streaming subagent viewer (client)",
+      "repository": null,
+      "publisher": "aaravarr",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "memory"
+    },
+    {
+      "name": "@ahggg/dsh-side-chat",
+      "version": "^0.7.2",
+      "description": "Codex-style side conversations for DeepSeek Harness",
+      "repository": "https://github.com/AHGGG/dsh-side-chat.git",
+      "publisher": "ahggg",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "memory"
+    },
+    {
+      "name": "@aiwayds/dsh-tui-pi",
+      "version": "^1.0.0",
+      "description": "pi-style terminal UI for DeepSeek Harness (dsh) — pi-tui look & feel, dsh slash commands, GitHub light/dark themes, powerline footer",
+      "repository": "https://github.com/fan56/dsh-tui-pi.git",
+      "publisher": "aiwayds",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "tui"
+    },
+    {
+      "name": "@chenkai114/dsh-daemon",
+      "version": "^0.1.18",
+      "description": "dsh daemon: register the DeepSeek Harness web server (dsh web) as an auto-start, self-healing background service (LaunchAgent / systemd / cr",
+      "repository": "https://github.com/chenkai2/dsh-daemon.git",
+      "publisher": "chenkai114",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "automation"
+    },
+    {
+      "name": "@dsh-lens/dsh-lens",
+      "version": "^0.1.0",
+      "description": "TypeScript/JavaScript diagnostics lens for DeepSeek Harness",
+      "repository": "https://github.com/hajimixiaojie/dsh-lens.git",
+      "publisher": "hajimixiaojie",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "dev"
+    },
+    {
+      "name": "@huiliyi37/dsh-office",
+      "version": "^0.2.1",
+      "description": "Office document tools (xlsx / pdf / pptx / docx) for DeepSeek Harness: generate, read, and edit spreadsheets, PDFs, presentations, and Word ",
+      "repository": null,
+      "publisher": "huiliyi37",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "office"
+    },
+    {
+      "name": "@huiliyi37/dsh-tianshu-tui",
+      "version": "^0.1.2-rc.26",
+      "description": "dsh-tianshu-tui: an interactive terminal UI plugin for the official DeepSeek Harness — streaming markdown/tool cards, 16+ themes, slash comm",
+      "repository": "https://github.com/huiliyi37/dsh-tianshu-tui.git",
+      "publisher": "huiliyi37",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "tui"
+    },
+    {
+      "name": "@kongjianguan/dsh-tokstat",
+      "version": "^0.1.1",
+      "description": "dsh usage & performance statistics: settings-panel plugin + TUI (tokens / TTFT / TPS / cost)",
+      "repository": "https://github.com/kongjianguan/dsh-tokstat.git",
+      "publisher": "kongjianguan",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "stats"
+    },
+    {
+      "name": "@linxin666/dsh-chat-recovery",
+      "version": "^0.3.5",
+      "description": "Chat recovery for the dsh web GUI: fork-based editing and explicit retry of the last failed turn while preserving the original session",
+      "repository": "https://github.com/zhu1090093659/dsh-web.git",
+      "publisher": "linxin666",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "web-ui"
+    },
+    {
+      "name": "@linxin666/dsh-client-ui-git-graph",
+      "version": "^0.3.6",
+      "description": "External dsh web GUI plugin: a blank-session git branch selector + Git graph, with real host-side git operations and guards, as a dsh profil",
+      "repository": "https://github.com/zhu1090093659/dsh-web.git",
+      "publisher": "linxin666",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "dev"
+    },
+    {
+      "name": "@linxin666/dsh-client-ui-skill-explorer",
+      "version": "^0.3.6",
+      "description": "DSH skill center: browse loaded skills by source (bundled / project / user / custom / runtime), enable or disable, create and delete, in a w",
+      "repository": "https://github.com/zhu1090093659/dsh-web.git",
+      "publisher": "linxin666",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "dev"
+    },
+    {
+      "name": "@linxin666/dsh-client-ui-task-board",
+      "version": "^0.3.6",
+      "description": "Host-authoritative task board for the DSH Web GUI with real session execution, Host cron scheduling, and optional cross-platform idle-sleep ",
+      "repository": "https://github.com/zhu1090093659/dsh-web.git",
+      "publisher": "linxin666",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "dev"
+    },
+    {
+      "name": "@linxin666/dsh-desktop-launcher",
+      "version": "^0.3.6",
+      "description": "Desktop launcher + one-click shutdown for dsh: create a double-click desktop icon that starts dsh web and opens the Web GUI, plus a floating",
+      "repository": "https://github.com/zhu1090093659/dsh-web.git",
+      "publisher": "linxin666",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "dev"
+    },
+    {
+      "name": "@linxin666/dsh-doctor",
+      "version": "^0.3.6",
+      "description": "Transactional rescue mode for DSH profiles with a supervised launcher, isolated recovery capsule, deterministic repairs, health monitoring, ",
+      "repository": "https://github.com/zhu1090093659/dsh-web.git",
+      "publisher": "linxin666",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "dev"
+    },
+    {
+      "name": "@linxin666/dsh-live-stats",
+      "version": "^0.1.20",
+      "description": "Live token estimates and generation throughput for DSH Web",
+      "repository": "https://github.com/zhu1090093659/dsh-web-ui.git",
+      "publisher": "linxin666",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "stats"
+    },
+    {
+      "name": "@linxin666/dsh-ssh",
+      "version": "^0.3.6",
+      "description": "Remote SSH operations for the dsh web GUI: host config store (~/.dsh/dsh-ssh.json, import from ~/.ssh/config), a persistent ssh2 connection ",
+      "repository": "https://github.com/zhu1090093659/dsh-web.git",
+      "publisher": "linxin666",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "remote"
+    },
+    {
+      "name": "@michengai/dsh-skills-manager",
+      "version": "^0.1.30",
+      "description": "NPM-installable DSH Web plugin for safely loading and managing skills across DSH and common local Agents.",
+      "repository": "https://github.com/MichengAI/dsh-skills-manager.git",
+      "publisher": "michengai",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "dev"
+    },
+    {
+      "name": "@open-agfs/dsh-agfs",
+      "version": "^0.1.9",
+      "description": "Host file-browser web app over the dsh webserver with a /dsh-agfs command",
+      "repository": "https://github.com/openAGFS/dsh-agfs.git",
+      "publisher": "openagfs",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "remote"
+    },
+    {
+      "name": "@pinkbanana/dsh-balance",
+      "version": "^0.5.0",
+      "description": "DeepSeek Harness plugin for API balances, models, and multidimensional usage billing",
+      "repository": "https://github.com/crazywoola/dsh-balance.git",
+      "publisher": "pinkbanana",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "stats"
+    },
+    {
+      "name": "@qing3a/dsh-event-auditor",
+      "version": "^0.1.0",
+      "description": "Harness 事件流审计面板：观察事件类型、分发模式、计数与最近事件，帮助插件作者理解 harness 内部发生了什么",
+      "repository": "https://github.com/qing3a/dsh-event-auditor.git",
+      "publisher": "qing3a",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "security"
+    },
+    {
+      "name": "@qing3a/dsh-repo-context",
+      "version": "^0.1.0",
+      "description": "把 git 状态与仓库规范动态注入 system prompt：分支/脏文件数/最近提交 + 仓库规范指引（官方 system-prompt section/context/variable 缝隙插件）",
+      "repository": "https://github.com/qing3a/dsh-repo-context.git",
+      "publisher": "qing3a",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "dev"
+    },
+    {
+      "name": "@qing3a/dsh-tray",
+      "version": "^0.1.0",
+      "description": "Windows 系统托盘插件：托盘图标 + 菜单（打开界面/状态/退出）+ 气泡通知，基于 trayicon（exe 宿主，无 native 编译）",
+      "repository": "https://github.com/qing3a/dsh-tray.git",
+      "publisher": "qing3a",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "dev"
+    },
+    {
+      "name": "@visol-456/dsh-llm-fallback",
+      "version": "^0.1.3",
+      "description": "Provider fallback chain for the DeepSeek Harness LLM seam",
+      "repository": "https://github.com/visol-456/dsh-llm-fallback.git",
+      "publisher": "visol-456",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "automation"
+    },
+    {
+      "name": "@zhangfengshun/dsh-remote-ssh",
+      "version": "^2.1.6",
+      "description": "DSH web plugin: VSCode Remote-SSH-like remote development (SSH to supercomputers/servers, remote workspace, file explorer, integrated termin",
+      "repository": "https://github.com/ZhangFengshun/dsh-remote-ssh.git",
+      "publisher": "zhangfengshun",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "remote"
+    },
+    {
+      "name": "dsh-agent-message",
+      "version": "^1.5.1",
+      "description": "跨会话 Agent 通信：让 DeepSeek Harness 里不同的 Agent 会话互相收发消息。",
+      "repository": "https://github.com/GengDaPeng/dsh-agent-message.git",
+      "publisher": "gengdapeng",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "memory"
+    },
+    {
+      "name": "dsh-approve-for-me",
+      "version": "^0.2.2",
+      "description": "Rule-gated automatic approval for DeepSeek Harness sandbox escalations with an optional LLM reviewer and native human fallback.",
+      "repository": "https://github.com/timeance/dsh-approve-for-me.git",
+      "publisher": "timeance",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "security"
+    },
+    {
+      "name": "dsh-auth-gate",
+      "version": "^0.9.1",
+      "description": "Application-layer authentication plugin for the dsh web surface",
+      "repository": "https://github.com/TecFancy/dsh-auth-gate.git",
+      "publisher": "smpower",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "security"
+    },
+    {
+      "name": "dsh-background-agents",
+      "version": "^0.6.0",
+      "description": "Interactive long-session background agents plus persistent multi-agent team rooms for DeepSeek Harness: durable continuable child agents wit",
+      "repository": "https://github.com/PerryLink/dsh-background-agents.git",
+      "publisher": "perrylink",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "memory"
+    },
+    {
+      "name": "dsh-bash-terminal",
+      "version": "^0.3.14",
+      "description": "DSH plugin: one shell tool that runs commands through PowerShell, Git Bash, or WSL on Windows, with a user-chosen default terminal in the We",
+      "repository": "https://github.com/MAXeaglet/dsh-bash-terminal.git",
+      "publisher": "maxeagle",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "terminal"
+    },
+    {
+      "name": "dsh-better-sidebar",
+      "version": "^0.16.1",
+      "description": "DSH web plugin: a VSCode-like right sidebar (explorer / editor / terminal / git / browser), isolated per conversation session. Exposes a ser",
+      "repository": "https://github.com/omdsh-dev/DSH-better-sidebar",
+      "publisher": "huanlin",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "web-ui"
+    },
+    {
+      "name": "dsh-better-stats",
+      "version": "^0.1.16",
+      "description": "Enhanced DSH composer stats strip: official CNY cost, coherent live agent-team settlement, live LLM/tool timers, provider balance",
+      "repository": "https://github.com/null5069/dsh-better-stats.git",
+      "publisher": "null5069",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "stats"
+    },
+    {
+      "name": "dsh-calendar",
+      "version": "^0.4.0",
+      "description": "DSH 日历工具插件：通过 CalDAV 读写日历事件（Google / iCloud / Nextcloud / 自定义）",
+      "repository": "https://github.com/STARDUSTLC666/dsh-calendar.git",
+      "publisher": "stardustlc",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "office"
+    },
+    {
+      "name": "dsh-chat-import",
+      "version": "^0.8.0",
+      "description": "Import Claude Code / Codex / ChatGPT / Cursor / Gemini / Reasonix / Pi Coding Agent / opencode / ZCode / Grok Build / OpenClaw / Hermes / Ki",
+      "repository": "https://github.com/Nwflower/dsh-chat-import.git",
+      "publisher": "nwflower",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "chat"
+    },
+    {
+      "name": "dsh-chat-sync",
+      "version": "^0.3.5",
+      "description": "DSH plugin: auto-import local AI CLI conversations (Claude Code, Codex CLI, Cursor Agent) as real DSH sessions",
+      "repository": "https://github.com/nan1010082085/dsh-chat-sync.git",
+      "publisher": "apform-ui",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "chat"
+    },
+    {
+      "name": "dsh-claude-move",
+      "version": "^0.3.0",
+      "description": "Four-source migration wizard: copy Claude Code, Codex, OpenCode and Hermes sessions, memories, skills, instructions and slash commands into ",
+      "repository": "https://github.com/PerryLink/dsh-claude-move.git",
+      "publisher": "perrylink",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "chat"
+    },
+    {
+      "name": "dsh-doublecheck",
+      "version": "^0.9.0",
+      "description": "Delivery quality gate for DeepSeek Harness: grill the requirements, test the implementation, prove the delivery, and gate the handoff with a",
+      "repository": "https://github.com/PerryLink/dsh-doublecheck.git",
+      "publisher": "perrylink",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "dev"
+    },
+    {
+      "name": "dsh-email",
+      "version": "^0.8.0",
+      "description": "IMAP/SMTP email tools for DeepSeek Harness: list, read, search and send mail, with QQ/163/126/Sina/Aliyun/Gmail/Outlook/iCloud presets.",
+      "repository": "https://github.com/STARDUSTLC666/dsh-email.git",
+      "publisher": "stardustlc",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "chat"
+    },
+    {
+      "name": "dsh-fabric-host",
+      "version": "^0.1.11",
+      "description": "DSH session-event and activity projection adapter for dsh-fabric",
+      "repository": "https://github.com/monotykamary/dsh-fabric.git",
+      "publisher": "monotykamary",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "automation"
+    },
+    {
+      "name": "dsh-ffmpeg",
+      "version": "^0.3.0",
+      "description": "DSH 视频处理工具插件：ffmpeg_probe/cut/concat/encode/subtitle/extract/gif 七工具，进程走官方 subprocess 服务，超时树级终止、环境变量路径回退与多视频流探测，零运行时依赖（ffmpeg 本体除外）。",
+      "repository": "https://github.com/STARDUSTLC666/dsh-ffmpeg.git",
+      "publisher": "stardustlc",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "office"
+    },
+    {
+      "name": "dsh-flakefinder",
+      "version": "^0.3.0",
+      "description": "DSH 测试稳定性插件：flaky_detect/history/quarantine/clear/report 五工具，支持 vitest/jest/pytest/node:test，重复运行测试并识别不稳定用例，JUnit/TAP 完整解析，JSON 历史与隔离清单，零运行时",
+      "repository": "https://github.com/STARDUSTLC666/dsh-flakefinder.git",
+      "publisher": "stardustlc",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "dev"
+    },
+    {
+      "name": "dsh-full-remote",
+      "version": "^0.3.7",
+      "description": "DeepSeek Harness plugin for remote access: a token-gated reverse proxy keeps settings, credentials, and file access working over public tunn",
+      "repository": "https://github.com/JUANWANG-BUAA/dsh-full-remote.git",
+      "publisher": "juanwang",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "remote"
+    },
+    {
+      "name": "dsh-hdc-bridge",
+      "version": "^0.8.2",
+      "description": "DSH-native HarmonyOS dev-assistant plugin: hdc device bridge with a live device panel, official-first versioned API docs (SDK .d.ts + offlin",
+      "repository": "https://github.com/1na-ko/dsh-hdc-bridge.git",
+      "publisher": "inako",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "remote"
+    },
+    {
+      "name": "dsh-lan-access",
+      "version": "^0.1.3",
+      "description": "DSH plugin: bind the Web GUI to 0.0.0.0 for LAN access and polyfill crypto.randomUUID for non-secure (LAN HTTP) contexts. Trusted networks o",
+      "repository": "https://github.com/Leon0555/dsh-lan-access.git",
+      "publisher": "leon0555",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "remote"
+    },
+    {
+      "name": "dsh-mcp-adapter",
+      "version": "^0.6.3",
+      "description": "MCP adapter for DeepSeek Harness — one proxy tool instead of dumping every MCP schema into context.",
+      "repository": "https://github.com/NexusAgentX/dsh-mcp-adapter.git",
+      "publisher": "faithleysath",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "mcp"
+    },
+    {
+      "name": "dsh-mcp-skill-panel",
+      "version": "^0.5.3",
+      "description": "MCP 与技能管理面板：设置页展示 MCP 服务器与 Skill 目录，随时启停释放上下文占用；可选 AI 中间层（mcp_search/mcp_call）按需使用 MCP。",
+      "repository": "https://github.com/lilyblessing/dsh-mcp-skill-panel.git",
+      "publisher": "lilyblessing",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "mcp"
+    },
+    {
+      "name": "dsh-mnemon",
+      "version": "^0.3.5",
+      "description": "Composable three-tier memory control plane for DeepSeek Harness: persistent runtime context, searchable project documents, pluggable long-te",
+      "repository": "https://github.com/omdsh-dev/dsh-mnemon.git",
+      "publisher": "grivn",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "memory"
+    },
+    {
+      "name": "dsh-open-file",
+      "version": "^0.1.1-rc.2",
+      "description": "Workspace-bound arbitrary file upload, reading, OCR, and rendering for DeepSeek Harness.",
+      "repository": "https://github.com/hyper-dsh-plugins/dsh-open-file.git",
+      "publisher": "hope666",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "vision"
+    },
+    {
+      "name": "dsh-outline",
+      "version": "^0.1.6",
+      "description": "DSH web plugin: a realtime conversation outline panel (user questions + markdown headings) for the DeepSeek Harness Web GUI.",
+      "repository": "https://github.com/urzeye/dsh-outline",
+      "publisher": "urzeye",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "web-ui"
+    },
+    {
+      "name": "dsh-pdf-edit",
+      "version": "^0.4.5",
+      "description": "Style-locked PDF editor plugin for DeepSeek Harness — AI edits text, native renderer preserves layout (ships dsh-std Community v0.15 manifes",
+      "repository": "https://github.com/Whatsmore-nf/dsh-pdf-edit.git",
+      "publisher": "whatsmore",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "office"
+    },
+    {
+      "name": "dsh-permission-rules",
+      "version": "^0.6.1",
+      "description": "Declarative Claude Code-style permission rules plus a Codex-style process-level network policy for DeepSeek Harness: ordered allow/deny/ask ",
+      "repository": "https://github.com/PerryLink/dsh-permission-rules.git",
+      "publisher": "perrylink",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "security"
+    },
+    {
+      "name": "dsh-ringcentral",
+      "version": "^0.4.1",
+      "description": "RingCentral Team Messaging IM channel plugin for deepseek-harness (dsh)",
+      "repository": "https://github.com/ringclaw/dsh-ringcentral.git",
+      "publisher": "linzhen",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "chat"
+    },
+    {
+      "name": "dsh-routing-suite",
+      "version": "^0.1.2",
+      "description": "A lightweight, selectable smart-routing mode for DeepSeek Harness.",
+      "repository": "https://github.com/dragonbaba/dsh-routing-suite.git",
+      "publisher": "rpg_zaun",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "automation"
+    },
+    {
+      "name": "dsh-rss",
+      "version": "^0.3.0",
+      "description": "DSH RSS 订阅工具插件：管理订阅源、OPML 导入导出、抓取解析 RSS/Atom 并保留正文（rss_list / rss_add / rss_remove / rss_fetch / rss_check / rss_opml_export / rss_opml_impo",
+      "repository": "https://github.com/STARDUSTLC666/dsh-rss.git",
+      "publisher": "stardustlc",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "web"
+    },
+    {
+      "name": "dsh-slack",
+      "version": "^0.3.0",
+      "description": "DSH 社区插件：Slack 通知/桥接（v0.2 支持 Socket Mode 双向：收件箱 + 线程回复）",
+      "repository": "https://github.com/STARDUSTLC666/dsh-slack.git",
+      "publisher": "stardustlc",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "chat"
+    },
+    {
+      "name": "dsh-soul-md",
+      "version": "^0.5.9",
+      "description": "DeepSeek Harness 的 soul.md 风格人设 + 长期记忆插件：设置页输入人设卡名称和内容即可，文件由插件自动管理；可按工作区指定人设、聊天框可给会话单独切人设；AI 可自行演化人设与记忆（soul_read/soul_update/memory_*）。",
+      "repository": "https://github.com/Scorp1o117/dsh-soul-md.git",
+      "publisher": "scorp1o117",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "memory"
+    },
+    {
+      "name": "dsh-spend",
+      "version": "^0.6.2",
+      "description": "Token usage, multi-dimensional statistics, auto-detected billing plans (Code/Token) and estimated spend for the dsh web UI",
+      "repository": "https://github.com/nonewind/dsh-spend.git",
+      "publisher": "nonewind",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "stats"
+    },
+    {
+      "name": "dsh-talk",
+      "version": "^0.2.1",
+      "description": "Voice-first session loop for DeepSeek Harness: a composer microphone button with browser/local speech-to-text (Web Speech, FunASR, whisper.c",
+      "repository": "https://github.com/PerryLink/dsh-talk.git",
+      "publisher": "perrylink",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "chat"
+    },
+    {
+      "name": "dsh-tdai-memory",
+      "version": "^0.2.14",
+      "description": "DeepSeek Harness 的 TencentDB Agent Memory 移植：L0 对话捕获 → L1 结构化记忆提取 → L2 场景/L3 画像，自动召回注入 + 记忆/对话搜索工具；复用现有 ~/.memory-tencentdb/memory-tdai 数据；附",
+      "repository": "https://github.com/Scorp1o117/dsh-tdai-memory.git",
+      "publisher": "scorp1o117",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "memory"
+    },
+    {
+      "name": "dsh-tool-vision",
+      "version": "^0.6.4",
+      "description": "DeepSeek Harness 外置视觉模型插件：inspect_image 把本地图片或 http(s) 图片 URL 发给任意 OpenAI 兼容端点，视觉模型看图的文字回答直接带回对话；附 Web UI 设置栏。",
+      "repository": "https://github.com/Scorp1o117/dsh-tool-vision.git",
+      "publisher": "scorp1o117",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "vision"
+    },
+    {
+      "name": "dsh-turn-index",
+      "version": "^0.1.1",
+      "description": "对话轮次索引：Web GUI 右侧边栏列出每一轮用户提问，点击跳转到对应位置 (Turn index sidebar for the DeepSeek Harness web GUI: one entry per user turn, click to jump)",
+      "repository": "https://github.com/Simon314620/dsh-turn-index.git",
+      "publisher": "simon314620",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "web-ui"
+    },
+    {
+      "name": "dsh-ui-quote-selection",
+      "version": "^0.1.0",
+      "description": "DSH web client plugin: select text in a chat message and quote it into the composer as an inline reference chip; the full text materializes ",
+      "repository": "https://github.com/nekogpt/dsh-ui-quote-selection.git",
+      "publisher": "nekogpt",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "web-ui"
+    },
+    {
+      "name": "dsh-univer-office",
+      "version": "^0.2.10",
+      "description": "DSH × Univer integration with a bundled collaboration Gateway and Viewer: inline previews, live floating Worktree windows, and session-end r",
+      "repository": "https://github.com/dream-num/dsh-univer-office.git",
+      "publisher": "jikkai",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "office"
+    },
+    {
+      "name": "dsh-vision-proxy",
+      "version": "^0.4.1",
+      "description": "DeepSeek brain + automatic image transcription for DeepSeek Harness: a deepseek-vision provider route that transcribes attached images to te",
+      "repository": "https://github.com/Flyvhidbwo/dsh-vision-proxy.git",
+      "publisher": "flylll",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "vision"
+    },
+    {
+      "name": "dsh-web-access",
+      "version": "^0.2.4",
+      "description": "Web access for DeepSeek Harness — multi-provider search/fetch on ctx.web, plus GitHub/PDF/YouTube extraction.",
+      "repository": "https://github.com/NexusAgentX/dsh-web-access.git",
+      "publisher": "faithleysath",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "web"
+    },
+    {
+      "name": "dsh-wechat",
+      "version": "^0.7.2",
+      "description": "Bridge WeChat (iLink bot) to DeepSeek Harness (DSH)",
+      "repository": "https://github.com/pan17/dsh-wechat.git",
+      "publisher": "panpan2026",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "chat"
+    },
+    {
+      "name": "dsh-win32",
+      "version": "^0.17.2",
+      "description": "Fix and diagnose DeepSeek Harness on native Windows. Official PowerShell, Workspace Write, shortcuts, and legacy preset repair. No WSL.",
+      "repository": "https://github.com/sjh9714/dsh-win32.git",
+      "publisher": "jinhyuk9714",
+      "added": "2026-08-28",
+      "trust": "vetted",
+      "category": "terminal"
+    }
+  ]
+}

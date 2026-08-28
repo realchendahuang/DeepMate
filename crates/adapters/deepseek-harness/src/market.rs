@@ -2,8 +2,8 @@
 //
 // DeepSeek Harness plugins are npm packages, so the market is the public npm
 // registry. Search results are normalized into core MarketEntry records and
-// split into curated (the official harness vendor scope) and community
-// sources.
+// split into curated (the DeepMate-maintained plugin list in this repository)
+// and community (raw npm search) sources.
 //
 // Results are cached in the DeepMate data directory
 // (`cache/marketplace.json`, single most-recent query) so repeated searches
@@ -19,13 +19,18 @@ use deepmate_core::model::{
 
 const NPM_SEARCH_URL: &str = "https://registry.npmjs.org/-/v1/search";
 const NPM_REGISTRY_URL: &str = "https://registry.npmjs.org";
-const CURATED_SCOPE: &str = "@deepseek-ai";
-// `package.engines` keys a plugin may declare its harness requirement under.
+// The curated plugin list lives in this repository (`plugins/curated.json`)
+// and is fetched from its raw GitHub URL. `DEEPMATE_CURATED_LIST_URL`
+// overrides it for tests and mirrors.
+const CURATED_LIST_URL: &str =
+    "https://raw.githubusercontent.com/realchendahuang/DeepMate/main/plugins/curated.json";
+const CURATED_LIST_ENV: &str = "DEEPMATE_CURATED_LIST_URL";
 const HARNESS_ENGINE_KEYS: [&str; 2] = ["dsh", "deepseek-harness"];
 const SEARCH_SIZE: usize = 15;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const CACHE_DIR: &str = "cache";
 const CACHE_FILENAME: &str = "marketplace.json";
+const CURATED_CACHE_FILENAME: &str = "curated.json";
 // Keep the cache in sync with `Config.market.refresh_interval_seconds`
 // (1 hour by default).
 const CACHE_TTL: Duration = Duration::from_secs(3600);
@@ -35,6 +40,7 @@ const CACHE_TTL: Duration = Duration::from_secs(3600);
 #[derive(Debug, Clone)]
 pub struct Market {
     cache_path: Option<PathBuf>,
+    curated_cache_path: Option<PathBuf>,
     // The HTTP client is built once by the adapter and shared across searches
     // (and across search calls) so connections are reused instead of paying
     // for a new TLS handshake per query. reqwest::Client clones share the same
@@ -45,7 +51,12 @@ pub struct Market {
 impl Market {
     pub fn new(cache_root: Option<PathBuf>, client: reqwest::Client) -> Self {
         Self {
-            cache_path: cache_root.map(|root| root.join(CACHE_DIR).join(CACHE_FILENAME)),
+            cache_path: cache_root
+                .as_ref()
+                .map(|root| root.join(CACHE_DIR).join(CACHE_FILENAME)),
+            curated_cache_path: cache_root
+                .as_ref()
+                .map(|root| root.join(CACHE_DIR).join(CURATED_CACHE_FILENAME)),
             client,
         }
     }
@@ -60,6 +71,25 @@ impl Market {
         if let Some(path) = &self.cache_path {
             if let Err(err) = store_cache(path, query, &entries) {
                 tracing::warn!(error = %err, "failed to write market cache");
+            }
+        }
+        Ok(entries)
+    }
+
+    // The curated plugin list, fetched from this repository and cached under
+    // the data directory. A stale or missing cache falls back to the network;
+    // a network failure degrades to the cached copy when one exists, and to
+    // an empty list otherwise (the curated source is a convenience, never a
+    // hard dependency of the market).
+    pub async fn curated(&self) -> CoreResult<Vec<MarketEntry>> {
+        if let Some(entries) = self.cached_curated() {
+            return Ok(entries);
+        }
+        let url = std::env::var(CURATED_LIST_ENV).unwrap_or_else(|_| CURATED_LIST_URL.to_string());
+        let entries = fetch_curated(&self.client, &url).await?;
+        if let Some(path) = &self.curated_cache_path {
+            if let Err(err) = store_curated_cache(path, &entries) {
+                tracing::warn!(error = %err, "failed to write curated list cache");
             }
         }
         Ok(entries)
@@ -111,6 +141,23 @@ impl Market {
         }
         Some(file.entries)
     }
+
+    // The cached curated list, when fresh. Unlike the search cache, a stale
+    // copy is still served as a fallback by `curated()` when the network
+    // fetch fails, so the curated source keeps working offline.
+    fn cached_curated(&self) -> Option<Vec<MarketEntry>> {
+        let path = self.curated_cache_path.as_ref()?;
+        let text = std::fs::read_to_string(path).ok()?;
+        let file: CuratedCacheFile = serde_json::from_str(&text).ok()?;
+        let updated = chrono::DateTime::parse_from_rfc3339(&file.updated).ok()?;
+        let age = (chrono::Utc::now() - updated.with_timezone(&chrono::Utc))
+            .to_std()
+            .ok()?;
+        if age > CACHE_TTL {
+            return None;
+        }
+        Some(file.entries)
+    }
 }
 
 // Build the shared HTTP client for market requests. Falls back to the
@@ -148,11 +195,9 @@ async fn search_npm(client: &reqwest::Client, query: &str) -> CoreResult<Vec<Mar
         .into_iter()
         .map(|obj| {
             let name = obj.package.name;
-            let source = if name.starts_with(CURATED_SCOPE) {
-                MarketSource::Curated
-            } else {
-                MarketSource::Community
-            };
+            // npm search results are community entries; the curated source is
+            // the DeepMate-maintained list, merged in by the adapter.
+            let source = MarketSource::Community;
             let (popularity, quality) = obj
                 .score
                 .and_then(|score| score.detail)
@@ -170,6 +215,7 @@ async fn search_npm(client: &reqwest::Client, query: &str) -> CoreResult<Vec<Mar
                     .publisher
                     .and_then(|publisher| publisher.username.or(publisher.name)),
                 updated: obj.package.date,
+                category: None,
                 popularity,
                 quality,
             }
@@ -256,14 +302,68 @@ fn compat_from_packument(text: &str, harness_version: Option<&str>) -> CoreResul
     })
 }
 
+// Fetch and normalize the curated plugin list. The list is a static JSON
+// document in the DeepMate repository; entries are normalized into the same
+// MarketEntry records the npm search produces, so the rest of the pipeline
+// (compat checks, installation, trust display) is shared.
+async fn fetch_curated(client: &reqwest::Client, url: &str) -> CoreResult<Vec<MarketEntry>> {
+    let response =
+        client.get(url).send().await.map_err(|err| {
+            CoreError::InvalidState(format!("curated list request failed: {err}"))
+        })?;
+    if !response.status().is_success() {
+        return Err(CoreError::InvalidState(format!(
+            "curated list returned HTTP {}",
+            response.status()
+        )));
+    }
+    let text = response
+        .text()
+        .await
+        .map_err(|err| CoreError::InvalidState(format!("invalid curated list response: {err}")))?;
+    curated_from_json(&text)
+}
+
+// Parse a curated list document into MarketEntry records. Pure so it can be
+// tested without network access. A list with a schema version newer than the
+// one this build understands is rejected rather than partially interpreted.
+fn curated_from_json(text: &str) -> CoreResult<Vec<MarketEntry>> {
+    let list: CuratedList = serde_json::from_str(text)
+        .map_err(|err| CoreError::InvalidState(format!("invalid curated list: {err}")))?;
+    if list.schema > CURATED_SCHEMA {
+        return Err(CoreError::InvalidState(format!(
+            "curated list schema {} is newer than this build supports ({CURATED_SCHEMA})",
+            list.schema
+        )));
+    }
+    Ok(list
+        .plugins
+        .into_iter()
+        .map(|plugin| MarketEntry {
+            id: plugin.name.clone(),
+            name: plugin.name,
+            description: Some(plugin.description),
+            version: Some(plugin.version),
+            source: MarketSource::Curated,
+            repository: plugin.repository,
+            publisher: plugin.publisher,
+            updated: Some(plugin.added),
+            category: plugin.category,
+            popularity: None,
+            quality: None,
+        })
+        .collect())
+}
+
 // The market sources the DeepSeek Harness adapter can discover from: the
-// curated harness vendor npm scope and the wider public registry.
+// curated plugin list maintained in the DeepMate repository and the wider
+// public registry.
 pub fn market_sources() -> Vec<MarketSourceInfo> {
     vec![
         MarketSourceInfo {
             id: "curated".to_string(),
             name: "Curated".to_string(),
-            description: format!("official plugins from the {CURATED_SCOPE} npm scope"),
+            description: "plugins reviewed and listed by the DeepMate maintainers".to_string(),
             source: MarketSource::Curated,
         },
         MarketSourceInfo {
@@ -273,6 +373,28 @@ pub fn market_sources() -> Vec<MarketSourceInfo> {
             source: MarketSource::Community,
         },
     ]
+}
+
+// The curated plugin list document, as maintained in the DeepMate repository
+// (`plugins/curated.json`). `schema` gates forward compatibility: a newer
+// schema is refused instead of misread.
+const CURATED_SCHEMA: u32 = 1;
+
+#[derive(Debug, serde::Deserialize)]
+struct CuratedList {
+    schema: u32,
+    plugins: Vec<CuratedPlugin>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct CuratedPlugin {
+    name: String,
+    version: String,
+    description: String,
+    repository: Option<String>,
+    publisher: Option<String>,
+    added: String,
+    category: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -347,6 +469,13 @@ struct CacheFile {
     entries: Vec<MarketEntry>,
 }
 
+// The on-disk curated list cache: the normalized entries plus a timestamp.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct CuratedCacheFile {
+    updated: String,
+    entries: Vec<MarketEntry>,
+}
+
 fn store_cache(path: &Path, query: &str, entries: &[MarketEntry]) -> CoreResult<()> {
     let file = CacheFile {
         updated: chrono::Utc::now().to_rfc3339(),
@@ -363,16 +492,100 @@ fn store_cache(path: &Path, query: &str, entries: &[MarketEntry]) -> CoreResult<
     Ok(())
 }
 
+fn store_curated_cache(path: &Path, entries: &[MarketEntry]) -> CoreResult<()> {
+    let file = CuratedCacheFile {
+        updated: chrono::Utc::now().to_rfc3339(),
+        entries: entries.to_vec(),
+    };
+    let text = serde_json::to_string_pretty(&file).map_err(|err| {
+        CoreError::InvalidState(format!("failed to serialize curated list cache: {err}"))
+    })?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, text)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn curated_scope_classification_is_stable() {
-        // The classification lives in the search mapping; the scope constant
-        // is the contract with the harness vendor's npm scope.
-        assert!(CURATED_SCOPE.starts_with('@'));
-        assert!(CURATED_SCOPE.ends_with("-ai") || CURATED_SCOPE.contains('/'));
+    fn curated_list_parses_into_curated_entries() {
+        let list = r#"{
+            "schema": 1,
+            "updated": "2026-08-28",
+            "plugins": [
+                {
+                    "name": "dsh-mnemon",
+                    "version": "^0.2",
+                    "description": "memory",
+                    "repository": "https://github.com/example/dsh-mnemon",
+                    "publisher": "someone",
+                    "added": "2026-08-28",
+                    "trust": "vetted"
+                }
+            ]
+        }"#;
+        let entries = curated_from_json(list).unwrap();
+        assert_eq!(entries.len(), 1);
+        let entry = &entries[0];
+        assert_eq!(entry.id, "dsh-mnemon");
+        assert_eq!(entry.source, MarketSource::Curated);
+        assert_eq!(entry.version.as_deref(), Some("^0.2"));
+        assert_eq!(entry.description.as_deref(), Some("memory"));
+        assert_eq!(
+            entry.repository.as_deref(),
+            Some("https://github.com/example/dsh-mnemon")
+        );
+        assert_eq!(entry.publisher.as_deref(), Some("someone"));
+        assert_eq!(entry.updated.as_deref(), Some("2026-08-28"));
+        assert_eq!(entry.popularity, None);
+        assert_eq!(entry.quality, None);
+    }
+
+    #[test]
+    fn curated_list_rejects_newer_schema() {
+        let list = r#"{
+            "schema": 2,
+            "plugins": []
+        }"#;
+        assert!(curated_from_json(list).is_err());
+    }
+
+    #[test]
+    fn curated_list_rejects_invalid_json() {
+        assert!(curated_from_json("not json").is_err());
+    }
+
+    #[test]
+    fn curated_cache_roundtrip_serves_entries() {
+        let dir = std::env::temp_dir().join(format!(
+            "deepmate-curated-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let market = Market::new(Some(dir), build_http_client());
+        let entries = vec![MarketEntry {
+            id: "dsh-mnemon".to_string(),
+            name: "dsh-mnemon".to_string(),
+            description: Some("memory".to_string()),
+            version: Some("0.2.14".to_string()),
+            source: MarketSource::Curated,
+            repository: Some("https://github.com/example/dsh-mnemon".to_string()),
+            publisher: Some("someone".to_string()),
+            updated: Some("2026-01-01T00:00:00.000Z".to_string()),
+            category: Some("memory".to_string()),
+            popularity: None,
+            quality: None,
+        }];
+        store_curated_cache(market.curated_cache_path.as_ref().unwrap(), &entries).unwrap();
+        let cached = market.cached_curated().expect("fresh cache must hit");
+        assert_eq!(cached, entries);
     }
 
     #[test]
@@ -405,6 +618,7 @@ mod tests {
             repository: Some("https://github.com/example/dsh-mnemon".to_string()),
             publisher: Some("someone".to_string()),
             updated: Some("2026-01-01T00:00:00.000Z".to_string()),
+            category: None,
             popularity: Some(0.4),
             quality: Some(0.9),
         }];

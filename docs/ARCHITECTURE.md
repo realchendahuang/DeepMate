@@ -438,7 +438,7 @@ Marketplace support is source-driven.
 ```text
 MarketSource
 │
-├── curated registry
+├── curated list (DeepMate-maintained plugins/curated.json)
 ├── npm-compatible registry
 ├── GitHub-backed source
 ├── private registry
@@ -447,6 +447,16 @@ MarketSource
 ```
 
 Each source normalizes data into a shared `PluginRecord` model.
+
+The curated source is a static JSON document maintained in the DeepMate
+repository (`plugins/curated.json`). DeepMate fetches it from the raw GitHub
+URL at runtime, caches it under the data directory, and merges it ahead of
+npm search results so curated entries always surface first. The list is the
+curation; installation still happens through the npm registry, so version
+ranges, compatibility checks and updates are shared with community entries.
+`DEEPMATE_CURATED_LIST_URL` overrides the fetch URL for tests and mirrors.
+A list with a `schema` newer than the build understands is refused rather
+than partially interpreted.
 
 Example fields:
 
@@ -502,6 +512,7 @@ Conceptual data layout:
 │
 ├── cache/
 │   ├── marketplace.json
+│   ├── curated.json
 │   └── plugin-metadata.json
 │
 ├── history/
@@ -550,6 +561,7 @@ Examples:
 
 ```text
 cache/marketplace.json
+cache/curated.json
 cache/plugin-metadata.json
 snapshots/coding.json
 ```

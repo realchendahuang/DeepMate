@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Download, RefreshCw, Trash2, Search, Package, ShoppingBag } from "lucide-react";
 import { useStore } from "../store";
@@ -9,6 +9,27 @@ import { EmptyState } from "../components/ui/data-list";
 import { PageBody, PageHeader } from "../components/ui/page";
 import { Segmented } from "../components/ui/segmented";
 import { Input } from "../components/ui/input";
+
+// Curated storefront categories, in display order. Keys map to
+// `plugins.categories.*` in the locale files; unknown categories fall back
+// to their raw key.
+const CATEGORY_ORDER = [
+  "official",
+  "memory",
+  "vision",
+  "mcp",
+  "chat",
+  "web",
+  "web-ui",
+  "terminal",
+  "tui",
+  "remote",
+  "office",
+  "dev",
+  "stats",
+  "security",
+  "automation",
+];
 
 export function PluginsPage() {
   const { t } = useTranslation();
@@ -41,6 +62,8 @@ export function PluginsContent({ tab }: PluginsContentProps) {
   const [installProfile, setInstallProfile] = useState("web");
   const [installSpec, setInstallSpec] = useState("");
   const [query, setQuery] = useState("");
+  // Active category filter on the market tab; null shows every entry.
+  const [category, setCategory] = useState<string | null>(null);
 
   const plugins = useStore((s) => s.plugins);
   const marketSources = useStore((s) => s.marketSources);
@@ -57,7 +80,29 @@ export function PluginsContent({ tab }: PluginsContentProps) {
   useEffect(() => {
     loadPlugins();
     loadMarketSources();
-  }, [loadPlugins, loadMarketSources]);
+    // The market tab opens on the curated storefront: an empty query shows
+    // the curated list without hitting the npm search.
+    searchMarket("");
+  }, [loadPlugins, loadMarketSources, searchMarket]);
+
+  // Category chips are derived from the curated entries, in display order.
+  // npm search results carry no category and only appear under "All".
+  const categories = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const entry of marketEntries) {
+      if (!entry.category) continue;
+      counts.set(entry.category, (counts.get(entry.category) ?? 0) + 1);
+    }
+    return CATEGORY_ORDER.filter((key) => counts.has(key)).map((key) => ({
+      key,
+      count: counts.get(key)!,
+    }));
+  }, [marketEntries]);
+
+  const visibleEntries = useMemo(() => {
+    if (!category) return marketEntries;
+    return marketEntries.filter((entry) => entry.category === category);
+  }, [marketEntries, category]);
 
   const doInstall = () => {
     if (installSpec) installPlugin(installProfile, installSpec);
@@ -166,6 +211,38 @@ export function PluginsContent({ tab }: PluginsContentProps) {
             </CardContent>
           </Card>
 
+          {categories.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setCategory(null)}
+                className={`rounded-full border px-3 py-1 text-small font-medium transition-colors ${
+                  category === null
+                    ? "border-accent/40 bg-accent/10 text-accent"
+                    : "border-border bg-panel-2 text-text-dim hover:bg-hover"
+                }`}
+              >
+                {t("plugins.all")}
+                <span className="ml-1.5 tabular-nums opacity-70">{marketEntries.length}</span>
+              </button>
+              {categories.map(({ key, count }) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setCategory(category === key ? null : key)}
+                  className={`rounded-full border px-3 py-1 text-small font-medium transition-colors ${
+                    category === key
+                      ? "border-accent/40 bg-accent/10 text-accent"
+                      : "border-border bg-panel-2 text-text-dim hover:bg-hover"
+                  }`}
+                >
+                  {t(`plugins.categories.${key}`, { defaultValue: key })}
+                  <span className="ml-1.5 tabular-nums opacity-70">{count}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
           {marketSources.length > 0 && (
             <Card>
               <CardContent className="p-4">
@@ -182,18 +259,23 @@ export function PluginsContent({ tab }: PluginsContentProps) {
             </Card>
           )}
 
-          {marketEntries.length === 0 ? (
+          {visibleEntries.length === 0 ? (
             <EmptyState icon={<ShoppingBag className="h-8 w-8 text-text-faint" />}>
-              {t("plugins.searchEmpty")}
+              {query ? t("plugins.searchEmpty") : t("plugins.marketEmpty")}
             </EmptyState>
           ) : (
             <Card className="overflow-hidden">
               <div className="divide-y divide-border">
-                {marketEntries.map((entry) => (
+                {visibleEntries.map((entry) => (
                   <div key={entry.id} className="p-4">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-heading font-semibold text-text">{entry.id}</span>
-                      <Badge variant={entry.source === "curated" ? "accent" : "neutral"}>{entry.source}</Badge>
+                      <TrustBadge source={entry.source} category={entry.category} />
+                      {entry.category && (
+                        <Badge variant="neutral" dot={false}>
+                          {t(`plugins.categories.${entry.category}`, { defaultValue: entry.category })}
+                        </Badge>
+                      )}
                       {entry.version && <Badge variant="skip" dot={false}>v{entry.version}</Badge>}
                       {entry.publisher && <span className="text-small text-text-faint">{t("plugins.by", { publisher: entry.publisher })}</span>}
                       <span className="flex-1" />
@@ -232,6 +314,20 @@ export function PluginsContent({ tab }: PluginsContentProps) {
       )}
     </>
   );
+}
+
+// Source trust badge: curated entries are split into official (DeepSeek
+// Harness vendor, category "official") and vetted (reviewed by the DeepMate
+// maintainers); npm search results are community.
+function TrustBadge({ source, category }: { source: "curated" | "community"; category: string | null }) {
+  const { t } = useTranslation();
+  if (source === "community") {
+    return <Badge variant="neutral">{t("plugins.trust.community")}</Badge>;
+  }
+  if (category === "official") {
+    return <Badge variant="accent">{t("plugins.trust.official")}</Badge>;
+  }
+  return <Badge variant="accent">{t("plugins.trust.vetted")}</Badge>;
 }
 
 // A compact 0-100 meter for a registry trust score; rendered only when the

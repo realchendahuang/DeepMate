@@ -90,6 +90,9 @@ export interface MarketEntry {
   repository: string | null;
   publisher: string | null;
   updated: string | null;
+  // Functional category (e.g. "memory", "vision", "mcp"), when the source
+  // publishes one. Absent for raw npm search results.
+  category: string | null;
   // Trust scores in 0..1, when the registry publishes them.
   popularity: number | null;
   quality: number | null;

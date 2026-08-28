@@ -456,9 +456,23 @@ impl HarnessAdapter for DeepSeekHarnessAdapter {
     }
 
     async fn search_plugins(&self, query: &str) -> CoreResult<Vec<MarketEntry>> {
-        market::Market::new(self.data_dir.clone(), self.http.clone())
-            .search(query)
-            .await
+        let market = market::Market::new(self.data_dir.clone(), self.http.clone());
+        // The curated list is merged into every search so the curated source
+        // is visible without a dedicated query. An empty query skips the npm
+        // search entirely and shows the curated list alone — that is the
+        // storefront the desktop market tab opens on. A curated entry that
+        // also matches the npm results keeps its curated source (and its
+        // curated metadata) by taking precedence.
+        let curated = market.curated().await.unwrap_or_default();
+        if query.trim().is_empty() {
+            return Ok(curated);
+        }
+        let mut entries = market.search(query).await?;
+        let curated_ids: std::collections::HashSet<&str> =
+            curated.iter().map(|entry| entry.id.as_str()).collect();
+        entries.retain(|entry| !curated_ids.contains(entry.id.as_str()));
+        entries.splice(0..0, curated);
+        Ok(entries)
     }
 
     async fn market_sources(&self) -> CoreResult<Vec<MarketSourceInfo>> {

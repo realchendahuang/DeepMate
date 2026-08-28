@@ -246,6 +246,7 @@ DeepMate-owned data follows a simple file-based structure:
 │   └── deepseek-harness.toml
 ├── cache/
 │   ├── marketplace.json
+│   ├── curated.json
 │   └── plugin-metadata.json
 ├── history/
 │   ├── actions.jsonl
@@ -329,9 +330,10 @@ Stage 6 (a second adapter):
 - Plugin lifecycle (install / remove / update) forwarded to the harness's own
   `dsh plugin` workflow, so profile and bundle reconciliation stay owned by
   the harness
-- Marketplace search backed by the npm registry, with curated (`@deepseek-ai`)
-  vs community source classification, provenance metadata (publisher,
-  repository, last-updated) and an on-disk query cache
+- Marketplace search backed by the npm registry, with a curated source driven
+  by the DeepMate-maintained plugin list (`plugins/curated.json`, fetched
+  from this repository and cached) vs community npm results, provenance
+  metadata (publisher, repository, last-updated) and an on-disk query cache
 - Portable snapshots: `snapshot export / import / list` capture a normalized
   inventory (profiles, providers, models, plugins — never secrets) to JSON
   and apply it merge-style to the same adapter, from both the CLI and the

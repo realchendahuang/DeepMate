@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Curated plugin list:
+  - The marketplace's **Curated** source is now driven by a
+    DeepMate-maintained list (`plugins/curated.json` in this repository)
+    instead of the `@deepseek-ai` npm scope heuristic. Anyone can propose a
+    plugin by opening a pull request against the list.
+  - The list is fetched from the raw GitHub URL at runtime, cached under the
+    data directory (`cache/curated.json`) and merged ahead of npm search
+    results, so curated entries always surface first. A stale cache keeps
+    the curated source working offline; `DEEPMATE_CURATED_LIST_URL`
+    overrides the fetch URL for tests and mirrors.
+  - First batch: 68 entries (2 official + 66 community), assembled by
+    cross-referencing the community's curated indexes
+    (AdamPlatin123/awesome-dsh-plugins, dshworks/awesome-dsh-plugins)
+    against the npm registry, with every package verified to exist.
+  - The desktop market tab opens on the curated storefront: an empty search
+    shows the curated list without hitting the npm registry, so the store
+    is browsable before any query is typed.
+  - The storefront gained category filters (memory, vision, MCP, chat,
+    remote, office, dev, …) with per-category counts, and trust badges
+    that distinguish official (DeepSeek Harness vendor), vetted
+    (DeepMate-reviewed) and community entries. Curated entries carry a
+    `category` field; npm search results are uncategorized.
 - Self-update loop:
   - `deepmate update` — checks the latest release, downloads the CLI
     archive for this platform, verifies it against the published sha256,

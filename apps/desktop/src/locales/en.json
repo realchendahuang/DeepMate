@@ -52,12 +52,36 @@
     "search": "Search",
     "searchTerms": "search terms",
     "searchEmpty": "Search the market to discover plugins.",
+    "marketEmpty": "The curated list is empty. Search the market to discover plugins.",
+    "all": "All",
     "by": "by {{publisher}}",
     "installInto": "Install into profile {{profile}}",
     "profileRequired": "Enter a profile first.",
     "updated": "Updated {{date}}",
     "popularity": "Popularity",
-    "quality": "Quality"
+    "quality": "Quality",
+    "trust": {
+      "official": "Official",
+      "vetted": "Vetted",
+      "community": "Community"
+    },
+    "categories": {
+      "official": "Official",
+      "memory": "Memory",
+      "vision": "Vision",
+      "mcp": "MCP",
+      "chat": "Chat & Messaging",
+      "web": "Web",
+      "web-ui": "Web UI",
+      "terminal": "Terminal",
+      "tui": "TUI",
+      "remote": "Remote & SSH",
+      "office": "Office & Docs",
+      "dev": "Development",
+      "stats": "Usage & Cost",
+      "security": "Security",
+      "automation": "Automation"
+    }
   },
   "settings": {
     "title": "Settings",
