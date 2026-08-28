@@ -50,6 +50,7 @@ export function PluginsContent({ tab }: PluginsContentProps) {
   const loadMarketSources = useStore((s) => s.loadMarketSources);
   const searchMarket = useStore((s) => s.searchMarket);
   const installPlugin = useStore((s) => s.installPlugin);
+  const marketInstall = useStore((s) => s.marketInstall);
   const removePlugin = useStore((s) => s.removePlugin);
   const updatePlugin = useStore((s) => s.updatePlugin);
 
@@ -145,10 +146,17 @@ export function PluginsContent({ tab }: PluginsContentProps) {
           <Card>
             <CardContent className="flex flex-col gap-2 p-4 md:flex-row">
               <Input
+                value={installProfile}
+                onChange={(event) => setInstallProfile(event.target.value)}
+                placeholder={t("plugins.profile")}
+                className="w-full md:w-[140px]"
+                onKeyDown={(event) => event.key === "Enter" && doSearch()}
+              />
+              <Input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder={t("plugins.searchTerms")}
-                className="flex-1"
+                className="w-full flex-1 md:w-auto"
                 onKeyDown={(event) => event.key === "Enter" && doSearch()}
               />
               <Button variant="primary" onClick={doSearch} disabled={busy || !query}>
@@ -188,9 +196,33 @@ export function PluginsContent({ tab }: PluginsContentProps) {
                       <Badge variant={entry.source === "curated" ? "accent" : "neutral"}>{entry.source}</Badge>
                       {entry.version && <Badge variant="skip" dot={false}>v{entry.version}</Badge>}
                       {entry.publisher && <span className="text-small text-text-faint">{t("plugins.by", { publisher: entry.publisher })}</span>}
+                      <span className="flex-1" />
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        disabled={busy || !installProfile.trim()}
+                        title={
+                          installProfile.trim()
+                            ? t("plugins.installInto", { profile: installProfile.trim() })
+                            : t("plugins.profileRequired")
+                        }
+                        onClick={() => marketInstall(installProfile.trim(), entry.id)}
+                      >
+                        <Download className="h-4 w-4" />
+                        {t("plugins.install")}
+                      </Button>
                     </div>
                     {entry.description && <p className="mt-1 text-body text-text-dim">{entry.description}</p>}
-                    {entry.repository && <p className="mt-1 truncate text-small text-accent">{entry.repository}</p>}
+                    <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+                      {entry.repository && <p className="max-w-full truncate text-small text-accent">{entry.repository}</p>}
+                      {entry.updated && (
+                        <span className="text-small text-text-faint">
+                          {t("plugins.updated", { date: entry.updated.slice(0, 10) })}
+                        </span>
+                      )}
+                      <TrustMeter label={t("plugins.popularity")} value={entry.popularity} />
+                      <TrustMeter label={t("plugins.quality")} value={entry.quality} />
+                    </div>
                   </div>
                 ))}
               </div>
@@ -199,5 +231,21 @@ export function PluginsContent({ tab }: PluginsContentProps) {
         </div>
       )}
     </>
+  );
+}
+
+// A compact 0-100 meter for a registry trust score; rendered only when the
+// registry published the signal.
+function TrustMeter({ label, value }: { label: string; value: number | null }) {
+  if (value == null) return null;
+  const percent = Math.round(value * 100);
+  return (
+    <span className="flex items-center gap-1.5 text-small text-text-faint" title={`${label}: ${percent}%`}>
+      <span>{label}</span>
+      <span className="h-1.5 w-14 overflow-hidden rounded-full bg-inset">
+        <span className="block h-full rounded-full bg-accent" style={{ width: `${percent}%` }} />
+      </span>
+      <span className="tabular-nums">{percent}</span>
+    </span>
   );
 }

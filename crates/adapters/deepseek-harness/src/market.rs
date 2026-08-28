@@ -13,10 +13,15 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use deepmate_core::error::{CoreError, CoreResult};
-use deepmate_core::model::{MarketEntry, MarketSource, MarketSourceInfo};
+use deepmate_core::model::{
+    compat_status, CompatReport, CompatStatus, MarketEntry, MarketSource, MarketSourceInfo,
+};
 
 const NPM_SEARCH_URL: &str = "https://registry.npmjs.org/-/v1/search";
+const NPM_REGISTRY_URL: &str = "https://registry.npmjs.org";
 const CURATED_SCOPE: &str = "@deepseek-ai";
+// `package.engines` keys a plugin may declare its harness requirement under.
+const HARNESS_ENGINE_KEYS: [&str; 2] = ["dsh", "deepseek-harness"];
 const SEARCH_SIZE: usize = 15;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const CACHE_DIR: &str = "cache";
@@ -58,6 +63,34 @@ impl Market {
             }
         }
         Ok(entries)
+    }
+
+    // Check a package's harness compatibility through its registry packument:
+    // the latest published version's `engines` entry is matched against the
+    // detected harness version by the core's semver logic.
+    pub async fn compat(
+        client: &reqwest::Client,
+        spec: &str,
+        harness_version: Option<String>,
+    ) -> CoreResult<CompatReport> {
+        let name = spec_package_name(spec);
+        let url = format!("{NPM_REGISTRY_URL}/{}", encode_package_name(name));
+        let response = client
+            .get(url)
+            .send()
+            .await
+            .map_err(|err| CoreError::InvalidState(format!("compat request failed: {err}")))?;
+        if !response.status().is_success() {
+            return Err(CoreError::InvalidState(format!(
+                "registry returned HTTP {} for {name}",
+                response.status()
+            )));
+        }
+        let text = response
+            .text()
+            .await
+            .map_err(|err| CoreError::InvalidState(format!("invalid registry response: {err}")))?;
+        compat_from_packument(&text, harness_version.as_deref())
     }
 
     // A cached result for this exact query, when fresh. A stale or missing
@@ -120,6 +153,11 @@ async fn search_npm(client: &reqwest::Client, query: &str) -> CoreResult<Vec<Mar
             } else {
                 MarketSource::Community
             };
+            let (popularity, quality) = obj
+                .score
+                .and_then(|score| score.detail)
+                .map(|detail| (normalized(detail.popularity), normalized(detail.quality)))
+                .unwrap_or((None, None));
             MarketEntry {
                 id: name.clone(),
                 name,
@@ -132,10 +170,90 @@ async fn search_npm(client: &reqwest::Client, query: &str) -> CoreResult<Vec<Mar
                     .publisher
                     .and_then(|publisher| publisher.username.or(publisher.name)),
                 updated: obj.package.date,
+                popularity,
+                quality,
             }
         })
         .collect();
     Ok(entries)
+}
+
+// Clamp a registry score into `0.0..=1.0`; anything outside or missing is
+// treated as "no signal" instead of a misleading value.
+fn normalized(score: Option<f64>) -> Option<f64> {
+    score
+        .filter(|value| value.is_finite())
+        .map(|value| value.clamp(0.0, 1.0))
+}
+
+// The package name a plugin spec refers to: `pkg@^1.0` and `pkg` both name
+// `pkg`, and `@scope/pkg@1.0` names `@scope/pkg` (the leading scope `@` is
+// never treated as a version separator).
+fn spec_package_name(spec: &str) -> &str {
+    let spec = spec.trim();
+    if let Some(rest) = spec.strip_prefix('@') {
+        return match rest.split_once('@') {
+            Some((scope, _)) => &spec[..1 + scope.len()],
+            None => spec,
+        };
+    }
+    spec.split_once('@').map_or(spec, |(name, _)| name)
+}
+
+// Package names are used verbatim in the registry URL; the `@scope/name`
+// slash is a legal path character, so no percent-encoding is needed beyond
+// rejecting whitespace and separators that would change the path.
+fn encode_package_name(name: &str) -> String {
+    name.trim().to_string()
+}
+
+// Extract a `CompatReport` from a registry packument document. Pure so it can
+// be tested without network access.
+fn compat_from_packument(text: &str, harness_version: Option<&str>) -> CoreResult<CompatReport> {
+    let packument: Packument = serde_json::from_str(text)
+        .map_err(|err| CoreError::InvalidState(format!("invalid registry packument: {err}")))?;
+    let latest = packument
+        .dist_tags
+        .and_then(|tags| tags.latest)
+        .ok_or_else(|| CoreError::InvalidState("packument has no latest dist-tag".to_string()))?;
+    let manifest = packument
+        .versions
+        .as_ref()
+        .and_then(|versions| versions.get(&latest));
+    let required = manifest
+        .and_then(|manifest| manifest.engines.as_ref())
+        .and_then(|engines| HARNESS_ENGINE_KEYS.iter().find_map(|key| engines.get(*key)));
+    let required = match required {
+        Some(range) => range.trim(),
+        None => {
+            return Ok(CompatReport {
+                status: CompatStatus::Unknown,
+                harness_version: harness_version.map(str::to_string),
+                required_range: None,
+                message: format!(
+                    "the latest version ({latest}) declares no harness requirement in its engines field"
+                ),
+            });
+        }
+    };
+    let status = compat_status(harness_version, Some(required));
+    let message = match status {
+        CompatStatus::Compatible => {
+            format!("requires harness {required}; the detected harness satisfies it")
+        }
+        CompatStatus::Incompatible => {
+            format!("requires harness {required}; the detected harness does not satisfy it")
+        }
+        CompatStatus::Unknown => {
+            format!("requires harness {required}; the requirement could not be evaluated")
+        }
+    };
+    Ok(CompatReport {
+        status,
+        harness_version: harness_version.map(str::to_string),
+        required_range: Some(required.to_string()),
+        message,
+    })
 }
 
 // The market sources the DeepSeek Harness adapter can discover from: the
@@ -165,6 +283,38 @@ struct SearchResponse {
 #[derive(Debug, serde::Deserialize)]
 struct SearchObject {
     package: SearchPackage,
+    // npm's review-style scores (0.0..=1.0); absent on some registries.
+    score: Option<SearchScore>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct SearchScore {
+    detail: Option<ScoreDetail>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ScoreDetail {
+    popularity: Option<f64>,
+    quality: Option<f64>,
+}
+
+// The slice of a registry packument needed for a compatibility check: the
+// latest dist-tag and that version's `engines` declaration.
+#[derive(Debug, serde::Deserialize)]
+struct Packument {
+    #[serde(rename = "dist-tags")]
+    dist_tags: Option<DistTags>,
+    versions: Option<std::collections::BTreeMap<String, VersionManifest>>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct DistTags {
+    latest: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct VersionManifest {
+    engines: Option<std::collections::BTreeMap<String, String>>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -255,10 +405,77 @@ mod tests {
             repository: Some("https://github.com/example/dsh-mnemon".to_string()),
             publisher: Some("someone".to_string()),
             updated: Some("2026-01-01T00:00:00.000Z".to_string()),
+            popularity: Some(0.4),
+            quality: Some(0.9),
         }];
         store_cache(market.cache_path.as_ref().unwrap(), "mnemon", &entries).unwrap();
         let cached = market.cached("mnemon").expect("same query must hit");
         assert_eq!(cached, entries);
         assert!(market.cached("other").is_none(), "other query must miss");
+    }
+
+    #[test]
+    fn spec_names_are_extracted_with_and_without_ranges() {
+        assert_eq!(spec_package_name("dsh-mnemon"), "dsh-mnemon");
+        assert_eq!(spec_package_name("dsh-mnemon@^0.2"), "dsh-mnemon");
+        assert_eq!(spec_package_name("dsh-mnemon@0.2.14"), "dsh-mnemon");
+        assert_eq!(spec_package_name("@deepseek-ai/dsh"), "@deepseek-ai/dsh");
+        assert_eq!(
+            spec_package_name("@deepseek-ai/dsh@^0.1"),
+            "@deepseek-ai/dsh"
+        );
+    }
+
+    #[test]
+    fn scores_outside_the_unit_interval_are_dropped() {
+        assert_eq!(normalized(Some(0.5)), Some(0.5));
+        assert_eq!(normalized(Some(1.7)), Some(1.0));
+        assert_eq!(normalized(Some(-3.0)), Some(0.0));
+        assert_eq!(normalized(Some(f64::NAN)), None);
+        assert_eq!(normalized(None), None);
+    }
+
+    #[test]
+    fn compat_reads_engines_from_the_latest_version() {
+        let packument = r#"{
+            "dist-tags": { "latest": "1.2.0" },
+            "versions": {
+                "1.1.0": { "engines": { "dsh": "^0.1" } },
+                "1.2.0": { "engines": { "dsh": "^0.2" } }
+            }
+        }"#;
+        let report = compat_from_packument(packument, Some("0.2.1")).unwrap();
+        assert_eq!(report.status, CompatStatus::Compatible);
+        assert_eq!(report.required_range.as_deref(), Some("^0.2"));
+        assert_eq!(report.harness_version.as_deref(), Some("0.2.1"));
+
+        let report = compat_from_packument(packument, Some("0.1.0")).unwrap();
+        assert_eq!(report.status, CompatStatus::Incompatible);
+    }
+
+    #[test]
+    fn compat_without_engines_is_unknown_not_an_error() {
+        let packument = r#"{
+            "dist-tags": { "latest": "1.0.0" },
+            "versions": { "1.0.0": {} }
+        }"#;
+        let report = compat_from_packument(packument, Some("0.1.0")).unwrap();
+        assert_eq!(report.status, CompatStatus::Unknown);
+        assert!(report.required_range.is_none());
+    }
+
+    #[test]
+    fn compat_is_unknown_for_other_engine_keys_only() {
+        let packument = r#"{
+            "dist-tags": { "latest": "1.0.0" },
+            "versions": { "1.0.0": { "engines": { "node": ">=18" } } }
+        }"#;
+        let report = compat_from_packument(packument, Some("0.1.0")).unwrap();
+        assert_eq!(report.status, CompatStatus::Unknown);
+    }
+
+    #[test]
+    fn compat_rejects_invalid_packument() {
+        assert!(compat_from_packument("not json", Some("0.1.0")).is_err());
     }
 }

@@ -16,13 +16,15 @@ use deepmate_app::record_action;
 use deepmate_core::adapter::HarnessAdapter;
 use deepmate_core::data::DataLayout;
 use deepmate_core::model::{
-    DoctorReport, MarketEntry, MarketSourceInfo, Model, Plugin, Profile, Provider, RuntimeStatus,
+    CompatReport, DoctorReport, MarketEntry, MarketSourceInfo, Model, Plugin, Profile, Provider,
+    RuntimeStatus,
 };
 use deepmate_core::CoreResult;
 use deepmate_platform::{PlatformService, SystemPlatform};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use tauri_plugin_autostart::ManagerExt;
+use tauri_plugin_dialog::DialogExt;
 
 // Shared application state: the active adapter and the data layout. The
 // adapter is Send + Sync, so it can live behind an Arc in Tauri state and be
@@ -473,6 +475,21 @@ pub async fn market_search(
         .map_err(|e| format!("{e}"))
 }
 
+// Check a market package's compatibility with the detected harness before an
+// installation. Capability-gated on marketplace, like the CLI's
+// `deepmate plugin check`.
+#[tauri::command]
+pub async fn plugin_check(state: State<'_, AppState>, spec: String) -> Result<CompatReport, String> {
+    let adapter = state.adapter.as_ref();
+    if !adapter.capabilities().marketplace {
+        return Err(format!(
+            "adapter '{}' does not support compatibility checks",
+            adapter.metadata().id
+        ));
+    }
+    adapter.plugin_compat(&spec).await.map_err(|e| format!("{e}"))
+}
+
 // ---- Snapshots ----
 
 #[tauri::command]
@@ -556,6 +573,16 @@ pub async fn set_language(state: State<'_, AppState>, language: String) -> Resul
 }
 
 #[tauri::command]
+pub async fn set_notify_updates(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
+    let mut config = deepmate_core::data::Config::load(&state.layout.config_path())
+        .map_err(|e| format!("{e}"))?;
+    config.general.notify_updates = enabled;
+    config
+        .save(&state.layout.config_path())
+        .map_err(|e| format!("{e}"))
+}
+
+#[tauri::command]
 pub async fn set_theme(state: State<'_, AppState>, theme: String) -> Result<(), String> {
     if !matches!(theme.as_str(), "system" | "light" | "dark") {
         return Err(format!("unsupported theme: {theme}"));
@@ -597,6 +624,7 @@ pub struct UiPrefs {
     pub language: String,
     pub theme: String,
     pub check_updates: bool,
+    pub notify_updates: bool,
     pub close_to_tray: bool,
 }
 
@@ -608,8 +636,57 @@ pub async fn get_config(state: State<'_, AppState>) -> Result<UiPrefs, String> {
         language: config.general.language,
         theme: config.ui.theme,
         check_updates: config.general.check_updates,
+        notify_updates: config.general.notify_updates,
         close_to_tray: config.ui.close_to_tray,
     })
+}
+
+// ---- Own-settings backup (export / import) ----
+
+// `Ok(None)` means the dialog was dismissed; both commands are no-ops then.
+#[tauri::command]
+pub async fn config_export(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<String>, String> {
+    let picked = app
+        .dialog()
+        .file()
+        .add_filter("JSON", &["json"])
+        .set_file_name("deepmate-config.json")
+        .blocking_save_file();
+    let Some(path) = picked.and_then(|file| file.into_path().ok()) else {
+        return Ok(None);
+    };
+    let config = deepmate_core::data::Config::load(&state.layout.config_path())
+        .map_err(|e| format!("{e}"))?;
+    deepmate_core::ConfigBackup::capture(&config)
+        .save(&path)
+        .map_err(|e| format!("{e}"))?;
+    record_action(&state.layout, "app", "desktop.config.export".to_string());
+    Ok(Some(path.display().to_string()))
+}
+
+#[tauri::command]
+pub async fn config_import(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<String>, String> {
+    let picked = app
+        .dialog()
+        .file()
+        .add_filter("JSON", &["json"])
+        .blocking_pick_file();
+    let Some(path) = picked.and_then(|file| file.into_path().ok()) else {
+        return Ok(None);
+    };
+    let backup = deepmate_core::ConfigBackup::load(&path).map_err(|e| format!("{e}"))?;
+    backup
+        .config
+        .save(&state.layout.config_path())
+        .map_err(|e| format!("{e}"))?;
+    record_action(&state.layout, "app", "desktop.config.import".to_string());
+    Ok(Some(path.display().to_string()))
 }
 
 // ---- Auto-start ----
@@ -663,13 +740,17 @@ const UPDATE_API_URL: &str =
     "https://api.github.com/repos/realchendahuang/DeepMate/releases/latest";
 const UPDATE_TIMEOUT_SECS: u64 = 10;
 
-#[tauri::command]
-pub async fn check_update() -> Result<Option<UpdateInfo>, String> {
+// Query the GitHub releases API for a newer DeepMate release. Shared by the
+// `check_update` command, the tray's check action and the startup
+// notification. `None` means the current version is the latest, or the check
+// could not complete (offline, rate limited, ...) — an update check must
+// fail quietly, never block the UI.
+pub(crate) async fn latest_release() -> Option<UpdateInfo> {
     let client = reqwest::Client::builder()
         .user_agent(format!("DeepMate/{}", env!("CARGO_PKG_VERSION")))
         .timeout(std::time::Duration::from_secs(UPDATE_TIMEOUT_SECS))
         .build()
-        .map_err(|e| format!("failed to build HTTP client: {e}"))?;
+        .ok()?;
 
     #[derive(Deserialize)]
     struct Release {
@@ -683,29 +764,34 @@ pub async fn check_update() -> Result<Option<UpdateInfo>, String> {
             Ok(release) => release,
             Err(err) => {
                 tracing::warn!("update check: invalid response: {err}");
-                return Ok(None);
+                return None;
             }
         },
         Ok(response) => {
             tracing::warn!("update check: GitHub returned {}", response.status());
-            return Ok(None);
+            return None;
         }
         Err(err) => {
             tracing::warn!("update check failed: {err}");
-            return Ok(None);
+            return None;
         }
     };
 
     let current = env!("CARGO_PKG_VERSION");
     if !deepmate_core::is_newer_version(&release.tag_name, current) {
-        return Ok(None);
+        return None;
     }
-    Ok(Some(UpdateInfo {
+    Some(UpdateInfo {
         current_version: current.to_string(),
         latest_version: release.tag_name.trim_start_matches('v').to_string(),
         url: release.html_url,
         published_at: release.published_at,
-    }))
+    })
+}
+
+#[tauri::command]
+pub async fn check_update() -> Result<Option<UpdateInfo>, String> {
+    Ok(latest_release().await)
 }
 
 // Open a URL in the system browser (used by the update banner). Only http(s)

@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Plugin compatibility checks: `deepmate plugin check <spec>` (and a
+  `plugin_compat` adapter hook) matches a market package's declared
+  `engines` requirement against the detected harness version. `plugin
+  install` runs the check as a preflight — a definite "incompatible" verdict
+  refuses the install unless `--force` is given, while unknown or unavailable
+  checks only note the fact. The desktop Market tab runs the same preflight
+  when installing from a search result.
+- Marketplace trust signals: npm's review scores (popularity, quality) are
+  normalized into `MarketEntry` and surfaced in `deepmate market search`
+  output and as meters in the desktop Market tab, next to the release date.
+  Market search results can now be installed directly from the desktop app.
+- Own-settings backup: `deepmate config export <path>` / `config import
+  <path>` write and apply DeepMate's own configuration (language, theme, tray
+  behavior, update preferences, market defaults) as a portable JSON document
+  — the counterpart to harness snapshots. The desktop Settings page offers
+  the same flow through native save/open dialogs and re-applies the imported
+  preferences live.
+- System notifications: a newer release found by the automatic startup check
+  raises a desktop notification (opt-out preference alongside the update
+  check), and the tray's explicit "Check Updates" action always reports its
+  outcome.
+- Tray menu additions: "Open Harness" launches the harness web UI from the
+  tray, and "Check Updates" runs the release check on demand, with
+  notifications localized like the rest of the tray menu.
+
+### Changed
+
+- `deepmate plugin install` gained a `--force` flag to override an
+  incompatible compatibility verdict.
+
 ## [0.6.0] - 2026-08-26
 
 ### Added

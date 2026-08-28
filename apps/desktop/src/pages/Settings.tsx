@@ -52,13 +52,17 @@ export function SettingsPage() {
   const setTheme = useStore((s) => s.setTheme);
   const setCloseToTray = useStore((s) => s.setCloseToTray);
   const setCheckUpdates = useStore((s) => s.setCheckUpdates);
+  const setNotifyUpdates = useStore((s) => s.setNotifyUpdates);
   const setAutostart = useStore((s) => s.setAutostart);
   const checkUpdate = useStore((s) => s.checkUpdate);
   const openRelease = useStore((s) => s.openRelease);
+  const configExport = useStore((s) => s.configExport);
+  const configImport = useStore((s) => s.configImport);
   const language = useStore((s) => s.language);
   const theme = useStore((s) => s.theme);
   const closeToTray = useStore((s) => s.closeToTray);
   const checkUpdates = useStore((s) => s.checkUpdates);
+  const notifyUpdates = useStore((s) => s.notifyUpdates);
   const autostart = useStore((s) => s.autostart);
   const updateInfo = useStore((s) => s.updateInfo);
   const updateChecked = useStore((s) => s.updateChecked);
@@ -390,6 +394,17 @@ export function SettingsPage() {
                     aria-label={t("settings.updates")}
                   />
                 </div>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-heading font-semibold text-text">{t("settings.notifications")}</div>
+                    <div className="text-small text-text-dim">{t("settings.notificationsHint")}</div>
+                  </div>
+                  <Switch
+                    checked={notifyUpdates}
+                    onChange={setNotifyUpdates}
+                    aria-label={t("settings.notifications")}
+                  />
+                </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <Button variant="secondary" size="sm" onClick={checkUpdate} disabled={busy}>
                     {t("settings.checkNow")}
@@ -407,6 +422,20 @@ export function SettingsPage() {
                   {updateChecked && !updateInfo && (
                     <span className="text-small text-text-dim">{t("settings.upToDate")}</span>
                   )}
+                </div>
+              </div>
+              <div className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <div className="text-heading font-semibold text-text">{t("settings.ownSettings")}</div>
+                  <div className="text-small text-text-dim">{t("settings.ownSettingsHint")}</div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="secondary" size="sm" onClick={configExport} disabled={busy}>
+                    {t("settings.exportSettings")}
+                  </Button>
+                  <Button variant="secondary" size="sm" onClick={configImport} disabled={busy}>
+                    {t("settings.importSettings")}
+                  </Button>
                 </div>
               </div>
             </div>

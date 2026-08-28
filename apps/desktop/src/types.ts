@@ -90,6 +90,19 @@ export interface MarketEntry {
   repository: string | null;
   publisher: string | null;
   updated: string | null;
+  // Trust scores in 0..1, when the registry publishes them.
+  popularity: number | null;
+  quality: number | null;
+}
+
+export type CompatStatus = "compatible" | "incompatible" | "unknown";
+
+// Result of checking a market package against the detected harness.
+export interface CompatReport {
+  status: CompatStatus;
+  harness_version: string | null;
+  required_range: string | null;
+  message: string;
 }
 
 export interface MarketSourceInfo {
@@ -122,6 +135,15 @@ export interface AdapterCapabilities {
   skills: boolean;
   mcp: boolean;
   snapshots: boolean;
+}
+
+// The persisted preferences restored on startup.
+export interface UiPrefs {
+  language: string;
+  theme: string;
+  check_updates: boolean;
+  notify_updates: boolean;
+  close_to_tray: boolean;
 }
 
 // A newer DeepMate release found by the update check.

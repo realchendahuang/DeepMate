@@ -248,6 +248,10 @@ trait HarnessAdapter {
     async fn models(&self) -> Result<Vec<Model>>;
     async fn plugins(&self) -> Result<Vec<Plugin>>;
 
+    // Whether a market package fits the active harness. Adapters without a
+    // compatibility contract leave the default, which reports Unsupported.
+    async fn plugin_compat(&self, spec: &str) -> Result<CompatReport>;
+
     async fn doctor(&self) -> Result<DoctorReport>;
 }
 ```
@@ -626,6 +630,39 @@ Snapshots should support:
 - validation
 - compatibility reporting
 - human-readable diffing
+
+## Own-settings backups
+
+Alongside harness snapshots, DeepMate can export its own configuration
+(language, theme, tray behavior, update preferences, market defaults) as a
+single portable JSON document (`deepmate-config/1` format). Export always
+writes the complete document and import replaces the active configuration
+with it — no partial merge, so an applied backup reproduces exactly what was
+exported. The document contains only preference values, never secrets.
+Unlike snapshots, backups are adapter-independent and are written to an
+explicit file path (via the CLI or a native save dialog in the desktop app).
+
+## Plugin compatibility and trust signals
+
+The market normalizes whatever trust signals a source publishes. For npm that
+is the search API's review scores (`popularity`, `quality`, clamped to
+0..1), surfaced on search results in both the CLI and the desktop app.
+
+Before an installation, the adapter contract offers `plugin_compat(spec)`: the
+DeepSeek Harness adapter resolves the package name from the spec, reads the
+latest version's `engines` entry from the registry packument, and matches it
+against the detected harness version with core semver logic
+(`model::compat_status`). The verdict is `Compatible`, `Incompatible` or
+`Unknown`:
+
+- `Incompatible` refuses the install unless `--force` is given (CLI) — the
+  desktop app surfaces the refusal as an error.
+- `Unknown` (nothing declared, unparsable values, or a failed lookup) and
+  `Unsupported` (adapter without a contract, e.g. pi-agent) never block;
+  they only note the fact.
+
+A running prerelease harness (e.g. `0.1.0-rc.6`) counts as its release line
+for range matching, so `^0.1` does not reject the harness's own prerelease.
 
 ## Doctor
 

@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 use deepmate_app::{build_registry, init_tracing, load_config_or_default, record_action};
 use deepmate_core::adapter::HarnessAdapter;
 use deepmate_core::model::{
-    is_outdated, MarketEntry, MarketSourceInfo, Model, Plugin, Profile, Provider,
+    is_outdated, CompatStatus, MarketEntry, MarketSourceInfo, Model, Plugin, Profile, Provider,
 };
 use deepmate_core::registry::AdapterRegistry;
 use deepmate_core::DataLayout;
@@ -77,6 +77,11 @@ enum Command {
     Snapshot {
         #[command(subcommand)]
         action: SnapshotAction,
+    },
+    /// Export and import DeepMate's own settings.
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
     },
 }
 
@@ -188,6 +193,15 @@ enum PluginAction {
         /// Target profile.
         #[arg(long, default_value = "web")]
         profile: String,
+        /// Install even when the compatibility check reports the plugin as
+        /// incompatible with the detected harness.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Check a market package's compatibility with the detected harness.
+    Check {
+        /// Package name, optionally with a version range.
+        spec: String,
     },
     /// Remove a plugin from a profile.
     Remove {
@@ -234,6 +248,20 @@ enum SnapshotAction {
     List,
 }
 
+#[derive(Debug, Subcommand)]
+enum ConfigAction {
+    /// Write DeepMate's own settings to a portable JSON file.
+    Export {
+        /// Destination path for the backup document.
+        path: PathBuf,
+    },
+    /// Replace DeepMate's own settings from a portable JSON file.
+    Import {
+        /// Path of the backup document to apply.
+        path: PathBuf,
+    },
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -275,12 +303,47 @@ async fn run(cli: &Cli, registry: &AdapterRegistry, layout: &DataLayout) -> anyh
         return Ok("cli.adapters".to_string());
     }
 
+    // DeepMate's own settings are adapter-independent, so the backup commands
+    // run before any adapter is resolved.
+    if let Command::Config { action } = &cli.command {
+        return match action {
+            ConfigAction::Export { path } => {
+                let config = deepmate_core::Config::load(&layout.config_path())?;
+                let backup = deepmate_core::ConfigBackup::capture(&config);
+                backup.save(path)?;
+                if cli.json {
+                    println!("{}", serde_json::to_string_pretty(&backup)?);
+                } else {
+                    println!("exported DeepMate settings to {}", path.display());
+                }
+                Ok("cli.config.export".to_string())
+            }
+            ConfigAction::Import { path } => {
+                let backup = deepmate_core::ConfigBackup::load(path)?;
+                backup
+                    .config
+                    .save(&layout.config_path())
+                    .with_context(|| format!("failed to apply {}", path.display()))?;
+                if cli.json {
+                    println!("{}", serde_json::json!({ "ok": true }));
+                } else {
+                    println!("imported DeepMate settings from {}", path.display());
+                    println!(
+                        "note: re-open the desktop app (or re-run commands) for the new settings to take effect"
+                    );
+                }
+                Ok("cli.config.import".to_string())
+            }
+        };
+    }
+
     let adapter = registry
         .get(&cli.adapter)
         .with_context(|| format!("adapter not found: {}", cli.adapter))?;
 
     let action = match &cli.command {
         Command::Adapters => unreachable!(),
+        Command::Config { .. } => unreachable!(),
         Command::Detect => {
             let detection = adapter.detect().await?;
             if cli.json {
@@ -510,7 +573,12 @@ async fn run(cli: &Cli, registry: &AdapterRegistry, layout: &DataLayout) -> anyh
                     print_list("plugins", plugins, cli.json)?;
                     "cli.plugin.list".to_string()
                 }
-                PluginAction::Install { spec, profile } => {
+                PluginAction::Install {
+                    spec,
+                    profile,
+                    force,
+                } => {
+                    preflight_compat(adapter, spec, *force).await?;
                     adapter.install_plugin(profile, spec).await?;
                     if cli.json {
                         println!("{}", serde_json::json!({ "ok": true }));
@@ -518,6 +586,24 @@ async fn run(cli: &Cli, registry: &AdapterRegistry, layout: &DataLayout) -> anyh
                         println!("installed {spec} into profile {profile}");
                     }
                     "cli.plugin.install".to_string()
+                }
+                PluginAction::Check { spec } => {
+                    require_capability(
+                        adapter,
+                        adapter.capabilities().marketplace,
+                        "compatibility checks",
+                    )?;
+                    let report = adapter.plugin_compat(spec).await?;
+                    if cli.json {
+                        println!("{}", serde_json::to_string_pretty(&report)?);
+                    } else {
+                        println!("{}: {}", spec, compat_word(report.status));
+                        println!("  {}", report.message);
+                        if let Some(version) = &report.harness_version {
+                            println!("  harness version: {version}");
+                        }
+                    }
+                    "cli.plugin.check".to_string()
                 }
                 PluginAction::Remove { id, profile } => {
                     adapter.remove_plugin(profile, id).await?;
@@ -605,6 +691,51 @@ async fn run(cli: &Cli, registry: &AdapterRegistry, layout: &DataLayout) -> anyh
         }
     };
     Ok(action)
+}
+
+// Run the compatibility check before a plugin installation.
+//
+// A definite `Incompatible` verdict refuses the install unless `--force` was
+// given; an `Unknown` verdict (nothing declared, or the check could not be
+// evaluated) and a failed check (offline registry) only note the fact on
+// stderr and let the install proceed — a missing signal must never block the
+// workflow.
+async fn preflight_compat(
+    adapter: &dyn HarnessAdapter,
+    spec: &str,
+    force: bool,
+) -> anyhow::Result<()> {
+    let report = match adapter.plugin_compat(spec).await {
+        Ok(report) => report,
+        Err(err) => {
+            eprintln!("note: compatibility check unavailable, continuing: {err}");
+            return Ok(());
+        }
+    };
+    match report.status {
+        CompatStatus::Compatible => eprintln!("compatibility: {}", report.message),
+        CompatStatus::Unknown => eprintln!("note: compatibility unknown: {}", report.message),
+        CompatStatus::Incompatible if force => eprintln!(
+            "warning: installing despite incompatibility: {}",
+            report.message
+        ),
+        CompatStatus::Incompatible => {
+            return Err(anyhow!(
+                "{spec} is incompatible: {}; re-run with --force to install anyway",
+                report.message
+            ));
+        }
+    }
+    Ok(())
+}
+
+// The short human word for a compatibility verdict.
+fn compat_word(status: CompatStatus) -> &'static str {
+    match status {
+        CompatStatus::Compatible => "compatible",
+        CompatStatus::Incompatible => "incompatible",
+        CompatStatus::Unknown => "unknown",
+    }
 }
 
 // Ask the market for the latest version of every listed plugin and mark the
@@ -765,6 +896,11 @@ impl HumanLine for MarketEntry {
         }
         if let Some(repository) = &self.repository {
             line.push_str(&format!(" [repo {repository}]"));
+        }
+        if let (Some(popularity), Some(quality)) = (self.popularity, self.quality) {
+            line.push_str(&format!(
+                " [popularity {popularity:.1}, quality {quality:.1}]"
+            ));
         }
         line
     }

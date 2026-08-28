@@ -50,7 +50,12 @@
     "search": "搜索",
     "searchTerms": "搜索词",
     "searchEmpty": "搜索市场以发现插件。",
-    "by": "来自 {{publisher}}"
+    "by": "来自 {{publisher}}",
+    "installInto": "安装到配置文件 {{profile}}",
+    "profileRequired": "请先填写配置文件。",
+    "updated": "更新于 {{date}}",
+    "popularity": "热度",
+    "quality": "质量"
   },
   "settings": {
     "title": "设置",
@@ -104,6 +109,12 @@
     "closeToTrayHint": "关闭窗口时将 DeepMate 隐藏到托盘，而不是退出。",
     "updates": "更新",
     "updatesHint": "自动检查 DeepMate 新版本。",
+    "notifications": "新版本通知",
+    "notificationsHint": "自动检查发现新版本时发送系统通知。",
+    "ownSettings": "DeepMate 设置",
+    "ownSettingsHint": "将偏好设置导出为便携文件，或在其他机器上导入应用。",
+    "exportSettings": "导出…",
+    "importSettings": "导入…",
     "checkNow": "立即检查",
     "upToDate": "已是最新版本。",
     "updateAvailable": "新版本 v{{version}}"

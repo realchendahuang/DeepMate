@@ -96,6 +96,10 @@ pub struct GeneralConfig {
     pub language: String,
     pub auto_start: bool,
     pub check_updates: bool,
+    // Desktop notification for a newly found release. Explicit checks from
+    // the tray always report their result; this only gates the automatic
+    // startup check.
+    pub notify_updates: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -121,6 +125,7 @@ impl Default for GeneralConfig {
             // an explicit user action.
             auto_start: false,
             check_updates: true,
+            notify_updates: true,
         }
     }
 }

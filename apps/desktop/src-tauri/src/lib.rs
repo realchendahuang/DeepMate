@@ -43,6 +43,7 @@ pub fn run() {
     // reads the current preference, not the value captured at startup.
     let close_to_tray = Arc::new(AtomicBool::new(config.ui.close_to_tray));
     let language = config.general.language.clone();
+    let check_updates_on_start = config.general.check_updates && config.general.notify_updates;
 
     let state = AppState {
         adapter: Arc::from(adapter),
@@ -52,6 +53,7 @@ pub fn run() {
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         // Auto-start registers the app with the OS login items; carry the
@@ -85,13 +87,17 @@ pub fn run() {
             commands::plugin_update,
             commands::list_market_sources,
             commands::market_search,
+            commands::plugin_check,
             commands::snapshot_export,
             commands::snapshot_import,
             commands::snapshot_list,
+            commands::config_export,
+            commands::config_import,
             commands::set_language,
             commands::set_theme,
             commands::set_close_to_tray,
             commands::set_check_updates,
+            commands::set_notify_updates,
             commands::autostart_get,
             commands::autostart_set,
             commands::check_update,
@@ -119,6 +125,26 @@ pub fn run() {
                 });
             }
             setup_tray(app, &language)?;
+
+            // Announce a newer release when the automatic check is on, so a
+            // resident (tray-hidden) DeepMate still surfaces it. The webview
+            // keeps showing the banner on Overview either way.
+            if check_updates_on_start {
+                let handle = app.handle().clone();
+                let language = language.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Some(info) = commands::latest_release().await {
+                        let zh = language == "zh";
+                        let title = format!("DeepMate v{}", info.latest_version);
+                        let body = if zh {
+                            "新版本已发布，点击查看。".to_string()
+                        } else {
+                            "A new release is available; open DeepMate for details.".to_string()
+                        };
+                        notify(&handle, &title, &body);
+                    }
+                });
+            }
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -135,25 +161,86 @@ pub fn run() {
 }
 
 // The tray is the app's home while the window is hidden. The menu labels
-// follow the same language preference that drives the UI.
+// follow the same language preference that drives the UI. Async work from
+// the menu (harness UI, update check) runs on the Tauri runtime so the
+// handler never blocks the tray.
 fn setup_tray(app: &tauri::App, language: &str) -> tauri::Result<()> {
-    let (show_label, quit_label) = if language == "zh" {
-        ("显示 DeepMate", "退出")
+    let zh = language == "zh";
+    let (show_label, harness_label, updates_label, quit_label) = if zh {
+        (
+            "显示 DeepMate",
+            "打开 Harness",
+            "检查更新",
+            "退出",
+        )
     } else {
-        ("Show DeepMate", "Quit")
+        ("Show DeepMate", "Open Harness", "Check Updates", "Quit")
     };
 
     let show = MenuItem::with_id(app, "show", show_label, true, None::<&str>)?;
+    let harness = MenuItem::with_id(app, "harness", harness_label, true, None::<&str>)?;
+    let updates = MenuItem::with_id(app, "updates", updates_label, true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", quit_label, true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show, &quit])?;
+    let menu = Menu::with_items(app, &[&show, &harness, &updates, &quit])?;
 
+    let language = language.to_string();
     let mut builder = TrayIconBuilder::with_id("main-tray")
         .menu(&menu)
         .show_menu_on_left_click(true)
-        .on_menu_event(|app, event| match event.id.as_ref() {
-            "show" => show_main_window(app),
-            "quit" => app.exit(0),
-            _ => {}
+        .on_menu_event(move |app, event| {
+            // Cloned per invocation so the spawned handlers localize their
+            // notifications like the menu labels.
+            let language = language.clone();
+            match event.id.as_ref() {
+                "show" => show_main_window(app),
+                "harness" => {
+                    let handle = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let adapter = handle.state::<AppState>().adapter.clone();
+                        if let Err(err) = adapter.open_ui().await {
+                            let zh = language == "zh";
+                            let title = if zh {
+                                "无法打开 Harness"
+                            } else {
+                                "Cannot open Harness"
+                            };
+                            notify(&handle, title, &err.to_string());
+                        }
+                    });
+                }
+                "updates" => {
+                    let handle = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        // An explicit tray check always reports its outcome,
+                        // regardless of the notification preference.
+                        match commands::latest_release().await {
+                            Some(info) => {
+                                show_main_window(&handle);
+                                let zh = language == "zh";
+                                let title = format!("DeepMate v{}", info.latest_version);
+                                let body = if zh {
+                                    "新版本已发布。".to_string()
+                                } else {
+                                    "A new release is available.".to_string()
+                                };
+                                notify(&handle, &title, &body);
+                            }
+                            None => {
+                                let zh = language == "zh";
+                                let title = "DeepMate";
+                                let body = if zh {
+                                    "已是最新版本。".to_string()
+                                } else {
+                                    "You're on the latest version.".to_string()
+                                };
+                                notify(&handle, title, &body);
+                            }
+                        }
+                    });
+                }
+                "quit" => app.exit(0),
+                _ => {}
+            }
         });
     if let Some(icon) = app.default_window_icon() {
         builder = builder.icon(icon.clone());
@@ -164,6 +251,15 @@ fn setup_tray(app: &tauri::App, language: &str) -> tauri::Result<()> {
     }
     builder.build(app)?;
     Ok(())
+}
+
+// Best-effort system notification; a missing permission or unsupported
+// platform must never take the app down.
+fn notify(app: &tauri::AppHandle, title: &str, body: &str) {
+    use tauri_plugin_notification::NotificationExt;
+    if let Err(err) = app.notification().builder().title(title).body(body).show() {
+        tracing::warn!(error = %err, "failed to show a notification");
+    }
 }
 
 fn show_main_window<R: tauri::Runtime>(app: &impl tauri::Manager<R>) {

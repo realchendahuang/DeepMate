@@ -155,7 +155,7 @@ pub struct Plugin {
 }
 
 // A marketplace search result (normalized representation).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MarketEntry {
     pub id: String,
     pub name: String,
@@ -167,7 +167,15 @@ pub struct MarketEntry {
     pub repository: Option<String>,
     pub publisher: Option<String>,
     pub updated: Option<String>,
+    // Normalized trust scores in `0.0..=1.0`, when the source publishes them.
+    // Popularity proxies adoption; quality proxies engineering hygiene.
+    #[serde(default)]
+    pub popularity: Option<f64>,
+    #[serde(default)]
+    pub quality: Option<f64>,
 }
+
+impl Eq for MarketEntry {}
 
 // Where a market entry came from.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -177,6 +185,75 @@ pub enum MarketSource {
     Curated,
     // Any other community-published source.
     Community,
+}
+
+// Outcome of a plugin compatibility check.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CompatStatus {
+    // The plugin declares a requirement the active harness satisfies.
+    Compatible,
+    // The plugin declares a requirement the active harness does not satisfy.
+    Incompatible,
+    // Either side declares nothing, or a value could not be parsed. An
+    // unknown verdict must never block an installation by itself.
+    Unknown,
+}
+
+// The result of checking one plugin against the active harness.
+//
+// `message` is a human-readable detail line in English (like Doctor check
+// summaries); the UI surfaces `status` through its own translations and uses
+// `message` as supporting detail.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CompatReport {
+    pub status: CompatStatus,
+    // The detected harness version the check ran against.
+    pub harness_version: Option<String>,
+    // The requirement the plugin declares, verbatim.
+    pub required_range: Option<String>,
+    pub message: String,
+}
+
+impl Eq for CompatReport {}
+
+impl CompatReport {
+    pub fn unknown(harness_version: Option<String>) -> Self {
+        Self {
+            status: CompatStatus::Unknown,
+            harness_version,
+            required_range: None,
+            message: "no harness requirement is declared for this plugin".to_string(),
+        }
+    }
+}
+
+// Compare a plugin's declared harness requirement against the active harness
+// version.
+//
+// `required` is a semver range (e.g. `^0.1`, `>=0.1.0-rc <0.2`). The
+// harness's prerelease/build suffix is stripped before matching: a running
+// `0.1.0-rc.6` counts as the `0.1` line, which is what a plugin author means
+// by `^0.1` — strict semver would otherwise report every prerelease harness
+// as incompatible with its own release range. Anything unparsable on either
+// side — or absent — yields `Unknown` so a malformed declaration degrades to
+// a non-blocking signal instead of a false refusal.
+pub fn compat_status(harness: Option<&str>, required: Option<&str>) -> CompatStatus {
+    let (Some(harness), Some(required)) = (harness, required) else {
+        return CompatStatus::Unknown;
+    };
+    let harness = harness.trim().trim_start_matches('v');
+    let required = required.trim();
+    let harness = semver::Version::parse(harness).map(|version| semver::Version {
+        pre: semver::Prerelease::EMPTY,
+        build: semver::BuildMetadata::EMPTY,
+        ..version
+    });
+    match (harness, semver::VersionReq::parse(required)) {
+        (Ok(harness), Ok(req)) if req.matches(&harness) => CompatStatus::Compatible,
+        (Ok(_), Ok(_)) => CompatStatus::Incompatible,
+        _ => CompatStatus::Unknown,
+    }
 }
 
 // A market source DeepMate knows about (normalized representation).
@@ -200,5 +277,64 @@ pub fn is_outdated(installed: &str, latest: &str) -> bool {
     ) {
         (Ok(a), Ok(b)) => b > a,
         _ => installed != latest,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{compat_status, CompatStatus};
+
+    #[test]
+    fn satisfied_range_is_compatible() {
+        assert_eq!(
+            compat_status(Some("0.1.0-rc.6"), Some("^0.1")),
+            CompatStatus::Compatible
+        );
+        assert_eq!(
+            compat_status(Some("1.4.2"), Some(">=1.0, <2.0")),
+            CompatStatus::Compatible
+        );
+    }
+
+    #[test]
+    fn prerelease_counts_as_its_release_line() {
+        // The real launcher reports prereleases like 0.1.0-rc.6; a plugin
+        // declaring ^0.1 means the 0.1 line, not "no prereleases".
+        assert_eq!(
+            compat_status(Some("0.1.0-rc.6"), Some(">=0.1.0")),
+            CompatStatus::Compatible
+        );
+        // A different line stays incompatible.
+        assert_eq!(
+            compat_status(Some("0.1.0-rc.6"), Some("^0.2")),
+            CompatStatus::Incompatible
+        );
+    }
+
+    #[test]
+    fn missing_sides_are_unknown() {
+        assert_eq!(compat_status(None, Some("^0.1")), CompatStatus::Unknown);
+        assert_eq!(compat_status(Some("0.1.0"), None), CompatStatus::Unknown);
+        assert_eq!(compat_status(None, None), CompatStatus::Unknown);
+    }
+
+    #[test]
+    fn unparsable_values_are_unknown_never_incompatible() {
+        assert_eq!(
+            compat_status(Some("garbage"), Some("^0.1")),
+            CompatStatus::Unknown
+        );
+        assert_eq!(
+            compat_status(Some("0.1.0"), Some("latest")),
+            CompatStatus::Unknown
+        );
+    }
+
+    #[test]
+    fn leading_v_is_tolerated() {
+        assert_eq!(
+            compat_status(Some("v0.1.0"), Some("^0.1")),
+            CompatStatus::Compatible
+        );
     }
 }

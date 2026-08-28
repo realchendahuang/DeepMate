@@ -34,6 +34,7 @@ interface AppState {
   language: string;
   theme: string;
   checkUpdates: boolean;
+  notifyUpdates: boolean;
   closeToTray: boolean;
   autostart: boolean;
   updateInfo: UpdateInfo | null;
@@ -59,15 +60,22 @@ interface AppState {
   loadMarketSources: () => Promise<void>;
   searchMarket: (query: string) => Promise<void>;
   installPlugin: (profile: string, spec: string) => Promise<void>;
+  // Install from the market with a compatibility preflight: a definite
+  // "incompatible" verdict refuses the install; unknown or a failed check
+  // lets it proceed (mirroring the CLI's --force-free default).
+  marketInstall: (profile: string, spec: string) => Promise<void>;
   removePlugin: (profile: string, id: string) => Promise<void>;
   updatePlugin: (profile: string, id: string) => Promise<void>;
   setLanguage: (language: string) => Promise<void>;
   setTheme: (theme: string) => Promise<void>;
   setCloseToTray: (enabled: boolean) => Promise<void>;
   setCheckUpdates: (enabled: boolean) => Promise<void>;
+  setNotifyUpdates: (enabled: boolean) => Promise<void>;
   setAutostart: (enabled: boolean) => Promise<void>;
   checkUpdate: () => Promise<void>;
   openRelease: (url: string) => Promise<void>;
+  configExport: () => Promise<void>;
+  configImport: () => Promise<void>;
   loadPrefs: () => Promise<void>;
   snapshotExport: (name: string) => Promise<void>;
   snapshotImport: (name: string) => Promise<void>;
@@ -105,6 +113,7 @@ export const useStore = create<AppState>((set) => ({
   language: "en",
   theme: "system",
   checkUpdates: true,
+  notifyUpdates: true,
   closeToTray: true,
   autostart: false,
   updateInfo: null,
@@ -186,6 +195,16 @@ export const useStore = create<AppState>((set) => ({
     await run(set, () => api.pluginInstall(profile, spec));
     await useStore.getState().loadPlugins();
   },
+  marketInstall: async (profile: string, spec: string) => {
+    await run(set, async () => {
+      const report = await api.pluginCheck(spec);
+      if (report.status === "incompatible") {
+        throw new Error(report.message);
+      }
+      return api.pluginInstall(profile, spec);
+    });
+    await useStore.getState().loadPlugins();
+  },
   removePlugin: async (profile: string, id: string) => {
     await run(set, () => api.pluginRemove(profile, id));
     await useStore.getState().loadPlugins();
@@ -211,9 +230,23 @@ export const useStore = create<AppState>((set) => ({
     await run(set, () => api.setCheckUpdates(enabled));
     set({ checkUpdates: enabled });
   },
+  setNotifyUpdates: async (enabled: boolean) => {
+    await run(set, () => api.setNotifyUpdates(enabled));
+    set({ notifyUpdates: enabled });
+  },
   setAutostart: async (enabled: boolean) => {
     await run(set, () => api.autostartSet(enabled));
     set({ autostart: enabled });
+  },
+  configExport: async () => {
+    await run(set, () => api.configExport());
+  },
+  configImport: async () => {
+    const imported = await run(set, () => api.configImport());
+    if (imported !== null) {
+      // Re-read the persisted preferences and re-apply them to the UI.
+      await useStore.getState().loadPrefs();
+    }
   },
   checkUpdate: async () => {
     const updateInfo = await run(set, () => api.checkUpdate());
@@ -234,6 +267,7 @@ export const useStore = create<AppState>((set) => ({
       language: prefs.language,
       theme: prefs.theme,
       checkUpdates: prefs.check_updates,
+      notifyUpdates: prefs.notify_updates,
       closeToTray: prefs.close_to_tray,
       autostart,
     });

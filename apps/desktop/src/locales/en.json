@@ -50,7 +50,12 @@
     "search": "Search",
     "searchTerms": "search terms",
     "searchEmpty": "Search the market to discover plugins.",
-    "by": "by {{publisher}}"
+    "by": "by {{publisher}}",
+    "installInto": "Install into profile {{profile}}",
+    "profileRequired": "Enter a profile first.",
+    "updated": "Updated {{date}}",
+    "popularity": "Popularity",
+    "quality": "Quality"
   },
   "settings": {
     "title": "Settings",
@@ -104,6 +109,12 @@
     "closeToTrayHint": "Closing the window hides DeepMate to the tray instead of quitting.",
     "updates": "Updates",
     "updatesHint": "Check for new DeepMate releases automatically.",
+    "notifications": "Release notifications",
+    "notificationsHint": "Notify when an automatic check finds a new release.",
+    "ownSettings": "DeepMate settings",
+    "ownSettingsHint": "Export your preferences to a portable file, or apply one from another machine.",
+    "exportSettings": "Export…",
+    "importSettings": "Import…",
     "checkNow": "Check now",
     "upToDate": "You're on the latest version.",
     "updateAvailable": "v{{version}} available"

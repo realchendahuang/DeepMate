@@ -11,8 +11,9 @@ use std::sync::{Arc, Mutex};
 use crate::adapter::{AdapterCapabilities, AdapterMetadata, Detection, HarnessAdapter};
 use crate::error::{CoreError, CoreResult};
 use crate::model::{
-    CheckStatus, DoctorCheck, DoctorReport, HarnessInfo, MarketEntry, MarketSource,
-    MarketSourceInfo, Model, Plugin, Profile, Provider, RuntimeStatus, RuntimeStatusKind,
+    CheckStatus, CompatReport, CompatStatus, DoctorCheck, DoctorReport, HarnessInfo, MarketEntry,
+    MarketSource, MarketSourceInfo, Model, Plugin, Profile, Provider, RuntimeStatus,
+    RuntimeStatusKind,
 };
 
 static NEXT_PID: AtomicU32 = AtomicU32::new(4200);
@@ -60,6 +61,8 @@ pub struct FakeAdapter {
     pub removed_models: Arc<Mutex<Vec<String>>>,
     pub market_entries: Vec<MarketEntry>,
     pub market_sources: Vec<MarketSourceInfo>,
+    // The verdict `plugin_compat` reports for any spec.
+    pub compat_report: CompatReport,
 }
 
 impl FakeAdapter {
@@ -122,6 +125,8 @@ impl FakeAdapter {
                 repository: Some("https://example.com/repo".to_string()),
                 publisher: Some("fake-publisher".to_string()),
                 updated: None,
+                popularity: Some(0.72),
+                quality: Some(0.91),
             }],
             market_sources: vec![
                 MarketSourceInfo {
@@ -137,6 +142,12 @@ impl FakeAdapter {
                     source: MarketSource::Community,
                 },
             ],
+            compat_report: CompatReport {
+                status: CompatStatus::Compatible,
+                harness_version: Some("9.9.9-test".to_string()),
+                required_range: Some("^9.0".to_string()),
+                message: "fake compat check passed".to_string(),
+            },
         }
     }
 
@@ -385,6 +396,10 @@ impl HarnessAdapter for FakeAdapter {
 
     async fn market_sources(&self) -> CoreResult<Vec<MarketSourceInfo>> {
         Ok(self.market_sources.clone())
+    }
+
+    async fn plugin_compat(&self, _spec: &str) -> CoreResult<CompatReport> {
+        Ok(self.compat_report.clone())
     }
 
     async fn doctor(&self) -> CoreResult<DoctorReport> {

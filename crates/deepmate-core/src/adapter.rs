@@ -3,7 +3,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::CoreResult;
 use crate::model::{
-    DoctorReport, MarketEntry, MarketSourceInfo, Model, Plugin, Profile, Provider, RuntimeStatus,
+    CompatReport, DoctorReport, MarketEntry, MarketSourceInfo, Model, Plugin, Profile, Provider,
+    RuntimeStatus,
 };
 
 // Static metadata for an adapter.
@@ -185,6 +186,18 @@ pub trait HarnessAdapter: Send + Sync {
     // List the market sources this adapter can discover plugins from.
     async fn market_sources(&self) -> CoreResult<Vec<MarketSourceInfo>> {
         Ok(Vec::new())
+    }
+
+    // Check whether a market package is compatible with the active harness.
+    //
+    // `spec` is the same package-name-with-optional-range syntax accepted by
+    // `install_plugin`. Adapters without a compatibility contract report
+    // `Unsupported`; callers treat that like an `Unknown` verdict.
+    async fn plugin_compat(&self, _spec: &str) -> CoreResult<CompatReport> {
+        Err(crate::error::CoreError::Unsupported(format!(
+            "{} does not implement plugin_compat()",
+            self.metadata().id
+        )))
     }
 
     async fn doctor(&self) -> CoreResult<DoctorReport>;

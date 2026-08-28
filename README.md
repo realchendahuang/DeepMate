@@ -197,8 +197,12 @@ deepmate model list            List available models
 deepmate plugin list [--check-updates]
                                 List installed plugins (optionally marking
                                 outdated ones from the market)
-deepmate plugin install <spec> [--profile <name>]
-                                Install a plugin into a profile
+deepmate plugin install <spec> [--profile <name>] [--force]
+                                Install a plugin into a profile; a definite
+                                "incompatible" compatibility verdict refuses
+                                the install unless --force is given
+deepmate plugin check <spec>    Check a market package's compatibility with
+                                the detected harness
 deepmate plugin remove <id> [--profile <name>]
                                 Remove a plugin from a profile
 deepmate plugin update [id] [--profile <name>]
@@ -210,17 +214,19 @@ deepmate snapshot export <name>
 deepmate snapshot import <name>
                                 Apply a snapshot to the active adapter (merge-style)
 deepmate snapshot list          List stored snapshots
+deepmate config export <path>  Write DeepMate's own settings to a portable file
+deepmate config import <path>  Replace DeepMate's own settings from a portable file
 ```
 
 Commands that the active adapter does not declare support for are rejected
 with a clear error instead of returning empty results. `--adapter test`
 supports the full surface; the DeepSeek Harness adapter currently supports
 runtime control, detect, status, open, doctor, profile list, provider list,
-model list, plugin list/install/remove/update, market list/search and
-snapshots. A second real adapter, `pi-agent`, exposes read-only inventory
-(providers, models, plugins) for Pi Agent and reports profiles, runtime,
-marketplace and snapshots as unsupported — a live demonstration of the
-capability gate.
+model list, plugin list/install/remove/update, plugin compatibility checks,
+market list/search and snapshots. A second real adapter, `pi-agent`, exposes
+read-only inventory (providers, models, plugins) for Pi Agent and reports
+profiles, runtime, marketplace, compatibility checks and snapshots as
+unsupported — a live demonstration of the capability gate.
 
 Append `--json` to any command for machine-readable output. Logs go to
 stderr and to `logs/deepmate.log` in the data directory, so JSON on stdout
@@ -272,14 +278,18 @@ Harness-owned state remains owned by the active harness and is accessed through 
 - Plugin inventory
 - Install / update / remove flows
 - Marketplace sources
-- Compatibility checks
-- Plugin diagnostics and trust signals
+- Compatibility checks (implemented: `deepmate plugin check` matches a
+  package's declared requirement against the detected harness, with an
+  install preflight and `--force` override)
+- Plugin diagnostics and trust signals (implemented: provenance metadata and
+  normalized npm popularity/quality scores on market results)
 
 ### Phase 3 — Portable setups
 
 - Environment snapshots (implemented in v0.6.0: `snapshot export / import /
   list` in the CLI and the desktop app)
-- Export / import of DeepMate's own configuration
+- Export / import of DeepMate's own configuration (implemented: `config
+  export / import` in the CLI and the desktop Settings page)
 - Profile portability
 - Private registries
 
@@ -324,6 +334,16 @@ Stage 6 (a second adapter):
   inventory (profiles, providers, models, plugins — never secrets) to JSON
   and apply it merge-style to the same adapter, from both the CLI and the
   desktop Settings page
+- Plugin compatibility checks and trust signals: market results carry
+  provenance plus normalized npm popularity/quality scores; a
+  `plugin_compat` adapter hook matches a package's declared `engines`
+  requirement against the detected harness (prerelease harnesses count as
+  their release line), `deepmate plugin check` inspects a package on demand,
+  `plugin install` runs the check as a preflight (`--force` overrides), and
+  the desktop Market tab installs search results behind the same preflight
+- Own-settings backup: `config export / import` moves DeepMate's own
+  configuration between machines as one JSON document, from the CLI or the
+  desktop Settings page with native save/open dialogs
 - A `pi-agent` adapter exposing read-only inventory for Pi Agent — the
   second real adapter and a live exercise of the capability gate
 - `deepmate-desktop` Tauri shell (React + TypeScript + Tailwind + shadcn/ui)
@@ -337,7 +357,10 @@ Stage 6 (a second adapter):
   action-history recording
 - System tray with close-to-tray behavior (hide instead of quit, restore
   from the tray menu or a macOS dock click) and an opt-in start-at-login
-  preference backed by OS login items
+  preference backed by OS login items; the tray also opens the harness web
+  UI and runs an on-demand release check
+- System notifications for a newer release — raised by the automatic startup
+  check (opt-out preference) and by the tray's explicit check
 - Update checking against the GitHub releases API (on by default, fails
   quiet when offline), surfaced as a banner on Overview and a check in
   Settings Preferences

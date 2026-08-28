@@ -22,8 +22,8 @@ use async_trait::async_trait;
 use deepmate_core::adapter::{AdapterCapabilities, AdapterMetadata, Detection, HarnessAdapter};
 use deepmate_core::error::{CoreError, CoreResult};
 use deepmate_core::model::{
-    CheckStatus, DoctorCheck, DoctorReport, HarnessInfo, MarketEntry, MarketSourceInfo, Model,
-    Plugin, Profile, Provider, RuntimeStatus, RuntimeStatusKind,
+    CheckStatus, CompatReport, DoctorCheck, DoctorReport, HarnessInfo, MarketEntry,
+    MarketSourceInfo, Model, Plugin, Profile, Provider, RuntimeStatus, RuntimeStatusKind,
 };
 use deepmate_platform::PlatformService;
 
@@ -463,6 +463,13 @@ impl HarnessAdapter for DeepSeekHarnessAdapter {
 
     async fn market_sources(&self) -> CoreResult<Vec<MarketSourceInfo>> {
         Ok(market::market_sources())
+    }
+
+    // Compatibility is a registry contract: the harness version detected from
+    // the CLI is matched against the package's declared `engines` requirement.
+    async fn plugin_compat(&self, spec: &str) -> CoreResult<CompatReport> {
+        let harness_version = self.cli_version();
+        market::Market::compat(&self.http, spec, harness_version).await
     }
 
     async fn doctor(&self) -> CoreResult<DoctorReport> {

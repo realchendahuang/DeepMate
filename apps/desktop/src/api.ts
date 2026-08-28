@@ -3,6 +3,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  CompatReport,
   DoctorReport,
   MarketEntry,
   MarketSourceInfo,
@@ -11,6 +12,7 @@ import type {
   Plugin,
   Profile,
   Provider,
+  UiPrefs,
   UpdateInfo,
 } from "./types";
 
@@ -45,6 +47,8 @@ export const api = {
   listMarketSources: () => invoke<MarketSourceInfo[]>("list_market_sources"),
   marketSearch: (query: string) =>
     invoke<MarketEntry[]>("market_search", { query }),
+  pluginCheck: (spec: string) =>
+    invoke<CompatReport>("plugin_check", { spec }),
   snapshotExport: (name: string) =>
     invoke<void>("snapshot_export", { name }),
   snapshotImport: (name: string) =>
@@ -56,16 +60,14 @@ export const api = {
     invoke<void>("set_close_to_tray", { enabled }),
   setCheckUpdates: (enabled: boolean) =>
     invoke<void>("set_check_updates", { enabled }),
+  setNotifyUpdates: (enabled: boolean) =>
+    invoke<void>("set_notify_updates", { enabled }),
   autostartGet: () => invoke<boolean>("autostart_get"),
   autostartSet: (enabled: boolean) =>
     invoke<void>("autostart_set", { enabled }),
   checkUpdate: () => invoke<UpdateInfo | null>("check_update"),
   openUrl: (url: string) => invoke<void>("open_url", { url }),
-  getConfig: () =>
-    invoke<{
-      language: string;
-      theme: string;
-      check_updates: boolean;
-      close_to_tray: boolean;
-    }>("get_config"),
+  configExport: () => invoke<string | null>("config_export"),
+  configImport: () => invoke<string | null>("config_import"),
+  getConfig: () => invoke<UiPrefs>("get_config"),
 };
