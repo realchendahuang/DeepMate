@@ -16,15 +16,19 @@ import {
   MinusCircle,
   Sparkles,
   Download,
+  X,
 } from "lucide-react";
 import { useStore } from "../store";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
-import { EmptyState } from "../components/ui/data-list";
+import { Skeleton } from "../components/ui/skeleton";
+import { EmptyState } from "../components/ui/empty-state";
 import { PageBody, PageHeader, SectionHeader } from "../components/ui/page";
-import type { CheckStatus } from "../types";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../components/ui/tooltip";
+import type { CheckStatus } from "../api";
 import { cn } from "../lib/utils";
+import type { View } from "../components/layout/nav";
 
 const STATUS_TONE: Record<string, string> = {
   running: "pass",
@@ -48,11 +52,11 @@ const CHECK_TONE: Record<CheckStatus, string> = {
   skip: "text-skip",
 };
 
-export function OverviewPage() {
+export function OverviewPage({ onNavigate }: { onNavigate?: (view: View) => void }) {
   const { t } = useTranslation();
   const overview = useStore((s) => s.overview);
   const doctor = useStore((s) => s.doctor);
-  const busy = useStore((s) => s.busy);
+  const busyAction = useStore((s) => s.busyAction);
   const refreshAll = useStore((s) => s.refreshAll);
   const runtimeStart = useStore((s) => s.runtimeStart);
   const runtimeStop = useStore((s) => s.runtimeStop);
@@ -62,24 +66,40 @@ export function OverviewPage() {
   const updateInfo = useStore((s) => s.updateInfo);
   const installUpdate = useStore((s) => s.installUpdate);
   const openRelease = useStore((s) => s.openRelease);
+  const dismissUpdate = useStore((s) => s.dismissUpdate);
 
   useEffect(() => {
     refreshAll();
   }, [refreshAll]);
 
   if (!overview) {
-    return <PageBody className="text-text-dim">{t("overview.title")}...</PageBody>;
+    return (
+      <PageBody className="space-y-5">
+        <PageHeader title={t("overview.title")} />
+        <Skeleton className="h-40 w-full" />
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          {[0, 1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-20 w-full" />
+          ))}
+        </div>
+        <Skeleton className="h-32 w-full" />
+      </PageBody>
+    );
   }
 
   const { detection, status, counts } = overview;
   const harnessFound = detection.found;
   const statusTone = STATUS_TONE[status.kind] ?? "neutral";
   const running = status.kind === "running";
+  const refreshing = busyAction === "refresh";
+  const installing = busyAction === "update-install";
+  const busy = busyAction !== null;
+
   const stats = [
-    { label: t("overview.profiles"), value: counts.profiles, icon: Layers },
-    { label: t("overview.providers"), value: counts.providers, icon: Cloud },
-    { label: t("overview.models"), value: counts.models, icon: Cpu },
-    { label: t("overview.plugins"), value: counts.plugins, icon: Package },
+    { label: t("overview.profiles"), value: counts.profiles, icon: Layers, view: "settings" as View },
+    { label: t("overview.providers"), value: counts.providers, icon: Cloud, view: "settings" as View },
+    { label: t("overview.models"), value: counts.models, icon: Cpu, view: "settings" as View },
+    { label: t("overview.plugins"), value: counts.plugins, icon: Package, view: "plugins" as View },
   ];
 
   return (
@@ -87,8 +107,8 @@ export function OverviewPage() {
       <PageHeader
         title={t("overview.title")}
         actions={
-          <Button type="button" onClick={refreshAll} disabled={busy}>
-            <RotateCw className="h-4 w-4" />
+          <Button type="button" onClick={refreshAll} disabled={refreshing}>
+            <RotateCw className={cn("h-4 w-4", refreshing && "animate-spin")} />
             {t("overview.refresh")}
           </Button>
         }
@@ -106,20 +126,19 @@ export function OverviewPage() {
                 variant="primary"
                 size="sm"
                 onClick={installUpdate}
-                disabled={busy}
+                disabled={installing}
                 title={t("overview.installUpdateHint")}
               >
-                <Download className="h-4 w-4" />
-                {t("overview.installUpdate")}
+                <Download className={cn("h-4 w-4", installing && "animate-pulse")} />
+                {installing ? t("overview.downloading") : t("overview.installUpdate")}
               </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => openRelease(updateInfo.url)}
-                title={updateInfo.url}
-              >
+              <Button variant="secondary" size="sm" onClick={() => openRelease(updateInfo.url)} title={updateInfo.url}>
                 <ExternalLink className="h-4 w-4" />
                 {t("overview.viewRelease")}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={dismissUpdate} aria-label={t("overview.dismissUpdate")}>
+                <X className="h-4 w-4" />
+                {t("overview.dismissUpdate")}
               </Button>
             </div>
           </CardContent>
@@ -160,10 +179,17 @@ export function OverviewPage() {
                 )}
               </div>
             </div>
-            <Button variant="primary" onClick={openHarness} disabled={busy || !running}>
-              <ExternalLink className="h-4 w-4" />
-              {t("overview.openHarness")}
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span>
+                  <Button variant="primary" onClick={openHarness} disabled={busy || !running}>
+                    <ExternalLink className="h-4 w-4" />
+                    {t("overview.openHarness")}
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>{t("overview.openHarnessHint")}</TooltipContent>
+            </Tooltip>
           </div>
 
           {harnessFound && detection.harness && (
@@ -195,18 +221,25 @@ export function OverviewPage() {
       </Card>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {stats.map(({ label, value, icon: Icon }) => (
-          <Card key={label}>
-            <CardContent className="flex items-center gap-3 p-4">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-accent-soft">
-                <Icon className="h-[18px] w-[18px] text-accent" />
-              </div>
-              <div className="min-w-0">
-                <div className="text-display font-bold text-text">{value == null ? "-" : value}</div>
-                <div className="truncate text-small text-text-dim">{label}</div>
-              </div>
-            </CardContent>
-          </Card>
+        {stats.map(({ label, value, icon: Icon, view: target }) => (
+          <button
+            key={label}
+            type="button"
+            onClick={() => onNavigate?.(target)}
+            className="rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+          >
+            <Card className="transition-colors hover:bg-hover">
+              <CardContent className="flex items-center gap-3 p-4">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-accent-soft">
+                  <Icon className="h-[18px] w-[18px] text-accent" />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-display font-bold text-text">{value == null ? "-" : value}</div>
+                  <div className="truncate text-small text-text-dim">{label}</div>
+                </div>
+              </CardContent>
+            </Card>
+          </button>
         ))}
       </div>
 
@@ -214,9 +247,9 @@ export function OverviewPage() {
         <SectionHeader
           title={t("overview.diagnostics")}
           actions={
-            <Button variant="primary" onClick={runDoctor} disabled={busy}>
+            <Button variant="primary" onClick={runDoctor} disabled={busyAction === "doctor"}>
               <ShieldCheck className="h-4 w-4" />
-              {busy ? t("overview.running") : t("overview.runDoctor")}
+              {busyAction === "doctor" ? t("overview.running") : t("overview.runDoctor")}
             </Button>
           }
         />

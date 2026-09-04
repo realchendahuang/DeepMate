@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "",
+        "title": "DeepMate",
         "width": 1120,
         "height": 720,
         "minWidth": 640,

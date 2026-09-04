@@ -1,6 +1,8 @@
-import * as React from "react";
-import { cva, type VariantProps } from "class-variance-authority";
-import { cn } from "../../lib/utils";
+import * as React from "react"
+import { cva, type VariantProps } from "class-variance-authority"
+import { Slot } from "radix-ui"
+
+import { cn } from "@/lib/utils"
 
 // Small status pill, styled after the Slint Badge. The tone vocabulary
 // (pass | warn | fail | skip | accent | neutral) drives the color everywhere.
@@ -20,18 +22,27 @@ const badgeVariants = cva(
     defaultVariants: {
       variant: "neutral",
     },
-  },
-);
+  }
+)
 
-export interface BadgeProps
-  extends React.HTMLAttributes<HTMLSpanElement>,
-    VariantProps<typeof badgeVariants> {
-  dot?: boolean;
-}
+function Badge({
+  className,
+  variant = "neutral",
+  dot = true,
+  asChild = false,
+  children,
+  ...props
+}: React.ComponentProps<"span"> &
+  VariantProps<typeof badgeVariants> & { dot?: boolean; asChild?: boolean }) {
+  const Comp = asChild ? Slot.Root : "span"
 
-function Badge({ className, variant, dot = true, children, ...props }: BadgeProps) {
   return (
-    <span className={cn(badgeVariants({ variant }), className)} {...props}>
+    <Comp
+      data-slot="badge"
+      data-variant={variant}
+      className={cn(badgeVariants({ variant }), className)}
+      {...props}
+    >
       {dot && (
         <span
           className={cn("h-1.5 w-1.5 rounded-full", {
@@ -45,8 +56,8 @@ function Badge({ className, variant, dot = true, children, ...props }: BadgeProp
         />
       )}
       {children}
-    </span>
-  );
+    </Comp>
+  )
 }
 
-export { Badge, badgeVariants };
+export { Badge, badgeVariants }

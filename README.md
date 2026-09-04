@@ -126,7 +126,7 @@ The current planned stack is:
 - **Rust** — control core, adapters, runtime management and shared domain logic
 - **Tauri 2** — cross-platform desktop shell (Rust backend + system WebView)
 - **React + TypeScript** — desktop frontend
-- **TailwindCSS + shadcn/ui** — desktop styling and component library
+- **TailwindCSS v4 + shadcn/ui** — desktop styling and component library
 - **Tokio** — asynchronous runtime and background work
 - **reqwest + rustls** — network access
 - **Serde** — serialization foundation

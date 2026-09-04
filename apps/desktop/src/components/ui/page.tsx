@@ -3,10 +3,12 @@ import { ArrowLeft } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { Button } from "./button";
 
-interface PageBodyProps extends React.HTMLAttributes<HTMLDivElement> {}
-
-export function PageBody({ className, ...props }: PageBodyProps) {
-  return <div className={cn("w-full px-4 py-5 md:px-6 md:py-6", className)} {...props} />;
+// The single scrollable page column. Content is capped at the `content`
+// width so lines stay readable on wide windows; the column stays left-aligned.
+export function PageBody({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div className={cn("w-full max-w-content px-4 py-5 md:px-6 md:py-6", className)} {...props} />
+  );
 }
 
 interface PageHeaderProps extends React.HTMLAttributes<HTMLDivElement> {

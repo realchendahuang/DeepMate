@@ -15,6 +15,7 @@
     "version": "版本：{{version}}",
     "pid": "PID {{pid}}",
     "openHarness": "打开 Harness",
+    "openHarnessHint": "在浏览器中打开 harness 的 Web 界面。",
     "refresh": "刷新",
     "start": "启动",
     "stop": "停止",
@@ -32,7 +33,9 @@
     "updateAvailable": "DeepMate v{{version}} 已发布。",
     "viewRelease": "查看发布",
     "installUpdate": "下载并安装",
-    "installUpdateHint": "下载安装包、校验签名摘要并打开安装器。"
+    "installUpdateHint": "下载安装包、校验签名摘要并打开安装器。",
+    "downloading": "下载中…",
+    "dismissUpdate": "稍后"
   },
   "plugins": {
     "title": "插件",
@@ -54,9 +57,15 @@
     "searchEmpty": "搜索市场以发现插件。",
     "marketEmpty": "精选清单为空。搜索市场以发现插件。",
     "all": "全部",
+    "results": "共 {{count}} 个结果",
+    "installedBadge": "已安装",
+    "searchInstalled": "筛选已安装插件",
+    "goToMarket": "去市场看看",
     "by": "来自 {{publisher}}",
     "installInto": "安装到配置文件 {{profile}}",
     "profileRequired": "请先填写配置文件。",
+    "removeConfirmTitle": "移除插件？",
+    "removeConfirmBody": "将从配置文件中卸载 \"{{name}}\"。此操作无法撤销。",
     "updated": "更新于 {{date}}",
     "popularity": "热度",
     "quality": "质量",
@@ -144,7 +153,45 @@
     "checkNow": "立即检查",
     "upToDate": "已是最新版本。",
     "updateAvailable": "新版本 v{{version}}",
-    "installUpdate": "立即安装"
+    "installUpdate": "立即安装",
+    "deleteSnapshot": "删除",
+    "deleteSnapshotConfirmTitle": "删除快照？",
+    "deleteSnapshotConfirmBody": "将永久删除快照 \"{{name}}\"。此操作无法撤销。",
+    "deleteProfileConfirmTitle": "删除配置文件？",
+    "deleteProfileConfirmBody": "将删除配置文件 \"{{name}}\" 及其插件。此操作无法撤销。",
+    "deleteProviderConfirmTitle": "删除提供商？",
+    "deleteProviderConfirmBody": "将删除提供商 \"{{name}}\" 及其模型。此操作无法撤销。",
+    "deleteModelConfirmTitle": "删除模型？",
+    "deleteModelConfirmBody": "将删除模型 \"{{name}}\"。此操作无法撤销。",
+    "importSnapshotConfirmTitle": "导入快照？",
+    "importSnapshotConfirmBody": "将用快照 \"{{name}}\" 覆盖当前的配置文件、提供商和模型。",
+    "importConfigConfirmTitle": "导入设置？",
+    "importConfigConfirmBody": "将用导入的文件覆盖当前的 DeepMate 偏好设置。",
+    "confirm": "确认",
+    "cancel": "取消"
+  },
+  "common": {
+    "errors": {
+      "incompatible": "该插件与当前安装的 harness 不兼容。",
+      "notFound": "未找到请求的项目。",
+      "alreadyExists": "该项目已存在。",
+      "network": "发生网络错误。请检查网络连接后重试。",
+      "permission": "权限被拒绝。请检查文件或系统权限。",
+      "checksum": "下载的文件未通过校验。",
+      "generic": "出错了，请重试。"
+    },
+    "success": {
+      "installed": "已安装。",
+      "removed": "已删除。",
+      "updated": "已更新。",
+      "saved": "已保存。",
+      "exported": "已导出。",
+      "imported": "已导入。",
+      "snapshotExported": "快照已导出。",
+      "snapshotImported": "快照已导入。",
+      "updateInstalled": "更新已安装。"
+    },
+    "loading": "加载中…"
   },
   "status": {
     "running": "运行中",

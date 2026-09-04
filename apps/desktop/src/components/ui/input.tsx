@@ -1,21 +1,21 @@
-import * as React from "react";
-import { cn } from "../../lib/utils";
+import * as React from "react"
+
+import { cn } from "@/lib/utils"
 
 // Single-line text input styled after the Slint TextField: inset surface,
 // hairline border that turns accent on focus.
-const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
-  ({ className, type, ...props }, ref) => (
+function Input({ className, type, ...props }: React.ComponentProps<"input">) {
+  return (
     <input
       type={type}
+      data-slot="input"
       className={cn(
-        "flex h-[32px] w-full rounded-md border border-border bg-inset px-2.5 text-body text-text placeholder:text-text-faint focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20",
-        className,
+        "flex h-[32px] w-full min-w-0 rounded-md border border-border bg-inset px-2.5 text-body text-text transition-colors outline-none placeholder:text-text-faint focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/20 disabled:pointer-events-none disabled:opacity-50",
+        className
       )}
-      ref={ref}
       {...props}
     />
-  ),
-);
-Input.displayName = "Input";
+  )
+}
 
-export { Input };
+export { Input }

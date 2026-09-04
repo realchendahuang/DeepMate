@@ -51,11 +51,29 @@ pub fn run() {
         close_to_tray: Arc::clone(&close_to_tray),
     };
 
+    // Regenerate the frontend's typed bindings on every debug build, so the
+    // React side can never drift from the Rust command surface. Release
+    // builds skip the export and use the last generated file.
+    #[cfg(debug_assertions)]
+    specta_builder()
+        .export(
+            specta_typescript::Typescript::default(),
+            "../src/bindings.ts",
+        )
+        .expect("failed to export TypeScript bindings");
+
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_store::Builder::new().build())
+        // Remember the window size and position across sessions.
+        .plugin(tauri_plugin_window_state::Builder::default().build())
+        // A second instance focuses the existing window instead of opening
+        // a duplicate control center.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_main_window(app);
+        }))
         // Auto-start registers the app with the OS login items; carry the
         // active adapter so a login-started instance manages the same harness
         // the user chose in the desktop session.
@@ -65,46 +83,7 @@ pub fn run() {
                 .build(),
         )
         .manage(state)
-        .invoke_handler(tauri::generate_handler![
-            commands::refresh_all,
-            commands::runtime_start,
-            commands::runtime_stop,
-            commands::runtime_restart,
-            commands::open_harness,
-            commands::run_doctor,
-            commands::list_profiles,
-            commands::list_providers,
-            commands::list_models,
-            commands::upsert_provider,
-            commands::remove_provider,
-            commands::upsert_model,
-            commands::remove_model,
-            commands::create_profile,
-            commands::remove_profile,
-            commands::list_plugins,
-            commands::plugin_install,
-            commands::plugin_remove,
-            commands::plugin_update,
-            commands::list_market_sources,
-            commands::market_search,
-            commands::plugin_check,
-            commands::snapshot_export,
-            commands::snapshot_import,
-            commands::snapshot_list,
-            commands::config_export,
-            commands::config_import,
-            commands::set_language,
-            commands::set_theme,
-            commands::set_close_to_tray,
-            commands::set_check_updates,
-            commands::set_notify_updates,
-            commands::autostart_get,
-            commands::autostart_set,
-            commands::check_update,
-            commands::update_install,
-            commands::open_url,
-            commands::get_config,
-        ])
+        .invoke_handler(specta_builder().invoke_handler())
         .setup(move |app| {
             if let Some(window) = app.get_webview_window("main") {
                 let close_to_tray = Arc::clone(&close_to_tray);
@@ -168,12 +147,7 @@ pub fn run() {
 fn setup_tray(app: &tauri::App, language: &str) -> tauri::Result<()> {
     let zh = language == "zh";
     let (show_label, harness_label, updates_label, quit_label) = if zh {
-        (
-            "显示 DeepMate",
-            "打开 Harness",
-            "检查更新",
-            "退出",
-        )
+        ("显示 DeepMate", "打开 Harness", "检查更新", "退出")
     } else {
         ("Show DeepMate", "Open Harness", "Check Updates", "Quit")
     };
@@ -269,6 +243,53 @@ fn show_main_window<R: tauri::Runtime>(app: &impl tauri::Manager<R>) {
         let _ = window.unminimize();
         let _ = window.set_focus();
     }
+}
+
+// The command bridge, shared by the invoke handler and the build-time
+// TypeScript export (see build.rs). The command list lives here so the
+// runtime registration and the generated bindings can never disagree.
+fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
+    tauri_specta::Builder::<tauri::Wry>::new().commands(tauri_specta::collect_commands![
+        commands::refresh_all,
+        commands::runtime_start,
+        commands::runtime_stop,
+        commands::runtime_restart,
+        commands::open_harness,
+        commands::run_doctor,
+        commands::list_profiles,
+        commands::list_providers,
+        commands::list_models,
+        commands::upsert_provider,
+        commands::remove_provider,
+        commands::upsert_model,
+        commands::remove_model,
+        commands::create_profile,
+        commands::remove_profile,
+        commands::list_plugins,
+        commands::plugin_install,
+        commands::plugin_remove,
+        commands::plugin_update,
+        commands::list_market_sources,
+        commands::market_search,
+        commands::plugin_check,
+        commands::snapshot_export,
+        commands::snapshot_import,
+        commands::snapshot_list,
+        commands::snapshot_delete,
+        commands::config_export,
+        commands::config_import,
+        commands::set_language,
+        commands::set_theme,
+        commands::set_close_to_tray,
+        commands::set_check_updates,
+        commands::set_notify_updates,
+        commands::autostart_get,
+        commands::autostart_set,
+        commands::check_update,
+        commands::update_install,
+        commands::open_url,
+        commands::get_config,
+    ])
 }
 
 // The desktop app accepts the same --adapter / --data-dir flags as the CLI.

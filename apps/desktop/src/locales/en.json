@@ -15,6 +15,7 @@
     "version": "Version: {{version}}",
     "pid": "PID {{pid}}",
     "openHarness": "Open Harness",
+    "openHarnessHint": "Opens the harness web UI in your browser.",
     "refresh": "Refresh",
     "start": "Start",
     "stop": "Stop",
@@ -32,7 +33,9 @@
     "updateAvailable": "DeepMate v{{version}} is available.",
     "viewRelease": "View release",
     "installUpdate": "Download & install",
-    "installUpdateHint": "Downloads the release bundle, verifies its checksum and opens the installer."
+    "installUpdateHint": "Downloads the release bundle, verifies its checksum and opens the installer.",
+    "downloading": "Downloading…",
+    "dismissUpdate": "Later"
   },
   "plugins": {
     "title": "Plugins",
@@ -54,9 +57,15 @@
     "searchEmpty": "Search the market to discover plugins.",
     "marketEmpty": "The curated list is empty. Search the market to discover plugins.",
     "all": "All",
+    "results": "{{count}} results",
+    "installedBadge": "installed",
+    "searchInstalled": "filter installed plugins",
+    "goToMarket": "Browse the market",
     "by": "by {{publisher}}",
     "installInto": "Install into profile {{profile}}",
     "profileRequired": "Enter a profile first.",
+    "removeConfirmTitle": "Remove plugin?",
+    "removeConfirmBody": "This uninstalls \"{{name}}\" from the profile. This cannot be undone.",
     "updated": "Updated {{date}}",
     "popularity": "Popularity",
     "quality": "Quality",
@@ -144,7 +153,45 @@
     "checkNow": "Check now",
     "upToDate": "You're on the latest version.",
     "updateAvailable": "v{{version}} available",
-    "installUpdate": "Install now"
+    "installUpdate": "Install now",
+    "deleteSnapshot": "Delete",
+    "deleteSnapshotConfirmTitle": "Delete snapshot?",
+    "deleteSnapshotConfirmBody": "This permanently removes the snapshot \"{{name}}\". This cannot be undone.",
+    "deleteProfileConfirmTitle": "Delete profile?",
+    "deleteProfileConfirmBody": "This removes the profile \"{{name}}\" and its plugins. This cannot be undone.",
+    "deleteProviderConfirmTitle": "Delete provider?",
+    "deleteProviderConfirmBody": "This removes the provider \"{{name}}\" and its models. This cannot be undone.",
+    "deleteModelConfirmTitle": "Delete model?",
+    "deleteModelConfirmBody": "This removes the model \"{{name}}\". This cannot be undone.",
+    "importSnapshotConfirmTitle": "Import snapshot?",
+    "importSnapshotConfirmBody": "This overwrites the current profiles, providers and models with the snapshot \"{{name}}\".",
+    "importConfigConfirmTitle": "Import settings?",
+    "importConfigConfirmBody": "This overwrites the current DeepMate preferences with the imported file.",
+    "confirm": "Confirm",
+    "cancel": "Cancel"
+  },
+  "common": {
+    "errors": {
+      "incompatible": "This plugin is not compatible with the installed harness.",
+      "notFound": "The requested item was not found.",
+      "alreadyExists": "This item already exists.",
+      "network": "A network error occurred. Check your connection and try again.",
+      "permission": "Permission denied. Check the file or system permissions.",
+      "checksum": "The downloaded file failed its checksum verification.",
+      "generic": "Something went wrong. Try again."
+    },
+    "success": {
+      "installed": "Installed.",
+      "removed": "Removed.",
+      "updated": "Updated.",
+      "saved": "Saved.",
+      "exported": "Exported.",
+      "imported": "Imported.",
+      "snapshotExported": "Snapshot exported.",
+      "snapshotImported": "Snapshot imported.",
+      "updateInstalled": "Update installed."
+    },
+    "loading": "Loading…"
   },
   "status": {
     "running": "running",

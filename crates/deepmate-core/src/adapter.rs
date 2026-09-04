@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use specta::Type;
 
 use crate::error::CoreResult;
 use crate::model::{
@@ -8,7 +9,7 @@ use crate::model::{
 };
 
 // Static metadata for an adapter.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct AdapterMetadata {
     pub id: String,
     pub name: String,
@@ -19,7 +20,7 @@ pub struct AdapterMetadata {
 //
 // The UI and CLI use this to show only operations the active harness actually
 // supports.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct AdapterCapabilities {
     pub runtime: bool,
     pub profiles: bool,
@@ -33,7 +34,7 @@ pub struct AdapterCapabilities {
 }
 
 // Result of a harness detection attempt.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct Detection {
     pub found: bool,
     pub harness: Option<crate::model::HarnessInfo>,

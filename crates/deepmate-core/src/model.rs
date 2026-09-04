@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
+use specta::Type;
 
 // Basic information about a detected harness.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct HarnessInfo {
     pub id: String,
     pub name: String,
@@ -10,7 +11,7 @@ pub struct HarnessInfo {
 }
 
 // Coarse runtime status.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeStatusKind {
     Unknown,
@@ -21,7 +22,7 @@ pub enum RuntimeStatusKind {
 }
 
 // Runtime status returned by an adapter.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct RuntimeStatus {
     pub kind: RuntimeStatusKind,
     pub pid: Option<u32>,
@@ -63,7 +64,7 @@ impl RuntimeStatus {
 }
 
 // A single Doctor check result.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct DoctorCheck {
     pub id: String,
     pub status: CheckStatus,
@@ -73,7 +74,7 @@ pub struct DoctorCheck {
 }
 
 // Status for a Doctor check.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum CheckStatus {
     Pass,
@@ -83,14 +84,14 @@ pub enum CheckStatus {
 }
 
 // A full Doctor report.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct DoctorReport {
     pub adapter_id: String,
     pub checks: Vec<DoctorCheck>,
 }
 
 // Harness profile (normalized representation).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct Profile {
     pub id: String,
     pub name: String,
@@ -103,7 +104,7 @@ pub struct Profile {
 // `thinkingFormat`, `supportsReasoningEffort`) carried through untouched.
 // It is serialized as a JSON string so the UI can offer a raw advanced
 // editor without the core knowing every possible harness-specific flag.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct Provider {
     pub id: String,
     pub name: String,
@@ -123,12 +124,16 @@ pub struct Provider {
 // `reasoning_efforts` and `compat` are opaque capability blocks (e.g.
 // `{ "max": "max" }` / `{ "supportsStore": false, "thinkingFormat": ... }`)
 // carried through as raw JSON strings for the same reason as `Provider::compat`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct Model {
     pub id: String,
     pub name: String,
     pub provider: Option<String>,
+    // Exported to TypeScript as u32: token counts never approach 2^53, and
+    // specta forbids u64 in bindings to avoid JS precision loss.
+    #[specta(type = Option<u32>)]
     pub context_window: Option<u64>,
+    #[specta(type = Option<u32>)]
     pub max_tokens: Option<u64>,
     // The input modalities the model accepts, e.g. `["text", "image"]`.
     pub input: Option<Vec<String>>,
@@ -137,7 +142,7 @@ pub struct Model {
 }
 
 // Plugin entry (normalized representation).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct Plugin {
     pub id: String,
     pub name: String,
@@ -155,7 +160,7 @@ pub struct Plugin {
 }
 
 // A marketplace search result (normalized representation).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct MarketEntry {
     pub id: String,
     pub name: String,
@@ -182,7 +187,7 @@ pub struct MarketEntry {
 impl Eq for MarketEntry {}
 
 // Where a market entry came from.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum MarketSource {
     // Official, vetted sources (e.g. the harness vendor's npm scope).
@@ -192,7 +197,7 @@ pub enum MarketSource {
 }
 
 // Outcome of a plugin compatibility check.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum CompatStatus {
     // The plugin declares a requirement the active harness satisfies.
@@ -209,7 +214,7 @@ pub enum CompatStatus {
 // `message` is a human-readable detail line in English (like Doctor check
 // summaries); the UI surfaces `status` through its own translations and uses
 // `message` as supporting detail.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 pub struct CompatReport {
     pub status: CompatStatus,
     // The detected harness version the check ran against.
@@ -261,7 +266,7 @@ pub fn compat_status(harness: Option<&str>, required: Option<&str>) -> CompatSta
 }
 
 // A market source DeepMate knows about (normalized representation).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct MarketSourceInfo {
     pub id: String,
     pub name: String,

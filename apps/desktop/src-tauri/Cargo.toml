@@ -19,7 +19,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
+tauri = { version = "2", features = ["tray-icon", "specta"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
@@ -31,7 +31,12 @@ anyhow = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time"] }
 tracing = "0.1"
+specta = { version = "=2.0.0-rc.25", features = ["derive"] }
+tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
+specta-typescript = "0.0.12"
 deepmate-core = { path = "../../../crates/deepmate-core" }
 deepmate-platform = { path = "../../../crates/deepmate-platform" }
 deepmate-app = { path = "../../../crates/deepmate-app" }
 deepseek-harness = { path = "../../../crates/adapters/deepseek-harness" }
+tauri-plugin-window-state = "2"
+tauri-plugin-single-instance = "2"

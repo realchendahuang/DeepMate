@@ -3,7 +3,9 @@
 // flags so every page reads from one source of truth.
 
 import { create } from "zustand";
+import { toast } from "sonner";
 import { api } from "./api";
+import { mapError } from "./lib/errors";
 import type {
   DoctorReport,
   MarketEntry,
@@ -14,7 +16,45 @@ import type {
   Profile,
   Provider,
   UpdateInfo,
-} from "./types";
+} from "./api";
+
+// Named operations for the busy tracker. Read-only operations (loads, search,
+// doctor) only disable their own trigger; mutating operations disable
+// everything that would conflict with them.
+export type BusyAction =
+  | "refresh"
+  | "runtime"
+  | "doctor"
+  | "load"
+  | "search"
+  | "install"
+  | "remove"
+  | "update"
+  | "save"
+  | "prefs"
+  | "update-install"
+  | "config"
+  | "snapshot";
+
+// Mutating operations that must not run concurrently with each other.
+const MUTATING: ReadonlySet<BusyAction> = new Set([
+  "install",
+  "remove",
+  "update",
+  "save",
+  "prefs",
+  "update-install",
+  "config",
+  "snapshot",
+]);
+
+// A read-only operation never blocks anything; a mutating operation blocks
+// every other mutating operation (and itself).
+export function isBlocked(active: BusyAction | null, candidate: BusyAction): boolean {
+  if (active === null) return false;
+  if (active === candidate) return true;
+  return MUTATING.has(active) && MUTATING.has(candidate);
+}
 
 interface AppState {
   // Overview.
@@ -29,8 +69,7 @@ interface AppState {
   doctor: DoctorReport | null;
   snapshots: string[];
   // UI.
-  busy: boolean;
-  error: string | null;
+  busyAction: BusyAction | null;
   language: string;
   theme: string;
   checkUpdates: boolean;
@@ -76,28 +115,33 @@ interface AppState {
   // Download the desktop bundle for this platform, verify its checksum and
   // hand it to the OS installer. A stale banner (already up to date) clears.
   installUpdate: () => Promise<void>;
+  // Hide the update banner until the next check finds a newer release.
+  dismissUpdate: () => void;
   openRelease: (url: string) => Promise<void>;
   configExport: () => Promise<void>;
   configImport: () => Promise<void>;
   loadPrefs: () => Promise<void>;
   snapshotExport: (name: string) => Promise<void>;
   snapshotImport: (name: string) => Promise<void>;
+  snapshotDelete: (name: string) => Promise<void>;
   loadSnapshots: () => Promise<void>;
 }
 
-// Wrap a command with busy/error handling.
+// Wrap a command with busy/error handling. Failures surface as a toast with
+// a friendly message; the raw error is rethrown for callers that need it.
 async function run<T>(
   set: (partial: Partial<AppState>) => void,
+  action: BusyAction,
   fn: () => Promise<T>,
 ): Promise<T> {
-  set({ busy: true, error: null });
+  set({ busyAction: action });
   try {
-    const result = await fn();
-    set({ busy: false });
-    return result;
+    return await fn();
   } catch (e) {
-    set({ busy: false, error: String(e) });
+    toast.error(mapError(e));
     throw e;
+  } finally {
+    set({ busyAction: null });
   }
 }
 
@@ -111,8 +155,7 @@ export const useStore = create<AppState>((set) => ({
   marketEntries: [],
   doctor: null,
   snapshots: [],
-  busy: false,
-  error: null,
+  busyAction: null,
   language: "en",
   theme: "system",
   checkUpdates: true,
@@ -123,83 +166,83 @@ export const useStore = create<AppState>((set) => ({
   updateChecked: false,
 
   refreshAll: async () => {
-    const overview = await run(set, () => api.refreshAll());
+    const overview = await run(set, "refresh", () => api.refreshAll());
     set({ overview });
   },
   runtimeStart: async () => {
-    await run(set, () => api.runtimeStart());
+    await run(set, "runtime", () => api.runtimeStart());
     await useStore.getState().refreshAll();
   },
   runtimeStop: async () => {
-    await run(set, () => api.runtimeStop());
+    await run(set, "runtime", () => api.runtimeStop());
     await useStore.getState().refreshAll();
   },
   runtimeRestart: async () => {
-    await run(set, () => api.runtimeRestart());
+    await run(set, "runtime", () => api.runtimeRestart());
     await useStore.getState().refreshAll();
   },
   openHarness: async () => {
-    await run(set, () => api.openHarness());
+    await run(set, "refresh", () => api.openHarness());
   },
   runDoctor: async () => {
-    const doctor = await run(set, () => api.runDoctor());
+    const doctor = await run(set, "doctor", () => api.runDoctor());
     set({ doctor });
   },
   loadProfiles: async () => {
-    const profiles = await run(set, () => api.listProfiles());
+    const profiles = await run(set, "load", () => api.listProfiles());
     set({ profiles });
   },
   loadProviders: async () => {
-    const providers = await run(set, () => api.listProviders());
+    const providers = await run(set, "load", () => api.listProviders());
     set({ providers });
   },
   loadModels: async () => {
-    const models = await run(set, () => api.listModels());
+    const models = await run(set, "load", () => api.listModels());
     set({ models });
   },
   upsertProvider: async (provider: Provider) => {
-    await run(set, () => api.upsertProvider(provider));
+    await run(set, "save", () => api.upsertProvider(provider));
     await useStore.getState().loadProviders();
   },
   removeProvider: async (id: string) => {
-    await run(set, () => api.removeProvider(id));
+    await run(set, "remove", () => api.removeProvider(id));
     await useStore.getState().loadProviders();
     await useStore.getState().loadModels();
   },
   upsertModel: async (provider: string, model: Model) => {
-    await run(set, () => api.upsertModel(provider, model));
+    await run(set, "save", () => api.upsertModel(provider, model));
     await useStore.getState().loadModels();
   },
   removeModel: async (provider: string, id: string) => {
-    await run(set, () => api.removeModel(provider, id));
+    await run(set, "remove", () => api.removeModel(provider, id));
     await useStore.getState().loadModels();
   },
   createProfile: async (name: string) => {
-    await run(set, () => api.createProfile(name));
+    await run(set, "save", () => api.createProfile(name));
     await useStore.getState().loadProfiles();
   },
   removeProfile: async (name: string) => {
-    await run(set, () => api.removeProfile(name));
+    await run(set, "remove", () => api.removeProfile(name));
     await useStore.getState().loadProfiles();
   },
   loadPlugins: async () => {
-    const plugins = await run(set, () => api.listPlugins());
+    const plugins = await run(set, "load", () => api.listPlugins());
     set({ plugins });
   },
   loadMarketSources: async () => {
-    const marketSources = await run(set, () => api.listMarketSources());
+    const marketSources = await run(set, "load", () => api.listMarketSources());
     set({ marketSources });
   },
   searchMarket: async (query: string) => {
-    const marketEntries = await run(set, () => api.marketSearch(query));
+    const marketEntries = await run(set, "search", () => api.marketSearch(query));
     set({ marketEntries });
   },
   installPlugin: async (profile: string, spec: string) => {
-    await run(set, () => api.pluginInstall(profile, spec));
+    await run(set, "install", () => api.pluginInstall(profile, spec));
     await useStore.getState().loadPlugins();
   },
   marketInstall: async (profile: string, spec: string) => {
-    await run(set, async () => {
+    await run(set, "install", async () => {
       const report = await api.pluginCheck(spec);
       if (report.status === "incompatible") {
         throw new Error(report.message);
@@ -209,63 +252,66 @@ export const useStore = create<AppState>((set) => ({
     await useStore.getState().loadPlugins();
   },
   removePlugin: async (profile: string, id: string) => {
-    await run(set, () => api.pluginRemove(profile, id));
+    await run(set, "remove", () => api.pluginRemove(profile, id));
     await useStore.getState().loadPlugins();
   },
   updatePlugin: async (profile: string, id: string) => {
-    await run(set, () => api.pluginUpdate(profile, id));
+    await run(set, "update", () => api.pluginUpdate(profile, id));
     await useStore.getState().loadPlugins();
   },
   setLanguage: async (language: string) => {
-    await run(set, () => api.setLanguage(language));
+    await run(set, "prefs", () => api.setLanguage(language));
     set({ language });
     (await import("./i18n")).default.changeLanguage(language);
   },
   setTheme: async (theme: string) => {
-    await run(set, () => api.setTheme(theme));
+    await run(set, "prefs", () => api.setTheme(theme));
     set({ theme });
   },
   setCloseToTray: async (enabled: boolean) => {
-    await run(set, () => api.setCloseToTray(enabled));
+    await run(set, "prefs", () => api.setCloseToTray(enabled));
     set({ closeToTray: enabled });
   },
   setCheckUpdates: async (enabled: boolean) => {
-    await run(set, () => api.setCheckUpdates(enabled));
+    await run(set, "prefs", () => api.setCheckUpdates(enabled));
     set({ checkUpdates: enabled });
   },
   setNotifyUpdates: async (enabled: boolean) => {
-    await run(set, () => api.setNotifyUpdates(enabled));
+    await run(set, "prefs", () => api.setNotifyUpdates(enabled));
     set({ notifyUpdates: enabled });
   },
   setAutostart: async (enabled: boolean) => {
-    await run(set, () => api.autostartSet(enabled));
+    await run(set, "prefs", () => api.autostartSet(enabled));
     set({ autostart: enabled });
   },
   configExport: async () => {
-    await run(set, () => api.configExport());
+    await run(set, "config", () => api.configExport());
   },
   configImport: async () => {
-    const imported = await run(set, () => api.configImport());
+    const imported = await run(set, "config", () => api.configImport());
     if (imported !== null) {
       // Re-read the persisted preferences and re-apply them to the UI.
       await useStore.getState().loadPrefs();
     }
   },
   checkUpdate: async () => {
-    const updateInfo = await run(set, () => api.checkUpdate());
+    const updateInfo = await run(set, "refresh", () => api.checkUpdate());
     set({ updateInfo, updateChecked: true });
   },
   installUpdate: async () => {
-    const outcome = await run(set, () => api.updateInstall());
+    const outcome = await run(set, "update-install", () => api.updateInstall());
     if (outcome.status === "up_to_date") {
       set({ updateInfo: null, updateChecked: true });
     }
   },
+  dismissUpdate: () => {
+    set({ updateInfo: null });
+  },
   openRelease: async (url: string) => {
-    await run(set, () => api.openUrl(url));
+    await run(set, "refresh", () => api.openUrl(url));
   },
   loadPrefs: async () => {
-    const prefs = await run(set, () => api.getConfig());
+    const prefs = await run(set, "load", () => api.getConfig());
     let autostart = false;
     try {
       autostart = await api.autostartGet();
@@ -283,15 +329,19 @@ export const useStore = create<AppState>((set) => ({
     (await import("./i18n")).default.changeLanguage(prefs.language);
   },
   snapshotExport: async (name: string) => {
-    await run(set, () => api.snapshotExport(name));
+    await run(set, "snapshot", () => api.snapshotExport(name));
     await useStore.getState().loadSnapshots();
   },
   snapshotImport: async (name: string) => {
-    await run(set, () => api.snapshotImport(name));
+    await run(set, "snapshot", () => api.snapshotImport(name));
     await useStore.getState().refreshAll();
   },
+  snapshotDelete: async (name: string) => {
+    await run(set, "snapshot", () => api.snapshotDelete(name));
+    await useStore.getState().loadSnapshots();
+  },
   loadSnapshots: async () => {
-    const snapshots = await run(set, () => api.snapshotList());
+    const snapshots = await run(set, "load", () => api.snapshotList());
     set({ snapshots });
   },
 }));

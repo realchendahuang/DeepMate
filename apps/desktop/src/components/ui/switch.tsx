@@ -1,35 +1,26 @@
-import { cn } from "../../lib/utils";
+import * as React from "react"
+import { Switch as SwitchPrimitive } from "radix-ui"
+
+import { cn } from "@/lib/utils"
 
 // A boolean toggle used by the preference rows (auto-start, close-to-tray,
 // update checks). Styled with the same tokens as the rest of the UI.
-interface SwitchProps {
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-  disabled?: boolean;
-  "aria-label"?: string;
-}
-
-export function Switch({ checked, onChange, disabled, ...props }: SwitchProps) {
+function Switch({ className, ...props }: React.ComponentProps<typeof SwitchPrimitive.Root>) {
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      disabled={disabled}
-      onClick={() => onChange(!checked)}
+    <SwitchPrimitive.Root
+      data-slot="switch"
       className={cn(
-        "relative inline-flex h-[22px] w-[38px] shrink-0 items-center rounded-full border transition-colors focus-visible:outline-none",
-        checked ? "border-accent bg-accent" : "border-border-strong bg-inset",
-        disabled && "opacity-50",
+        "peer relative inline-flex h-[22px] w-[38px] shrink-0 items-center rounded-full border transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/50 data-checked:border-accent data-checked:bg-accent data-unchecked:border-border-strong data-unchecked:bg-inset data-disabled:cursor-not-allowed data-disabled:opacity-50",
+        className
       )}
       {...props}
     >
-      <span
-        className={cn(
-          "inline-block h-[16px] w-[16px] rounded-full bg-white shadow-sm transition-transform",
-          checked ? "translate-x-[18px]" : "translate-x-[2px]",
-        )}
+      <SwitchPrimitive.Thumb
+        data-slot="switch-thumb"
+        className="pointer-events-none block size-4 rounded-full bg-white shadow-sm transition-transform data-checked:translate-x-[18px] data-unchecked:translate-x-[2px]"
       />
-    </button>
-  );
+    </SwitchPrimitive.Root>
+  )
 }
+
+export { Switch }

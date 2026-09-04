@@ -169,6 +169,18 @@ impl SnapshotStore {
         names.sort();
         Ok(names)
     }
+
+    // Delete a snapshot by name; a missing snapshot is an error.
+    pub fn delete(&self, name: &str) -> CoreResult<()> {
+        let path = self.path_for(name);
+        match std::fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Err(CoreError::InvalidState(
+                format!("snapshot not found: {name}"),
+            )),
+            Err(err) => Err(err.into()),
+        }
+    }
 }
 
 #[cfg(test)]
