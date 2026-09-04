@@ -90,6 +90,17 @@
       "stats": "用量与成本",
       "security": "安全与权限",
       "automation": "自动化"
+    },
+    "op": {
+      "running": "插件操作",
+      "inProgress": "正在运行 harness 插件命令…",
+      "noOutput": "暂无输出。",
+      "completed": "完成。",
+      "failed": "操作失败。",
+      "close": "关闭",
+      "install": "正在安装 {{target}}",
+      "remove": "正在移除 {{target}}",
+      "update": "正在更新 {{target}}"
     }
   },
   "settings": {
@@ -168,7 +179,9 @@
     "importConfigConfirmTitle": "导入设置？",
     "importConfigConfirmBody": "将用导入的文件覆盖当前的 DeepMate 偏好设置。",
     "confirm": "确认",
-    "cancel": "取消"
+    "about": "关于",
+    "aboutVersion": "版本 {{version}}",
+    "aboutDescription": "AI harness 的轻量伴侣与控制面板。DeepMate 负责管理 harness，harness 负责干活。"
   },
   "common": {
     "errors": {

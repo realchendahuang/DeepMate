@@ -90,6 +90,17 @@
       "stats": "Usage & Cost",
       "security": "Security",
       "automation": "Automation"
+    },
+    "op": {
+      "running": "Plugin operation",
+      "inProgress": "Running the harness plugin command…",
+      "noOutput": "No output yet.",
+      "completed": "Done.",
+      "failed": "The operation failed.",
+      "close": "Close",
+      "install": "Installing {{target}}",
+      "remove": "Removing {{target}}",
+      "update": "Updating {{target}}"
     }
   },
   "settings": {
@@ -168,7 +179,9 @@
     "importConfigConfirmTitle": "Import settings?",
     "importConfigConfirmBody": "This overwrites the current DeepMate preferences with the imported file.",
     "confirm": "Confirm",
-    "cancel": "Cancel"
+    "about": "About",
+    "aboutVersion": "Version {{version}}",
+    "aboutDescription": "A lightweight companion and control plane for AI harnesses. DeepMate manages the harness; the harness does the work."
   },
   "common": {
     "errors": {

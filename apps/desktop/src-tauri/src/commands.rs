@@ -22,8 +22,8 @@ use deepmate_app::record_action;
 use deepmate_core::adapter::HarnessAdapter;
 use deepmate_core::data::DataLayout;
 use deepmate_core::model::{
-    CompatReport, DoctorReport, MarketEntry, MarketSourceInfo, Model, Plugin, Profile, Provider,
-    RuntimeStatus,
+    CompatReport, DoctorReport, MarketEntry, MarketSourceInfo, Model, Plugin, PluginOpEvent,
+    PluginOpKind, Profile, Provider, RuntimeStatus,
 };
 use deepmate_core::CoreResult;
 use deepmate_platform::{PlatformService, SystemPlatform};
@@ -405,6 +405,58 @@ pub async fn plugin_update(app: AppHandle, profile: String, id: String) -> Resul
         adapter.update_plugin(&profile, Some(&id)),
     )
     .await
+}
+
+// Run a plugin operation while streaming progress events to the frontend
+// over a Tauri channel. The command returns once the operation finishes; the
+// events (Started / Line / Finished) arrive on `channel` as they happen, so
+// the UI can render a live progress log. The blocking plugin commands above
+// stay for callers that only need the outcome.
+#[tauri::command]
+#[specta::specta]
+pub async fn plugin_op_stream(
+    app: AppHandle,
+    channel: tauri::ipc::Channel<PluginOpEvent>,
+    profile: String,
+    kind: PluginOpKind,
+    target: String,
+) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let adapter = state.adapter.as_ref();
+    require_capability(adapter, adapter.capabilities().plugins, "plugins")?;
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<PluginOpEvent>(64);
+    let adapter = Arc::clone(&state.adapter);
+    let layout = state.layout.clone();
+    let adapter_id = adapter.metadata().id.clone();
+    let action = match kind {
+        PluginOpKind::Install => "desktop.plugin.install",
+        PluginOpKind::Remove => "desktop.plugin.remove",
+        PluginOpKind::Update => "desktop.plugin.update",
+    };
+
+    // Forward events from the adapter's stream to the webview channel.
+    let forwarder = tauri::async_runtime::spawn(async move {
+        while let Some(event) = rx.recv().await {
+            if channel.send(event).is_err() {
+                break;
+            }
+        }
+    });
+
+    let result = adapter
+        .stream_plugin_op(&profile, kind, Some(&target), tx)
+        .await;
+    // The forwarder drains the channel and exits on its own once the sender
+    // is dropped; no explicit join needed.
+    std::mem::drop(forwarder);
+    match result {
+        Ok(()) => {
+            record_action(&layout, &adapter_id, action.to_string());
+            Ok(())
+        }
+        Err(e) => Err(format!("{e}")),
+    }
 }
 
 // ---- Market ----

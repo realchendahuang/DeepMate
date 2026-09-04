@@ -13,6 +13,8 @@ import type {
   Model,
   Overview,
   Plugin,
+  PluginOpEvent,
+  PluginOpKind,
   Profile,
   Provider,
   UpdateInfo,
@@ -78,6 +80,10 @@ interface AppState {
   autostart: boolean;
   updateInfo: UpdateInfo | null;
   updateChecked: boolean;
+  // Live plugin operation (install / remove / update): the event log the
+  // progress dialog renders, and whether an operation is in flight.
+  opLog: PluginOpEvent[];
+  opActive: boolean;
 
   // Actions.
   refreshAll: () => Promise<void>;
@@ -105,6 +111,11 @@ interface AppState {
   marketInstall: (profile: string, spec: string) => Promise<void>;
   removePlugin: (profile: string, id: string) => Promise<void>;
   updatePlugin: (profile: string, id: string) => Promise<void>;
+  // Run a plugin operation with a live progress log. The dialog stays open
+  // until the operation finishes; events append to `opLog` as they arrive.
+  runPluginOp: (profile: string, kind: PluginOpKind, target: string) => Promise<void>;
+  // Close the progress dialog and clear its log.
+  dismissPluginOp: () => void;
   setLanguage: (language: string) => Promise<void>;
   setTheme: (theme: string) => Promise<void>;
   setCloseToTray: (enabled: boolean) => Promise<void>;
@@ -164,6 +175,8 @@ export const useStore = create<AppState>((set) => ({
   autostart: false,
   updateInfo: null,
   updateChecked: false,
+  opLog: [],
+  opActive: false,
 
   refreshAll: async () => {
     const overview = await run(set, "refresh", () => api.refreshAll());
@@ -258,6 +271,23 @@ export const useStore = create<AppState>((set) => ({
   updatePlugin: async (profile: string, id: string) => {
     await run(set, "update", () => api.pluginUpdate(profile, id));
     await useStore.getState().loadPlugins();
+  },
+  runPluginOp: async (profile: string, kind: PluginOpKind, target: string) => {
+    set({ opLog: [], opActive: true });
+    try {
+      await api.pluginOpStream(profile, kind, target, (event) => {
+        set((state) => ({ opLog: [...state.opLog, event] }));
+      });
+      await useStore.getState().loadPlugins();
+    } catch (e) {
+      toast.error(mapError(e));
+      throw e;
+    } finally {
+      set({ opActive: false });
+    }
+  },
+  dismissPluginOp: () => {
+    set({ opLog: [], opActive: false });
   },
   setLanguage: async (language: string) => {
     await run(set, "prefs", () => api.setLanguage(language));

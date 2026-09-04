@@ -176,6 +176,55 @@ pub trait HarnessAdapter: Send + Sync {
         )))
     }
 
+    // Run a plugin operation while streaming progress events to `tx`.
+    //
+    // The default implementation wraps the blocking `install_plugin` /
+    // `remove_plugin` / `update_plugin` calls with `Started` and `Finished`
+    // events, so every adapter produces a well-formed stream. Adapters that
+    // can observe the harness process live (e.g. the DeepSeek Harness CLI)
+    // override this to also emit `Line` events from the child's output.
+    async fn stream_plugin_op(
+        &self,
+        profile: &str,
+        kind: crate::model::PluginOpKind,
+        target: Option<&str>,
+        tx: tokio::sync::mpsc::Sender<crate::model::PluginOpEvent>,
+    ) -> CoreResult<()> {
+        use crate::model::{PluginOpEvent, PluginOpKind};
+        let target = target.unwrap_or("").to_string();
+        let _ = tx
+            .send(PluginOpEvent::Started {
+                op: kind,
+                target: target.clone(),
+            })
+            .await;
+        let result = match kind {
+            PluginOpKind::Install => self.install_plugin(profile, &target).await,
+            PluginOpKind::Remove => self.remove_plugin(profile, &target).await,
+            PluginOpKind::Update => self.update_plugin(profile, Some(&target)).await,
+        };
+        match result {
+            Ok(()) => {
+                let _ = tx
+                    .send(PluginOpEvent::Finished {
+                        ok: true,
+                        detail: None,
+                    })
+                    .await;
+                Ok(())
+            }
+            Err(e) => {
+                let _ = tx
+                    .send(PluginOpEvent::Finished {
+                        ok: false,
+                        detail: Some(e.to_string()),
+                    })
+                    .await;
+                Err(e)
+            }
+        }
+    }
+
     // Search the market for plugins matching `query`.
     async fn search_plugins(&self, _query: &str) -> CoreResult<Vec<MarketEntry>> {
         Err(crate::error::CoreError::Unsupported(format!(

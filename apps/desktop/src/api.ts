@@ -7,7 +7,8 @@
 // Errors surface as thrown strings.
 
 import { commands } from "./bindings";
-import type { Model, Provider } from "./bindings";
+import { Channel } from "@tauri-apps/api/core";
+import type { Model, PluginOpEvent, PluginOpKind, Provider } from "./bindings";
 
 // Unwrap the generated result envelope; a rejected command surfaces as a
 // thrown string, matching the previous hand-written invoke wrappers.
@@ -44,6 +45,18 @@ export const api = {
   pluginCheck: (spec: string) => unwrap(commands.pluginCheck(spec)),
   pluginRemove: (profile: string, id: string) => unwrap(commands.pluginRemove(profile, id)),
   pluginUpdate: (profile: string, id: string) => unwrap(commands.pluginUpdate(profile, id)),
+  // Stream a plugin operation: `onEvent` receives Started / Line / Finished
+  // events as they happen; the promise resolves when the operation ends.
+  pluginOpStream: (
+    profile: string,
+    kind: PluginOpKind,
+    target: string,
+    onEvent: (event: PluginOpEvent) => void,
+  ) => {
+    const channel = new Channel<PluginOpEvent>();
+    channel.onmessage = onEvent;
+    return unwrap(commands.pluginOpStream(channel, profile, kind, target));
+  },
   snapshotExport: (name: string) => unwrap(commands.snapshotExport(name)),
   snapshotImport: (name: string) => unwrap(commands.snapshotImport(name)),
   snapshotDelete: (name: string) => unwrap(commands.snapshotDelete(name)),
@@ -72,6 +85,8 @@ export type {
   Model,
   Overview,
   Plugin,
+  PluginOpEvent,
+  PluginOpKind,
   Profile,
   Provider,
   UiPrefs,

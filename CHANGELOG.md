@@ -45,6 +45,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Update availability and asset selection (target-triple matching,
   checksum parsing and verification) now live in the core's `update`
   module, shared by the CLI and the desktop app.
+- Live plugin-operation progress:
+  - The desktop Plugins page now runs install / update / remove through a
+    streamed command (`plugin_op_stream`): the harness CLI's output lines
+    arrive over a Tauri channel and render in a live progress dialog, with
+    the outcome (success or the failure detail) shown when the operation
+    ends. The blocking plugin commands remain for callers that only need the
+    outcome.
+  - The core gained a `stream_plugin_op` adapter hook with a default
+    implementation that wraps the blocking calls in Started/Finished events,
+    so every adapter produces a well-formed stream; the DeepSeek Harness
+    adapter overrides it to forward the child process's stdout/stderr lines.
+- Semantic types in the generated bindings: `MarketEntry.updated` is now a
+  real `Date` on the frontend (converted from the RFC3339 wire format by the
+  generated binding code) instead of a string the UI had to slice; the
+  desktop market list renders it with `toLocaleDateString()`.
+- The Settings page gained an About section showing the app version, which
+  is exported into the bindings as a constant (`appVersion`) from
+  `CARGO_PKG_VERSION` instead of being hard-coded in the UI.
 
 ## [0.7.0] - 2026-08-28
 

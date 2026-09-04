@@ -214,7 +214,10 @@ async fn search_npm(client: &reqwest::Client, query: &str) -> CoreResult<Vec<Mar
                     .package
                     .publisher
                     .and_then(|publisher| publisher.username.or(publisher.name)),
-                updated: obj.package.date,
+                updated: obj
+                    .package
+                    .date
+                    .and_then(|date| parse_updated(&date)),
                 category: None,
                 popularity,
                 quality,
@@ -222,6 +225,20 @@ async fn search_npm(client: &reqwest::Client, query: &str) -> CoreResult<Vec<Mar
         })
         .collect();
     Ok(entries)
+}
+
+// Parse a package's last-updated value into a UTC timestamp. Sources publish
+// either a full RFC3339 timestamp (npm) or a bare `YYYY-MM-DD` date
+// (curated.json); anything else degrades to `None` rather than a wrong date.
+fn parse_updated(value: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .map(|date| date.with_timezone(&chrono::Utc))
+        .ok()
+        .or_else(|| {
+            chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
+                .ok()
+                .map(|date| date.and_hms_opt(0, 0, 0).unwrap().and_utc())
+        })
 }
 
 // Clamp a registry score into `0.0..=1.0`; anything outside or missing is
@@ -347,7 +364,7 @@ fn curated_from_json(text: &str) -> CoreResult<Vec<MarketEntry>> {
             source: MarketSource::Curated,
             repository: plugin.repository,
             publisher: plugin.publisher,
-            updated: Some(plugin.added),
+            updated: parse_updated(&plugin.added),
             category: plugin.category,
             popularity: None,
             quality: None,
@@ -540,7 +557,10 @@ mod tests {
             Some("https://github.com/example/dsh-mnemon")
         );
         assert_eq!(entry.publisher.as_deref(), Some("someone"));
-        assert_eq!(entry.updated.as_deref(), Some("2026-08-28"));
+        assert_eq!(
+            entry.updated.map(|date| date.to_rfc3339()),
+            Some("2026-08-28T00:00:00+00:00".to_string())
+        );
         assert_eq!(entry.popularity, None);
         assert_eq!(entry.quality, None);
     }
@@ -578,7 +598,11 @@ mod tests {
             source: MarketSource::Curated,
             repository: Some("https://github.com/example/dsh-mnemon".to_string()),
             publisher: Some("someone".to_string()),
-            updated: Some("2026-01-01T00:00:00.000Z".to_string()),
+            updated: Some(
+                chrono::DateTime::parse_from_rfc3339("2026-01-01T00:00:00.000Z")
+                    .unwrap()
+                    .with_timezone(&chrono::Utc),
+            ),
             category: Some("memory".to_string()),
             popularity: None,
             quality: None,
@@ -617,7 +641,11 @@ mod tests {
             source: MarketSource::Community,
             repository: Some("https://github.com/example/dsh-mnemon".to_string()),
             publisher: Some("someone".to_string()),
-            updated: Some("2026-01-01T00:00:00.000Z".to_string()),
+            updated: Some(
+                chrono::DateTime::parse_from_rfc3339("2026-01-01T00:00:00.000Z")
+                    .unwrap()
+                    .with_timezone(&chrono::Utc),
+            ),
             category: None,
             popularity: Some(0.4),
             quality: Some(0.9),

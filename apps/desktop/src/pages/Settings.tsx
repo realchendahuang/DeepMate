@@ -1,15 +1,8 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Layers,
-  Cloud,
-  Cpu,
-  Plus,
-  Pencil,
-  Trash2,
-  Camera,
-} from "lucide-react";
+import { Layers, Cloud, Cpu, Plus, Pencil, Trash2, Camera, Info } from "lucide-react";
 import { useStore } from "../store";
+import { appVersion } from "../bindings";
 import type { Model, Provider } from "../api";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -35,7 +28,13 @@ import { Skeleton } from "../components/ui/skeleton";
 import { EmptyState } from "../components/ui/empty-state";
 import { ConfirmDialog } from "../components/ui/confirm-dialog";
 import { PageBody, PageHeader, SectionHeader } from "../components/ui/page";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/dialog";
 import { Switch } from "../components/ui/switch";
 import { cn } from "../lib/utils";
 
@@ -47,6 +46,7 @@ const SECTIONS = [
   { key: "models", icon: Cpu },
   { key: "snapshots", icon: Camera },
   { key: "preferences", icon: null },
+  { key: "about", icon: Info },
 ] as const;
 
 type SectionKey = (typeof SECTIONS)[number]["key"];
@@ -161,7 +161,9 @@ export function SettingsPage() {
   };
 
   const confirmTitle = confirm
-    ? t(`settings.${confirm.kind === "snapshot-import" ? "importSnapshot" : confirm.kind === "config-import" ? "importConfig" : "delete"}ConfirmTitle`)
+    ? t(
+        `settings.${confirm.kind === "snapshot-import" ? "importSnapshot" : confirm.kind === "config-import" ? "importConfig" : "delete"}ConfirmTitle`,
+      )
     : "";
   const confirmBody = confirm
     ? t(
@@ -262,10 +264,16 @@ export function SettingsPage() {
                           className="flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-hover md:px-5"
                         >
                           <div className="min-w-0 flex-1">
-                            <div className="truncate text-body font-semibold text-text">{profile.name}</div>
-                            <div className="mt-0.5 truncate text-small text-text-faint lg:hidden">{profile.id}</div>
+                            <div className="truncate text-body font-semibold text-text">
+                              {profile.name}
+                            </div>
+                            <div className="mt-0.5 truncate text-small text-text-faint lg:hidden">
+                              {profile.id}
+                            </div>
                           </div>
-                          <div className="hidden shrink-0 text-small text-text-dim lg:block">{profile.id}</div>
+                          <div className="hidden shrink-0 text-small text-text-dim lg:block">
+                            {profile.id}
+                          </div>
                           <div className="hidden min-w-0 flex-1 truncate text-small text-text-faint lg:block">
                             {profile.description ?? ""}
                           </div>
@@ -276,7 +284,9 @@ export function SettingsPage() {
                               setConfirm({ kind: "profile", id: profile.id, name: profile.name })
                             }
                             disabled={profile.id === "web"}
-                            title={profile.id === "web" ? t("settings.protectedProfile") : undefined}
+                            title={
+                              profile.id === "web" ? t("settings.protectedProfile") : undefined
+                            }
                           >
                             <Trash2 className="h-4 w-4" />
                             {t("settings.remove")}
@@ -320,14 +330,20 @@ export function SettingsPage() {
                       <TableBody>
                         {providers.map((provider) => (
                           <TableRow key={provider.id}>
-                            <TableCell className="font-semibold text-text">{provider.name}</TableCell>
+                            <TableCell className="font-semibold text-text">
+                              {provider.name}
+                            </TableCell>
                             <TableCell className="text-text-dim">{provider.kind}</TableCell>
                             <TableCell className="hidden text-text-faint lg:table-cell">
                               {provider.id}
                             </TableCell>
                             <TableCell>
                               <div className="flex items-center gap-1">
-                                <Button variant="ghost" size="icon" onClick={() => setProviderDialog(provider)}>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => setProviderDialog(provider)}
+                                >
                                   <Pencil className="h-4 w-4" />
                                 </Button>
                                 {provider.id !== "deepseek-official" && (
@@ -335,7 +351,11 @@ export function SettingsPage() {
                                     variant="ghost"
                                     size="icon"
                                     onClick={() =>
-                                      setConfirm({ kind: "provider", id: provider.id, name: provider.name })
+                                      setConfirm({
+                                        kind: "provider",
+                                        id: provider.id,
+                                        name: provider.name,
+                                      })
                                     }
                                   >
                                     <Trash2 className="h-4 w-4" />
@@ -390,7 +410,11 @@ export function SettingsPage() {
                             </TableCell>
                             <TableCell>
                               <div className="flex items-center gap-1">
-                                <Button variant="ghost" size="icon" onClick={() => setModelDialog(model)}>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => setModelDialog(model)}
+                                >
                                   <Pencil className="h-4 w-4" />
                                 </Button>
                                 <Button
@@ -498,7 +522,9 @@ export function SettingsPage() {
                   <div className="divide-y divide-border">
                     <div className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
                       <div>
-                        <div className="text-heading font-semibold text-text">{t("settings.language")}</div>
+                        <div className="text-heading font-semibold text-text">
+                          {t("settings.language")}
+                        </div>
                         <div className="text-small text-text-dim">{t("settings.general")}</div>
                       </div>
                       <Select value={language} onValueChange={(value) => setLanguage(value)}>
@@ -513,7 +539,9 @@ export function SettingsPage() {
                     </div>
                     <div className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
                       <div>
-                        <div className="text-heading font-semibold text-text">{t("settings.theme")}</div>
+                        <div className="text-heading font-semibold text-text">
+                          {t("settings.theme")}
+                        </div>
                         <div className="text-small text-text-dim">{t("settings.appearance")}</div>
                       </div>
                       <Select value={theme} onValueChange={(value) => setTheme(value)}>
@@ -529,8 +557,12 @@ export function SettingsPage() {
                     </div>
                     <div className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
                       <div>
-                        <div className="text-heading font-semibold text-text">{t("settings.autoStart")}</div>
-                        <div className="text-small text-text-dim">{t("settings.autoStartHint")}</div>
+                        <div className="text-heading font-semibold text-text">
+                          {t("settings.autoStart")}
+                        </div>
+                        <div className="text-small text-text-dim">
+                          {t("settings.autoStartHint")}
+                        </div>
                       </div>
                       <Switch
                         checked={autostart}
@@ -540,8 +572,12 @@ export function SettingsPage() {
                     </div>
                     <div className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
                       <div>
-                        <div className="text-heading font-semibold text-text">{t("settings.closeToTray")}</div>
-                        <div className="text-small text-text-dim">{t("settings.closeToTrayHint")}</div>
+                        <div className="text-heading font-semibold text-text">
+                          {t("settings.closeToTray")}
+                        </div>
+                        <div className="text-small text-text-dim">
+                          {t("settings.closeToTrayHint")}
+                        </div>
                       </div>
                       <Switch
                         checked={closeToTray}
@@ -552,8 +588,12 @@ export function SettingsPage() {
                     <div className="space-y-3 p-4">
                       <div className="flex items-center justify-between gap-3">
                         <div>
-                          <div className="text-heading font-semibold text-text">{t("settings.updates")}</div>
-                          <div className="text-small text-text-dim">{t("settings.updatesHint")}</div>
+                          <div className="text-heading font-semibold text-text">
+                            {t("settings.updates")}
+                          </div>
+                          <div className="text-small text-text-dim">
+                            {t("settings.updatesHint")}
+                          </div>
                         </div>
                         <Switch
                           checked={checkUpdates}
@@ -563,8 +603,12 @@ export function SettingsPage() {
                       </div>
                       <div className="flex items-center justify-between gap-3">
                         <div>
-                          <div className="text-heading font-semibold text-text">{t("settings.notifications")}</div>
-                          <div className="text-small text-text-dim">{t("settings.notificationsHint")}</div>
+                          <div className="text-heading font-semibold text-text">
+                            {t("settings.notifications")}
+                          </div>
+                          <div className="text-small text-text-dim">
+                            {t("settings.notificationsHint")}
+                          </div>
                         </div>
                         <Switch
                           checked={notifyUpdates}
@@ -578,7 +622,12 @@ export function SettingsPage() {
                         </Button>
                         {updateInfo && (
                           <>
-                            <Button variant="primary" size="sm" onClick={installUpdate} disabled={busy}>
+                            <Button
+                              variant="primary"
+                              size="sm"
+                              onClick={installUpdate}
+                              disabled={busy}
+                            >
                               {t("settings.installUpdate")}
                             </Button>
                             <Button
@@ -587,7 +636,9 @@ export function SettingsPage() {
                               onClick={() => openRelease(updateInfo.url)}
                               title={updateInfo.url}
                             >
-                              {t("settings.updateAvailable", { version: updateInfo.latest_version })}
+                              {t("settings.updateAvailable", {
+                                version: updateInfo.latest_version,
+                              })}
                             </Button>
                           </>
                         )}
@@ -598,11 +649,20 @@ export function SettingsPage() {
                     </div>
                     <div className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
                       <div>
-                        <div className="text-heading font-semibold text-text">{t("settings.ownSettings")}</div>
-                        <div className="text-small text-text-dim">{t("settings.ownSettingsHint")}</div>
+                        <div className="text-heading font-semibold text-text">
+                          {t("settings.ownSettings")}
+                        </div>
+                        <div className="text-small text-text-dim">
+                          {t("settings.ownSettingsHint")}
+                        </div>
                       </div>
                       <div className="flex flex-wrap gap-2">
-                        <Button variant="secondary" size="sm" onClick={configExport} disabled={busy}>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={configExport}
+                          disabled={busy}
+                        >
                           {t("settings.exportSettings")}
                         </Button>
                         <Button
@@ -619,18 +679,35 @@ export function SettingsPage() {
                 </Card>
               </section>
             )}
+
+            {section === "about" && (
+              <section className="space-y-3">
+                <SectionHeader title={t("settings.about")} />
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="text-heading font-semibold text-text">DeepMate</div>
+                    <div className="mt-1 text-small text-text-dim">
+                      {t("settings.aboutVersion", { version: appVersion })}
+                    </div>
+                    <div className="mt-3 text-small text-text-dim">
+                      {t("settings.aboutDescription")}
+                    </div>
+                  </CardContent>
+                </Card>
+              </section>
+            )}
           </div>
         </CardContent>
       </Card>
 
       <ProviderDialog
-        key={providerDialog === "new" ? "new" : providerDialog?.id ?? "closed"}
+        key={providerDialog === "new" ? "new" : (providerDialog?.id ?? "closed")}
         open={providerDialog !== null}
         value={providerDialog === "new" ? null : providerDialog}
         onClose={() => setProviderDialog(null)}
       />
       <ModelDialog
-        key={modelDialog === "new" ? "new" : modelDialog?.id ?? "closed"}
+        key={modelDialog === "new" ? "new" : (modelDialog?.id ?? "closed")}
         open={modelDialog !== null}
         value={modelDialog === "new" ? null : modelDialog}
         onClose={() => setModelDialog(null)}
@@ -691,23 +768,49 @@ function ProviderDialog({
     <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{value ? t("settings.editProvider") : t("settings.addProvider")}</DialogTitle>
+          <DialogTitle>
+            {value ? t("settings.editProvider") : t("settings.addProvider")}
+          </DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
-          <Field label={t("settings.id")} hint={isDeepseek ? t("settings.deepseekRoute") : undefined}>
-            <Input value={id} onChange={(event) => setId(event.target.value)} disabled={isDeepseek} placeholder="openai" />
+          <Field
+            label={t("settings.id")}
+            hint={isDeepseek ? t("settings.deepseekRoute") : undefined}
+          >
+            <Input
+              value={id}
+              onChange={(event) => setId(event.target.value)}
+              disabled={isDeepseek}
+              placeholder="openai"
+            />
           </Field>
           <Field label={t("settings.name")}>
-            <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="OpenAI" />
+            <Input
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="OpenAI"
+            />
           </Field>
           <Field label={t("settings.api")}>
-            <Input value={api} onChange={(event) => setApi(event.target.value)} placeholder="openai-responses" />
+            <Input
+              value={api}
+              onChange={(event) => setApi(event.target.value)}
+              placeholder="openai-responses"
+            />
           </Field>
           <Field label={t("settings.baseUrl")}>
-            <Input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.example.com/v1" />
+            <Input
+              value={baseUrl}
+              onChange={(event) => setBaseUrl(event.target.value)}
+              placeholder="https://api.example.com/v1"
+            />
           </Field>
           <Field label={t("settings.apiKeyEnv")} hint={t("settings.apiKeyEnvHint")}>
-            <Input value={apiKeyEnv} onChange={(event) => setApiKeyEnv(event.target.value)} placeholder="MY_API_KEY" />
+            <Input
+              value={apiKeyEnv}
+              onChange={(event) => setApiKeyEnv(event.target.value)}
+              placeholder="MY_API_KEY"
+            />
           </Field>
           <Field label={t("settings.compat")} hint={t("settings.compatHint")}>
             <Textarea
@@ -719,8 +822,12 @@ function ProviderDialog({
           </Field>
         </div>
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>{t("settings.cancel")}</Button>
-          <Button variant="primary" onClick={save} disabled={!canSave}>{t("settings.save")}</Button>
+          <Button variant="ghost" onClick={onClose}>
+            {t("settings.cancel")}
+          </Button>
+          <Button variant="primary" onClick={save} disabled={!canSave}>
+            {t("settings.save")}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -769,7 +876,10 @@ function ModelDialog({
       context_window: contextWindow.trim() ? Number(contextWindow.trim()) : null,
       max_tokens: maxTokens.trim() ? Number(maxTokens.trim()) : null,
       input: input.trim()
-        ? input.split(",").map((part) => part.trim()).filter((part) => part.length > 0)
+        ? input
+            .split(",")
+            .map((part) => part.trim())
+            .filter((part) => part.length > 0)
         : null,
       reasoning_efforts: reasoning.trim() || null,
       compat: compat.trim() || null,
@@ -799,10 +909,18 @@ function ModelDialog({
             </Select>
           </Field>
           <Field label={t("settings.id")}>
-            <Input value={id} onChange={(event) => setId(event.target.value)} placeholder="gpt-4o" />
+            <Input
+              value={id}
+              onChange={(event) => setId(event.target.value)}
+              placeholder="gpt-4o"
+            />
           </Field>
           <Field label={t("settings.name")}>
-            <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="GPT-4o" />
+            <Input
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="GPT-4o"
+            />
           </Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label={t("settings.contextWindow")}>
@@ -823,7 +941,11 @@ function ModelDialog({
             </Field>
           </div>
           <Field label={t("settings.input")} hint={t("settings.inputHint")}>
-            <Input value={input} onChange={(event) => setInput(event.target.value)} placeholder="text,image" />
+            <Input
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              placeholder="text,image"
+            />
           </Field>
           <Field label={t("settings.reasoningEfforts")} hint={t("settings.compatHint")}>
             <Textarea
@@ -843,8 +965,12 @@ function ModelDialog({
           </Field>
         </div>
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>{t("settings.cancel")}</Button>
-          <Button variant="primary" onClick={save} disabled={!canSave}>{t("settings.save")}</Button>
+          <Button variant="ghost" onClick={onClose}>
+            {t("settings.cancel")}
+          </Button>
+          <Button variant="primary" onClick={save} disabled={!canSave}>
+            {t("settings.save")}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

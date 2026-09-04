@@ -249,47 +249,56 @@ fn show_main_window<R: tauri::Runtime>(app: &impl tauri::Manager<R>) {
 // TypeScript export (see build.rs). The command list lives here so the
 // runtime registration and the generated bindings can never disagree.
 fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
-    tauri_specta::Builder::<tauri::Wry>::new().commands(tauri_specta::collect_commands![
-        commands::refresh_all,
-        commands::runtime_start,
-        commands::runtime_stop,
-        commands::runtime_restart,
-        commands::open_harness,
-        commands::run_doctor,
-        commands::list_profiles,
-        commands::list_providers,
-        commands::list_models,
-        commands::upsert_provider,
-        commands::remove_provider,
-        commands::upsert_model,
-        commands::remove_model,
-        commands::create_profile,
-        commands::remove_profile,
-        commands::list_plugins,
-        commands::plugin_install,
-        commands::plugin_remove,
-        commands::plugin_update,
-        commands::list_market_sources,
-        commands::market_search,
-        commands::plugin_check,
-        commands::snapshot_export,
-        commands::snapshot_import,
-        commands::snapshot_list,
-        commands::snapshot_delete,
-        commands::config_export,
-        commands::config_import,
-        commands::set_language,
-        commands::set_theme,
-        commands::set_close_to_tray,
-        commands::set_check_updates,
-        commands::set_notify_updates,
-        commands::autostart_get,
-        commands::autostart_set,
-        commands::check_update,
-        commands::update_install,
-        commands::open_url,
-        commands::get_config,
-    ])
+    tauri_specta::Builder::<tauri::Wry>::new()
+        // Map transport-shaped types to their real JS runtime shapes: chrono
+        // DateTime becomes `Date`, bytes become `Uint8Array`, etc. The
+        // generated bindings then carry the conversion code.
+        .semantic_types(specta_typescript::semantic::Configuration::default())
+        // The app version, exported as a constant so the UI never hard-codes
+        // or re-derives it.
+        .constant("appVersion", env!("CARGO_PKG_VERSION"))
+        .commands(tauri_specta::collect_commands![
+            commands::refresh_all,
+            commands::runtime_start,
+            commands::runtime_stop,
+            commands::runtime_restart,
+            commands::open_harness,
+            commands::run_doctor,
+            commands::list_profiles,
+            commands::list_providers,
+            commands::list_models,
+            commands::upsert_provider,
+            commands::remove_provider,
+            commands::upsert_model,
+            commands::remove_model,
+            commands::create_profile,
+            commands::remove_profile,
+            commands::list_plugins,
+            commands::plugin_install,
+            commands::plugin_remove,
+            commands::plugin_update,
+            commands::plugin_op_stream,
+            commands::list_market_sources,
+            commands::market_search,
+            commands::plugin_check,
+            commands::snapshot_export,
+            commands::snapshot_import,
+            commands::snapshot_list,
+            commands::snapshot_delete,
+            commands::config_export,
+            commands::config_import,
+            commands::set_language,
+            commands::set_theme,
+            commands::set_close_to_tray,
+            commands::set_check_updates,
+            commands::set_notify_updates,
+            commands::autostart_get,
+            commands::autostart_set,
+            commands::check_update,
+            commands::update_install,
+            commands::open_url,
+            commands::get_config,
+        ])
 }
 
 // The desktop app accepts the same --adapter / --data-dir flags as the CLI.

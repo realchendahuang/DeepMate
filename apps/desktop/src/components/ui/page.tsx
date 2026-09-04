@@ -27,7 +27,10 @@ export function PageHeader({
   ...props
 }: PageHeaderProps) {
   return (
-    <header className={cn("flex flex-wrap items-center justify-between gap-3", className)} {...props}>
+    <header
+      className={cn("flex flex-wrap items-center justify-between gap-3", className)}
+      {...props}
+    >
       <div className="flex min-w-0 items-center gap-2">
         {onBack && (
           <Button

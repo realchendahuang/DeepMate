@@ -96,8 +96,18 @@ export function OverviewPage({ onNavigate }: { onNavigate?: (view: View) => void
   const busy = busyAction !== null;
 
   const stats = [
-    { label: t("overview.profiles"), value: counts.profiles, icon: Layers, view: "settings" as View },
-    { label: t("overview.providers"), value: counts.providers, icon: Cloud, view: "settings" as View },
+    {
+      label: t("overview.profiles"),
+      value: counts.profiles,
+      icon: Layers,
+      view: "settings" as View,
+    },
+    {
+      label: t("overview.providers"),
+      value: counts.providers,
+      icon: Cloud,
+      view: "settings" as View,
+    },
     { label: t("overview.models"), value: counts.models, icon: Cpu, view: "settings" as View },
     { label: t("overview.plugins"), value: counts.plugins, icon: Package, view: "plugins" as View },
   ];
@@ -132,11 +142,21 @@ export function OverviewPage({ onNavigate }: { onNavigate?: (view: View) => void
                 <Download className={cn("h-4 w-4", installing && "animate-pulse")} />
                 {installing ? t("overview.downloading") : t("overview.installUpdate")}
               </Button>
-              <Button variant="secondary" size="sm" onClick={() => openRelease(updateInfo.url)} title={updateInfo.url}>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => openRelease(updateInfo.url)}
+                title={updateInfo.url}
+              >
                 <ExternalLink className="h-4 w-4" />
                 {t("overview.viewRelease")}
               </Button>
-              <Button variant="ghost" size="sm" onClick={dismissUpdate} aria-label={t("overview.dismissUpdate")}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={dismissUpdate}
+                aria-label={t("overview.dismissUpdate")}
+              >
                 <X className="h-4 w-4" />
                 {t("overview.dismissUpdate")}
               </Button>
@@ -173,9 +193,13 @@ export function OverviewPage({ onNavigate }: { onNavigate?: (view: View) => void
                     "bg-fail": statusTone === "fail",
                   })}
                 />
-                <span className="text-body font-semibold text-text">{t(`status.${status.kind}`)}</span>
+                <span className="text-body font-semibold text-text">
+                  {t(`status.${status.kind}`)}
+                </span>
                 {status.pid != null && (
-                  <span className="text-small text-text-faint">{t("overview.pid", { pid: status.pid })}</span>
+                  <span className="text-small text-text-faint">
+                    {t("overview.pid", { pid: status.pid })}
+                  </span>
                 )}
               </div>
             </div>
@@ -194,11 +218,13 @@ export function OverviewPage({ onNavigate }: { onNavigate?: (view: View) => void
 
           {harnessFound && detection.harness && (
             <div className="mt-4 flex flex-wrap gap-1.5 border-t border-border pt-4">
-              {["runtime", "profiles", "providers", "models", "plugins", "marketplace"].map((cap) => (
-                <Badge key={cap} variant="accent" dot={false}>
-                  {cap}
-                </Badge>
-              ))}
+              {["runtime", "profiles", "providers", "models", "plugins", "marketplace"].map(
+                (cap) => (
+                  <Badge key={cap} variant="accent" dot={false}>
+                    {cap}
+                  </Badge>
+                ),
+              )}
             </div>
           )}
 
@@ -234,7 +260,9 @@ export function OverviewPage({ onNavigate }: { onNavigate?: (view: View) => void
                   <Icon className="h-[18px] w-[18px] text-accent" />
                 </div>
                 <div className="min-w-0">
-                  <div className="text-display font-bold text-text">{value == null ? "-" : value}</div>
+                  <div className="text-display font-bold text-text">
+                    {value == null ? "-" : value}
+                  </div>
                   <div className="truncate text-small text-text-dim">{label}</div>
                 </div>
               </CardContent>
@@ -265,7 +293,9 @@ export function OverviewPage({ onNavigate }: { onNavigate?: (view: View) => void
                 const Icon = CHECK_ICON[check.status];
                 return (
                   <div key={check.id} className="flex gap-3 py-3">
-                    <Icon className={cn("mt-0.5 h-[18px] w-[18px] shrink-0", CHECK_TONE[check.status])} />
+                    <Icon
+                      className={cn("mt-0.5 h-[18px] w-[18px] shrink-0", CHECK_TONE[check.status])}
+                    />
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                         <span className="text-body font-semibold text-text">{check.summary}</span>

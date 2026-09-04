@@ -64,7 +64,12 @@ export function AppShell() {
         </div>
 
         {/* Mobile navigation drawer. */}
-        <MobileNav open={navOpen} view={view} onNavigate={navigate} onClose={() => setNavOpen(false)} />
+        <MobileNav
+          open={navOpen}
+          view={view}
+          onNavigate={navigate}
+          onClose={() => setNavOpen(false)}
+        />
       </div>
     </TooltipProvider>
   );

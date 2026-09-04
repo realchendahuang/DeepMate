@@ -23,9 +23,11 @@ use deepmate_core::adapter::{AdapterCapabilities, AdapterMetadata, Detection, Ha
 use deepmate_core::error::{CoreError, CoreResult};
 use deepmate_core::model::{
     CheckStatus, CompatReport, DoctorCheck, DoctorReport, HarnessInfo, MarketEntry,
-    MarketSourceInfo, Model, Plugin, Profile, Provider, RuntimeStatus, RuntimeStatusKind,
+    MarketSourceInfo, Model, Plugin, PluginOpEvent, PluginOpKind, Profile, Provider, RuntimeStatus,
+    RuntimeStatusKind,
 };
 use deepmate_platform::PlatformService;
+use tokio::io::AsyncBufReadExt;
 
 mod dsh;
 mod market;
@@ -452,6 +454,105 @@ impl HarnessAdapter for DeepSeekHarnessAdapter {
         match id {
             Some(id) => self.run_plugin(profile, &["update", id]).await,
             None => self.run_plugin(profile, &["update"]).await,
+        }
+    }
+
+    // Stream a plugin operation with live output: spawn `dsh plugin` with
+    // piped stdout/stderr and forward each line as a `Line` event, so the
+    // desktop UI can show a real progress log instead of a spinner. The
+    // forwarded pnpm verb is derived from the operation kind, mirroring
+    // `run_plugin`'s "never run a bare pnpm install" rule.
+    async fn stream_plugin_op(
+        &self,
+        profile: &str,
+        kind: PluginOpKind,
+        target: Option<&str>,
+        tx: tokio::sync::mpsc::Sender<PluginOpEvent>,
+    ) -> CoreResult<()> {
+        let cli = self.find_cli().ok_or_else(|| {
+            CoreError::InvalidState("harness CLI was not found on PATH".to_string())
+        })?;
+        let target = target.unwrap_or("").to_string();
+        let forwarded: &[&str] = match kind {
+            PluginOpKind::Install => &["add", &target],
+            PluginOpKind::Remove => &["remove", &target],
+            PluginOpKind::Update => &["update", &target],
+        };
+        let _ = tx
+            .send(PluginOpEvent::Started {
+                op: kind,
+                target: target.clone(),
+            })
+            .await;
+
+        let mut child = tokio::process::Command::new(&cli)
+            .arg("plugin")
+            .arg("--profile")
+            .arg(profile)
+            .args(forwarded)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|err| CoreError::InvalidState(format!("failed to run `dsh plugin`: {err}")))?;
+
+        let stdout = child.stdout.take().expect("stdout was piped");
+        let stderr = child.stderr.take().expect("stderr was piped");
+        let mut lines = tokio::io::BufReader::new(stdout).lines();
+        let mut err_lines = tokio::io::BufReader::new(stderr).lines();
+        let mut stderr_tail: Vec<String> = Vec::new();
+        loop {
+            tokio::select! {
+                line = lines.next_line() => match line {
+                    Ok(Some(line)) => {
+                        let trimmed = line.trim().to_string();
+                        if !trimmed.is_empty() {
+                            let _ = tx.send(PluginOpEvent::Line { text: trimmed }).await;
+                        }
+                    }
+                    _ => break,
+                },
+                line = err_lines.next_line() => match line {
+                    Ok(Some(line)) => {
+                        let trimmed = line.trim().to_string();
+                        if !trimmed.is_empty() {
+                            stderr_tail.push(trimmed);
+                            if stderr_tail.len() > 8 {
+                                stderr_tail.remove(0);
+                            }
+                        }
+                    }
+                    _ => break,
+                },
+            }
+        }
+        let status = child.wait().await.map_err(|err| {
+            CoreError::InvalidState(format!("failed to wait for `dsh plugin`: {err}"))
+        })?;
+        if status.success() {
+            let _ = tx
+                .send(PluginOpEvent::Finished {
+                    ok: true,
+                    detail: None,
+                })
+                .await;
+            Ok(())
+        } else {
+            let detail = if stderr_tail.is_empty() {
+                format!("`dsh plugin` failed with exit {:?}", status.code())
+            } else {
+                format!(
+                    "`dsh plugin` failed with exit {:?}: {}",
+                    status.code(),
+                    stderr_tail.join(" ")
+                )
+            };
+            let _ = tx
+                .send(PluginOpEvent::Finished {
+                    ok: false,
+                    detail: Some(detail.clone()),
+                })
+                .await;
+            Err(CoreError::InvalidState(detail))
         }
     }
 

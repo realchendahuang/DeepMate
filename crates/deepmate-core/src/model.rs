@@ -171,7 +171,10 @@ pub struct MarketEntry {
     // a source may not expose any of them.
     pub repository: Option<String>,
     pub publisher: Option<String>,
-    pub updated: Option<String>,
+    // Last update of the package, when the source publishes one. Serialized
+    // as an RFC3339 string on the wire; the desktop bindings map it to a
+    // real `Date` via specta's semantic types.
+    pub updated: Option<chrono::DateTime<chrono::Utc>>,
     // Functional category (e.g. "memory", "vision", "mcp"), when the source
     // publishes one. Absent for raw npm search results.
     #[serde(default)]
@@ -272,6 +275,40 @@ pub struct MarketSourceInfo {
     pub name: String,
     pub description: String,
     pub source: MarketSource,
+}
+
+// The kind of plugin operation a stream reports on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginOpKind {
+    Install,
+    Remove,
+    Update,
+}
+
+// One event in a streamed plugin operation (install / remove / update).
+//
+// The desktop UI renders these as a live progress log: `Started` opens the
+// operation, `Line` appends harness output, `Finished` closes it with the
+// outcome. Adapters that cannot stream the harness process still emit
+// `Started`/`Finished` around the blocking call, so the UI always gets a
+// bounded, well-formed stream.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(tag = "phase", rename_all = "snake_case")]
+pub enum PluginOpEvent {
+    Started {
+        op: PluginOpKind,
+        target: String,
+    },
+    Line {
+        text: String,
+    },
+    Finished {
+        ok: bool,
+        // The failure detail (e.g. the harness command's stderr tail) when
+        // the operation failed; `None` on success.
+        detail: Option<String>,
+    },
 }
 
 // Compare an installed version against a latest version.

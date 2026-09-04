@@ -76,7 +76,7 @@
   --text-dim: 220 10% 40%;
   --text-faint: 220 10% 58%;
   --accent: 231 75% 58%;
-  --accent-soft: 231 75% 58% / 0.10;
+  --accent-soft: 231 75% 58% / 0.1;
   --on-accent: 0 0% 100%;
   --pass: 158 70% 36%;
   --warn: 40 80% 38%;
@@ -178,8 +178,21 @@
 
   body {
     @apply bg-bg text-text antialiased;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-      "Helvetica Neue", Arial, sans-serif;
+    font-family:
+      -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     font-size: 13px;
+  }
+
+  /* Motion is feedback: users who prefer reduced motion get instant state
+     changes instead of the standard transitions and animations. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }

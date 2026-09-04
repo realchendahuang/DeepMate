@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Download, RefreshCw, Trash2, Search, Package, ShoppingBag } from "lucide-react";
+import { Download, RefreshCw, Trash2, Search, Package, ShoppingBag, Loader2 } from "lucide-react";
 import { useStore } from "../store";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
@@ -8,10 +8,19 @@ import { Badge } from "../components/ui/badge";
 import { Skeleton } from "../components/ui/skeleton";
 import { EmptyState } from "../components/ui/empty-state";
 import { ConfirmDialog } from "../components/ui/confirm-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/dialog";
 import { PageBody, PageHeader } from "../components/ui/page";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Input } from "../components/ui/input";
 import { cn } from "../lib/utils";
+import type { PluginOpEvent } from "../api";
 
 // Curated storefront categories, in display order. Keys map to
 // `plugins.categories.*` in the locale files; unknown categories fall back
@@ -70,7 +79,9 @@ export function PluginsContent({ onTabChange }: PluginsContentProps) {
   // Filter for the installed list.
   const [installedQuery, setInstalledQuery] = useState("");
   // Pending removal confirmation.
-  const [removing, setRemoving] = useState<{ profile: string; id: string; name: string } | null>(null);
+  const [removing, setRemoving] = useState<{ profile: string; id: string; name: string } | null>(
+    null,
+  );
 
   const plugins = useStore((s) => s.plugins);
   const marketSources = useStore((s) => s.marketSources);
@@ -79,10 +90,10 @@ export function PluginsContent({ onTabChange }: PluginsContentProps) {
   const loadPlugins = useStore((s) => s.loadPlugins);
   const loadMarketSources = useStore((s) => s.loadMarketSources);
   const searchMarket = useStore((s) => s.searchMarket);
-  const installPlugin = useStore((s) => s.installPlugin);
-  const marketInstall = useStore((s) => s.marketInstall);
-  const removePlugin = useStore((s) => s.removePlugin);
-  const updatePlugin = useStore((s) => s.updatePlugin);
+  const runPluginOp = useStore((s) => s.runPluginOp);
+  const dismissPluginOp = useStore((s) => s.dismissPluginOp);
+  const opLog = useStore((s) => s.opLog);
+  const opActive = useStore((s) => s.opActive);
 
   const [loaded, setLoaded] = useState(false);
 
@@ -132,10 +143,16 @@ export function PluginsContent({ onTabChange }: PluginsContentProps) {
   }, [plugins]);
 
   const doInstall = () => {
-    if (installSpec) installPlugin(installProfile, installSpec);
+    if (installSpec) runPluginOp(installProfile, "install", installSpec);
   };
   const doSearch = () => {
     if (query) searchMarket(query);
+  };
+  const doUpdate = (profile: string, id: string) => {
+    runPluginOp(profile, "update", id);
+  };
+  const doRemove = (profile: string, id: string) => {
+    runPluginOp(profile, "remove", id);
   };
 
   const busy = busyAction !== null;
@@ -196,7 +213,10 @@ export function PluginsContent({ onTabChange }: PluginsContentProps) {
           <Card className="overflow-hidden">
             <div className="divide-y divide-border">
               {visiblePlugins.map((plugin) => (
-                <div key={plugin.id} className="flex flex-col gap-3 p-4 md:flex-row md:items-center">
+                <div
+                  key={plugin.id}
+                  className="flex flex-col gap-3 p-4 md:flex-row md:items-center"
+                >
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-heading font-semibold text-text">{plugin.name}</span>
@@ -206,22 +226,29 @@ export function PluginsContent({ onTabChange }: PluginsContentProps) {
                       {plugin.outdated && <Badge variant="warn">{t("plugins.outdated")}</Badge>}
                     </div>
                     <div className="mt-0.5 flex flex-wrap gap-x-2 text-small text-text-faint">
-                      <span>{plugin.profile}/{plugin.id}</span>
+                      <span>
+                        {plugin.profile}/{plugin.id}
+                      </span>
                       {plugin.version && (
                         <span className={plugin.outdated ? "text-warn" : undefined}>
-                          {t("plugins.versionLatest", { version: plugin.version, latest: plugin.latest ?? "-" })}
+                          {t("plugins.versionLatest", {
+                            version: plugin.version,
+                            latest: plugin.latest ?? "-",
+                          })}
                         </span>
                       )}
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <Button onClick={() => updatePlugin(plugin.profile, plugin.id)} disabled={busy}>
+                    <Button onClick={() => doUpdate(plugin.profile, plugin.id)} disabled={busy}>
                       <RefreshCw className="h-4 w-4" />
                       {t("plugins.update")}
                     </Button>
                     <Button
                       variant="danger"
-                      onClick={() => setRemoving({ profile: plugin.profile, id: plugin.id, name: plugin.name })}
+                      onClick={() =>
+                        setRemoving({ profile: plugin.profile, id: plugin.id, name: plugin.name })
+                      }
                       disabled={busy}
                     >
                       <Trash2 className="h-4 w-4" />
@@ -300,8 +327,12 @@ export function PluginsContent({ onTabChange }: PluginsContentProps) {
               <div className="space-y-1.5">
                 {marketSources.map((source) => (
                   <div key={source.id} className="flex flex-wrap items-center gap-2">
-                    <Badge variant={source.source === "curated" ? "accent" : "neutral"}>{source.name}</Badge>
-                    {source.description && <span className="text-small text-text-dim">{source.description}</span>}
+                    <Badge variant={source.source === "curated" ? "accent" : "neutral"}>
+                      {source.name}
+                    </Badge>
+                    {source.description && (
+                      <span className="text-small text-text-dim">{source.description}</span>
+                    )}
                   </div>
                 ))}
               </div>
@@ -333,12 +364,20 @@ export function PluginsContent({ onTabChange }: PluginsContentProps) {
                         <TrustBadge source={entry.source} category={entry.category} />
                         {entry.category && (
                           <Badge variant="neutral" dot={false}>
-                            {t(`plugins.categories.${entry.category}`, { defaultValue: entry.category })}
+                            {t(`plugins.categories.${entry.category}`, {
+                              defaultValue: entry.category,
+                            })}
                           </Badge>
                         )}
-                        {entry.version && <Badge variant="skip" dot={false}>v{entry.version}</Badge>}
+                        {entry.version && (
+                          <Badge variant="skip" dot={false}>
+                            v{entry.version}
+                          </Badge>
+                        )}
                         {entry.publisher && (
-                          <span className="text-small text-text-faint">{t("plugins.by", { publisher: entry.publisher })}</span>
+                          <span className="text-small text-text-faint">
+                            {t("plugins.by", { publisher: entry.publisher })}
+                          </span>
                         )}
                         <span className="flex-1" />
                         {installed ? (
@@ -353,19 +392,25 @@ export function PluginsContent({ onTabChange }: PluginsContentProps) {
                                 ? t("plugins.installInto", { profile: installProfile.trim() })
                                 : t("plugins.profileRequired")
                             }
-                            onClick={() => marketInstall(installProfile.trim(), entry.id)}
+                            onClick={() => runPluginOp(installProfile.trim(), "install", entry.id)}
                           >
                             <Download className="h-4 w-4" />
                             {t("plugins.install")}
                           </Button>
                         )}
                       </div>
-                      {entry.description && <p className="mt-1 text-body text-text-dim">{entry.description}</p>}
+                      {entry.description && (
+                        <p className="mt-1 text-body text-text-dim">{entry.description}</p>
+                      )}
                       <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1.5">
-                        {entry.repository && <p className="max-w-full truncate text-small text-accent">{entry.repository}</p>}
+                        {entry.repository && (
+                          <p className="max-w-full truncate text-small text-accent">
+                            {entry.repository}
+                          </p>
+                        )}
                         {entry.updated && (
                           <span className="text-small text-text-faint">
-                            {t("plugins.updated", { date: entry.updated.slice(0, 10) })}
+                            {t("plugins.updated", { date: entry.updated.toLocaleDateString() })}
                           </span>
                         )}
                         <TrustMeter label={t("plugins.popularity")} value={entry.popularity} />
@@ -386,17 +431,108 @@ export function PluginsContent({ onTabChange }: PluginsContentProps) {
         title={t("plugins.removeConfirmTitle")}
         body={t("plugins.removeConfirmBody", { name: removing?.name ?? "" })}
         onConfirm={() => {
-          if (removing) removePlugin(removing.profile, removing.id);
+          if (removing) doRemove(removing.profile, removing.id);
         }}
       />
+
+      <OpProgressDialog
+        open={opActive || opLog.length > 0}
+        onClose={dismissPluginOp}
+        log={opLog}
+        active={opActive}
+      />
     </>
+  );
+}
+
+// Live progress log for a plugin operation (install / remove / update). The
+// dialog stays open while the operation runs and shows the harness output
+// lines as they stream in; once finished it shows the outcome and a close
+// button.
+function OpProgressDialog({
+  open,
+  onClose,
+  log,
+  active,
+}: {
+  open: boolean;
+  onClose: () => void;
+  log: PluginOpEvent[];
+  active: boolean;
+}) {
+  const { t } = useTranslation();
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Keep the newest lines in view as they stream in.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [log]);
+
+  const started = log.find((event) => event.phase === "started");
+  const finished = log.find((event) => event.phase === "finished");
+  const lines = log.filter((event) => event.phase === "line");
+
+  const title = started
+    ? t(`plugins.op.${started.op}`, { target: started.target })
+    : t("plugins.op.running");
+  const done = finished !== undefined;
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => !next && !active && onClose()}>
+      <DialogContent className="max-w-lg" showCloseButton={!active}>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            {!done && <Loader2 className="h-4 w-4 animate-spin text-accent" />}
+            {title}
+          </DialogTitle>
+          <DialogDescription>
+            {done
+              ? finished?.ok
+                ? t("plugins.op.completed")
+                : t("plugins.op.failed")
+              : t("plugins.op.inProgress")}
+          </DialogDescription>
+        </DialogHeader>
+        <div
+          ref={scrollRef}
+          className="max-h-56 overflow-y-auto rounded-md border border-border bg-inset p-3 font-mono text-small text-text-dim"
+        >
+          {lines.length === 0 ? (
+            <span className="text-text-faint">{t("plugins.op.noOutput")}</span>
+          ) : (
+            lines.map((event, index) => (
+              <div key={index} className="whitespace-pre-wrap break-words">
+                {event.text}
+              </div>
+            ))
+          )}
+          {finished && !finished.ok && finished.detail && (
+            <div className="mt-2 whitespace-pre-wrap break-words text-warn">{finished.detail}</div>
+          )}
+        </div>
+        <DialogFooter>
+          {done && (
+            <Button variant="primary" onClick={onClose}>
+              {t("plugins.op.close")}
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
 // Source trust badge: curated entries are split into official (DeepSeek
 // Harness vendor, category "official") and vetted (reviewed by the DeepMate
 // maintainers); npm search results are community.
-function TrustBadge({ source, category }: { source: "curated" | "community"; category?: string | null }) {
+function TrustBadge({
+  source,
+  category,
+}: {
+  source: "curated" | "community";
+  category?: string | null;
+}) {
   const { t } = useTranslation();
   if (source === "community") {
     return <Badge variant="neutral">{t("plugins.trust.community")}</Badge>;
@@ -413,7 +549,10 @@ function TrustMeter({ label, value }: { label: string; value?: number | null }) 
   if (value == null) return null;
   const percent = Math.round(value * 100);
   return (
-    <span className="flex items-center gap-1.5 text-small text-text-faint" title={`${label}: ${percent}%`}>
+    <span
+      className="flex items-center gap-1.5 text-small text-text-faint"
+      title={`${label}: ${percent}%`}
+    >
       <span>{label}</span>
       <span className="h-1.5 w-14 overflow-hidden rounded-full bg-inset">
         <span className="block h-full rounded-full bg-accent" style={{ width: `${percent}%` }} />

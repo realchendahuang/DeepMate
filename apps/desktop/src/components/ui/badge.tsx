@@ -1,8 +1,8 @@
-import * as React from "react"
-import { cva, type VariantProps } from "class-variance-authority"
-import { Slot } from "radix-ui"
+import * as React from "react";
+import { cva, type VariantProps } from "class-variance-authority";
+import { Slot } from "radix-ui";
 
-import { cn } from "@/lib/utils"
+import { cn } from "@/lib/utils";
 
 // Small status pill, styled after the Slint Badge. The tone vocabulary
 // (pass | warn | fail | skip | accent | neutral) drives the color everywhere.
@@ -22,8 +22,8 @@ const badgeVariants = cva(
     defaultVariants: {
       variant: "neutral",
     },
-  }
-)
+  },
+);
 
 function Badge({
   className,
@@ -34,7 +34,7 @@ function Badge({
   ...props
 }: React.ComponentProps<"span"> &
   VariantProps<typeof badgeVariants> & { dot?: boolean; asChild?: boolean }) {
-  const Comp = asChild ? Slot.Root : "span"
+  const Comp = asChild ? Slot.Root : "span";
 
   return (
     <Comp
@@ -57,7 +57,7 @@ function Badge({
       )}
       {children}
     </Comp>
-  )
+  );
 }
 
-export { Badge, badgeVariants }
+export { Badge, badgeVariants };
