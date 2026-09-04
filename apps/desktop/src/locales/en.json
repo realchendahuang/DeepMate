@@ -191,7 +191,9 @@
       "network": "A network error occurred. Check your connection and try again.",
       "permission": "Permission denied. Check the file or system permissions.",
       "checksum": "The downloaded file failed its checksum verification.",
-      "generic": "Something went wrong. Try again."
+      "generic": "Something went wrong. Try again.",
+      "crash": "The interface hit an unexpected error.",
+      "reload": "Reload the app"
     },
     "success": {
       "installed": "Installed.",

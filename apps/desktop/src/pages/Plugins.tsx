@@ -49,18 +49,21 @@ export function PluginsPage() {
 
   return (
     <PageBody className="space-y-5">
-      <PageHeader
-        title={t("plugins.title")}
-        actions={
-          <Tabs value={tab} onValueChange={setTab}>
+      {/* The Tabs root must wrap the content panels: Radix throws when a
+          TabsContent renders outside its Root, which blanks the whole app
+          (there is no error boundary on this route). */}
+      <Tabs value={tab} onValueChange={setTab} className="gap-5">
+        <PageHeader
+          title={t("plugins.title")}
+          actions={
             <TabsList>
               <TabsTrigger value="installed">{t("plugins.installed")}</TabsTrigger>
               <TabsTrigger value="market">{t("plugins.market")}</TabsTrigger>
             </TabsList>
-          </Tabs>
-        }
-      />
-      <PluginsContent onTabChange={setTab} />
+          }
+        />
+        <PluginsContent onTabChange={setTab} />
+      </Tabs>
     </PageBody>
   );
 }
