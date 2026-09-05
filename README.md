@@ -29,9 +29,7 @@ DeepMate aims to make those questions easy to answer without turning into anothe
 
 ## What DeepMate is
 
-DeepMate is planned as a **control plane** for AI harnesses.
-
-The first adapter targets **DeepSeek Harness**, with a core architecture designed so other harnesses and agent runtimes can be supported later without rewriting the product.
+DeepMate is a **control plane** for **DeepSeek Harness**: a pure data-layer control core plus a dedicated service crate that knows how to manage the harness. All harness-specific behavior lives in that one service crate, so adding support for another harness would never touch the core or the product surface.
 
 ### Core areas
 
@@ -64,7 +62,7 @@ The goal is to stay small, fast and focused.
 
 ## Architecture
 
-DeepMate is designed around adapters rather than direct coupling to one harness implementation.
+DeepMate separates a harness-agnostic control core from a harness-specific service layer.
 
 ```text
                DeepMate
@@ -75,21 +73,22 @@ DeepMate is designed around adapters rather than direct coupling to one harness 
                  │
         ┌────────▼─────────┐
         │   Control Core   │
-        │       Rust       │
+        │ pure data layer  │
         └────────┬─────────┘
                  │
-        ┌────────▼─────────┐
-        │ Harness Adapter  │
-        └────────┬─────────┘
+        ┌────────▼──────────┐
+        │ deepseek-harness  │
+        │   service crate   │
+        └────────┬──────────┘
                  │
         ┌────────▼─────────┐
         │ DeepSeek Harness │
         └──────────────────┘
 ```
 
-The UI does not need to know how a harness stores configuration or exposes its runtime. Those implementation details belong inside the adapter layer.
+The UI does not need to know how DeepSeek Harness stores configuration or exposes its runtime. Those implementation details live in the `deepseek-harness` service crate; the control core holds only normalized domain models, the data layout, configuration, snapshots and update helpers.
 
-This keeps the product resilient as harnesses evolve and makes future multi-harness support possible.
+This keeps the core simple and fully testable while the harness integration can move as fast as the harness itself does.
 
 For the full technical design, see **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
@@ -107,9 +106,9 @@ DeepMate manages the harness through its official interfaces and formats wheneve
 
 DeepMate uses the existing DeepSeek Harness profile, bundle, plugin, settings and provider mechanisms rather than inventing incompatible replacements.
 
-### 4. Everything behind an adapter
+### 4. One harness, one service
 
-Harness-specific behavior belongs behind a stable adapter boundary so the control core can stay generic.
+Harness-specific behavior lives in the `deepseek-harness` crate. The control core stays a pure data layer and never learns harness-specific names.
 
 ### 5. Management surface, not work surface
 
@@ -123,7 +122,7 @@ DeepMate-owned configuration and state use portable file formats that are easy t
 
 The current planned stack is:
 
-- **Rust** — control core, adapters, runtime management and shared domain logic
+- **Rust** — control core, the deepseek-harness service, runtime management and shared domain logic
 - **Tauri 2** — cross-platform desktop shell (Rust backend + system WebView)
 - **React + TypeScript** — desktop frontend
 - **TailwindCSS v4 + shadcn/ui** — desktop styling and component library
@@ -137,7 +136,6 @@ The current planned stack is:
 - **tracing** — structured logging and diagnostics
 - **thiserror + anyhow** — domain and application error handling
 - **OS secure credential store** — DeepMate-owned secrets
-- **JSON-RPC over stdio** — planned public protocol for third-party harness adapters
 
 The desktop app and CLI are both consumers of the same Rust control core.
 
@@ -150,9 +148,9 @@ app's frontend).
 # Build the core + CLI
 cargo build --workspace
 
-# Run the CLI against the built-in deterministic test adapter
-cargo run -- --adapter test status
-cargo run -- --adapter test doctor
+# Try the CLI
+cargo run -- status
+cargo run -- doctor
 
 # Run the desktop shell (Tauri): installs frontend deps, then opens the app
 cd apps/desktop
@@ -174,9 +172,7 @@ download needs a right-click "Open" (or `xattr -dr com.apple.quarantine`) to
 clear Gatekeeper; it is not notarized. The CLI is also available as a plain
 `tar.gz` on every platform.
 
-Both the CLI and the desktop app accept `--adapter` (default
-`deepseek-harness`, use `test` for the deterministic fake adapter and
-`pi-agent` for Pi Agent inventory) and
+Both the CLI and the desktop app accept
 `--data-dir` to override the data directory. On Linux, building the desktop
 app requires the Tauri system dependencies (`libwebkit2gtk-4.1-dev`,
 `libgtk-3-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`).
@@ -184,8 +180,7 @@ app requires the Tauri system dependencies (`libwebkit2gtk-4.1-dev`,
 CLI command surface:
 
 ```text
-deepmate adapters              List registered adapters
-deepmate detect                Detect the active harness
+deepmate detect                Detect the harness
 deepmate status                Show the active harness runtime status
 deepmate open                  Open the harness UI in the system browser
 deepmate doctor                Run environment diagnostics
@@ -212,7 +207,7 @@ deepmate market search <query> Search the market for plugins
 deepmate snapshot export <name>
                                 Capture the current setup as a portable snapshot
 deepmate snapshot import <name>
-                                Apply a snapshot to the active adapter (merge-style)
+                                Apply a stored snapshot (merge-style)
 deepmate snapshot list          List stored snapshots
 deepmate config export <path>  Write DeepMate's own settings to a portable file
 deepmate config import <path>  Replace DeepMate's own settings from a portable file
@@ -220,15 +215,9 @@ deepmate update                Update the CLI: download the release archive,
                                verify its sha256 and self-replace
 ```
 
-Commands that the active adapter does not declare support for are rejected
-with a clear error instead of returning empty results. `--adapter test`
-supports the full surface; the DeepSeek Harness adapter currently supports
-runtime control, detect, status, open, doctor, profile list, provider list,
-model list, plugin list/install/remove/update, plugin compatibility checks,
-market list/search and snapshots. A second real adapter, `pi-agent`, exposes
-read-only inventory (providers, models, plugins) for Pi Agent and reports
-profiles, runtime, marketplace, compatibility checks and snapshots as
-unsupported — a live demonstration of the capability gate.
+DeepMate controls DeepSeek Harness only: every command talks to the `dsh`
+CLI and the documented `$DSH_HOME` file contracts. There are no alternate
+backends or capability switches to configure.
 
 Append `--json` to any command for machine-readable output. Logs go to
 stderr and to `logs/deepmate.log` in the data directory, so JSON on stdout
@@ -242,8 +231,6 @@ DeepMate-owned data follows a simple file-based structure:
 <DeepMate Data>/
 │
 ├── config.toml
-├── adapters/
-│   └── deepseek-harness.toml
 ├── cache/
 │   ├── marketplace.json
 │   ├── curated.json
@@ -263,7 +250,7 @@ DeepMate-owned data follows a simple file-based structure:
 The root follows the operating system's application-data convention and can
 be overridden with `DEEPMATE_DATA_DIR` or `--data-dir`.
 
-Harness-owned state remains owned by the active harness and is accessed through its adapter.
+Harness-owned state remains owned by DeepSeek Harness and is accessed through the deepseek-harness service.
 
 ## Roadmap
 
@@ -296,35 +283,24 @@ Harness-owned state remains owned by the active harness and is accessed through 
 - Profile portability
 - Private registries
 
-### Phase 4 — More harnesses
-
-- Additional harness / agent runtime adapters (the Pi Agent adapter shipped
-  in v0.6.0)
-- Stable public adapter protocol
-
 ## Project status
 
 DeepMate is currently in **early development**, with a working Stage 1
 foundation, a Stage 2 desktop shell, Stage 3 configuration editing,
-Stage 4 plugin/marketplace support, Stage 5 snapshots and the first steps of
-Stage 6 (a second adapter):
+Stage 4 plugin/marketplace support and Stage 5 snapshots:
 
-- Rust workspace with `deepmate-core`, `deepmate-platform` and the
-  `deepseek-harness` adapter
-- `deepmate` CLI with `adapters`, `detect`, `status`, `open`, `doctor`,
-  `runtime`, `profile`, `provider`, `model`, `plugin`, `market` and
-  `snapshot` commands
-- Deterministic `test` adapter for development and CI
+- Rust workspace with `deepmate-core` (pure data layer), `deepmate-platform`
+  and the `deepseek-harness` service crate
+- `deepmate` CLI with `detect`, `status`, `open`, `doctor`, `runtime`,
+  `profile`, `provider`, `model`, `plugin`, `market` and `snapshot` commands
 - File-based data layer: OS-convention data directory, TOML config, JSONL
   action history and file logging
-- Capability-gated CLI: commands are only exposed when the active adapter
-  supports them
-- DeepSeek Harness adapter with real `dsh` integration: CLI detection, web
+- DeepSeek Harness service with real `dsh` integration: CLI detection, web
   UI reachability, `runtime start` (detached `dsh web` with pid tracking),
   `runtime stop`, profile discovery, plugin inventory, and provider/model
   catalogs through the documented `$DSH_HOME` file contracts
   (`profiles/*/package.json` and `settings.yaml`)
-- Configuration editing through the adapter boundary: providers, models and
+- Configuration editing through the service layer: providers, models and
   profiles can be created, edited and removed (upsert-style) from the
   desktop Settings page, with the harness-owned files staying authoritative
 - Plugin lifecycle (install / remove / update) forwarded to the harness's own
@@ -336,11 +312,11 @@ Stage 6 (a second adapter):
   metadata (publisher, repository, last-updated) and an on-disk query cache
 - Portable snapshots: `snapshot export / import / list` capture a normalized
   inventory (profiles, providers, models, plugins — never secrets) to JSON
-  and apply it merge-style to the same adapter, from both the CLI and the
+  and apply it merge-style to the harness, from both the CLI and the
   desktop Settings page
 - Plugin compatibility checks and trust signals: market results carry
-  provenance plus normalized npm popularity/quality scores; a
-  `plugin_compat` adapter hook matches a package's declared `engines`
+  provenance plus normalized npm popularity/quality scores; a compatibility
+  check matches a package's declared `engines`
   requirement against the detected harness (prerelease harnesses count as
   their release line), `deepmate plugin check` inspects a package on demand,
   `plugin install` runs the check as a preflight (`--force` overrides), and
@@ -348,8 +324,6 @@ Stage 6 (a second adapter):
 - Own-settings backup: `config export / import` moves DeepMate's own
   configuration between machines as one JSON document, from the CLI or the
   desktop Settings page with native save/open dialogs
-- A `pi-agent` adapter exposing read-only inventory for Pi Agent — the
-  second real adapter and a live exercise of the capability gate
 - `deepmate-desktop` Tauri shell (React + TypeScript + Tailwind + shadcn/ui)
   with a left navigation rail and a shallow three-page layout — Overview
   (status, runtime controls, diagnostics and the update banner), Plugins
@@ -357,8 +331,7 @@ Stage 6 (a second adapter):
   responsive breakpoints and en/zh i18n
 - Tauri command surface mirroring the CLI: inventory, configuration editing,
   plugin lifecycle, runtime control, snapshots, doctor, and config
-  (language/theme/preferences) persistence, with capability gating and
-  action-history recording
+  (language/theme/preferences) persistence, with action-history recording
 - System tray with close-to-tray behavior (hide instead of quit, restore
   from the tray menu or a macOS dock click) and an opt-in start-at-login
   preference backed by OS login items; the tray also opens the harness web
@@ -372,8 +345,8 @@ Stage 6 (a second adapter):
   verifies its sha256 and replaces the running binary; the desktop app
   downloads and checksum-verifies the release DMG and hands it to the OS
   installer from the update banner
-- Shared `deepmate-app` service crate hosting the registry, config, logging
-  and history helpers used by both the CLI and the desktop app
+- Shared `deepmate-app` service crate hosting harness assembly, config,
+  logging and history helpers used by both the CLI and the desktop app
 - Releases are built and published locally (no CI publishing): the macOS
   host produces the `DeepMate.app` DMG plus a CLI tar.gz with sha256
   checksums, uploaded with `gh release create`

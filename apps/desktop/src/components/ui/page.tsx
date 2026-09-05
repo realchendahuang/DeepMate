@@ -3,11 +3,18 @@ import { ArrowLeft } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { Button } from "./button";
 
-// The single scrollable page column. Content is capped at the `content`
-// width so lines stay readable on wide windows; the column stays left-aligned.
+// The single scrollable page column. Fluid up to the `content` width so the
+// column tracks window resizes; past the cap it centers (Notion-style) so the
+// extra space splits evenly instead of pooling on one side.
 export function PageBody({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div className={cn("w-full max-w-content px-4 py-5 md:px-6 md:py-6", className)} {...props} />
+    <div
+      className={cn(
+        "mx-auto flex w-full max-w-content flex-col px-4 py-5 md:px-6 md:py-6",
+        className,
+      )}
+      {...props}
+    />
   );
 }
 

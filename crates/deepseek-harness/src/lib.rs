@@ -1,7 +1,7 @@
-// DeepSeek Harness adapter.
+// The DeepSeek Harness service layer.
 //
-// This is the first concrete adapter. It keeps DeepSeek-specific command and
-// path knowledge behind the HarnessAdapter trait.
+// This is the one harness DeepMate controls. It keeps DeepSeek-specific
+// command and path knowledge out of the core and the frontends.
 //
 // The real harness CLI is `dsh` (npm package @deepseek-ai/dsh):
 //   - `dsh web` boots the web profile (default UI: http://127.0.0.1:3080)
@@ -18,14 +18,13 @@ use std::process::Command;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use async_trait::async_trait;
-use deepmate_core::adapter::{AdapterCapabilities, AdapterMetadata, Detection, HarnessAdapter};
 use deepmate_core::error::{CoreError, CoreResult};
 use deepmate_core::model::{
-    CheckStatus, CompatReport, DoctorCheck, DoctorReport, HarnessInfo, MarketEntry,
+    CheckStatus, CompatReport, Detection, DoctorCheck, DoctorReport, HarnessInfo, MarketEntry,
     MarketSourceInfo, Model, Plugin, PluginOpEvent, PluginOpKind, Profile, Provider, RuntimeStatus,
     RuntimeStatusKind,
 };
+use deepmate_core::snapshot::{Snapshot, SnapshotReport, SNAPSHOT_FORMAT};
 use deepmate_platform::PlatformService;
 use tokio::io::AsyncBufReadExt;
 
@@ -37,14 +36,13 @@ use dsh::{
     remove_profile, SettingsEditor,
 };
 
-const ADAPTER_ID: &str = "deepseek-harness";
-const ADAPTER_NAME: &str = "DeepSeek Harness";
-const ADAPTER_VERSION: &str = "0.4.0";
+const HARNESS_ID: &str = "deepseek-harness";
+const HARNESS_NAME: &str = "DeepSeek Harness";
 const DEFAULT_UI_URL: &str = "http://127.0.0.1:3080";
 const UI_PROBE_TIMEOUT: Duration = Duration::from_millis(500);
 
-// The adapter for DeepSeek Harness.
-pub struct DeepSeekHarnessAdapter {
+// The DeepSeek Harness service.
+pub struct DeepSeekHarness {
     platform: Arc<dyn PlatformService>,
     ui_url: Option<String>,
     cli_names: Vec<String>,
@@ -53,7 +51,7 @@ pub struct DeepSeekHarnessAdapter {
     http: reqwest::Client,
 }
 
-impl DeepSeekHarnessAdapter {
+impl DeepSeekHarness {
     pub fn new(platform: Arc<dyn PlatformService>) -> Self {
         Self {
             platform,
@@ -75,7 +73,7 @@ impl DeepSeekHarnessAdapter {
         self
     }
 
-    // The data directory is used for adapter-owned runtime state: the pid of
+    // The data directory is used for DeepMate-owned runtime state: the pid of
     // a harness started by DeepMate and the harness's own web log.
     pub fn with_data_dir(mut self, dir: impl Into<PathBuf>) -> Self {
         self.data_dir = Some(dir.into());
@@ -278,46 +276,21 @@ impl DeepSeekHarnessAdapter {
         tracing::info!(cli = %cli, profile, forwarded = ?forwarded, "plugin command completed");
         Ok(())
     }
-}
 
-#[async_trait]
-impl HarnessAdapter for DeepSeekHarnessAdapter {
-    fn metadata(&self) -> AdapterMetadata {
-        AdapterMetadata {
-            id: ADAPTER_ID.to_string(),
-            name: ADAPTER_NAME.to_string(),
-            version: ADAPTER_VERSION.to_string(),
-        }
-    }
-
-    fn capabilities(&self) -> AdapterCapabilities {
-        AdapterCapabilities {
-            runtime: true,
-            profiles: true,
-            providers: true,
-            models: true,
-            plugins: true,
-            marketplace: true,
-            snapshots: true,
-            ..Default::default()
-        }
-    }
-
-    async fn detect(&self) -> CoreResult<Detection> {
+    pub async fn detect(&self) -> CoreResult<Detection> {
         let cli = self.find_cli();
         Ok(Detection {
             found: cli.is_some(),
             harness: cli.as_ref().map(|_cli| HarnessInfo {
-                id: ADAPTER_ID.to_string(),
-                name: ADAPTER_NAME.to_string(),
+                id: HARNESS_ID.to_string(),
+                name: HARNESS_NAME.to_string(),
                 version: self.cli_version(),
-                adapter_version: ADAPTER_VERSION.to_string(),
             }),
             detail: cli.map(|cli| format!("found CLI: {cli}")),
         })
     }
 
-    async fn status(&self) -> CoreResult<RuntimeStatus> {
+    pub async fn status(&self) -> CoreResult<RuntimeStatus> {
         if self.find_cli().is_none() {
             return Ok(RuntimeStatus {
                 kind: RuntimeStatusKind::Error,
@@ -339,7 +312,7 @@ impl HarnessAdapter for DeepSeekHarnessAdapter {
         })
     }
 
-    async fn start(&self) -> CoreResult<()> {
+    pub async fn start(&self) -> CoreResult<()> {
         let cli = self.find_cli().ok_or_else(|| {
             CoreError::InvalidState("harness CLI was not found on PATH".to_string())
         })?;
@@ -373,7 +346,7 @@ impl HarnessAdapter for DeepSeekHarnessAdapter {
         Ok(())
     }
 
-    async fn stop(&self) -> CoreResult<()> {
+    pub async fn stop(&self) -> CoreResult<()> {
         let Some(pid) = self.read_pid() else {
             tracing::warn!("no harness pid recorded; the harness may have been started manually");
             return Ok(());
@@ -385,12 +358,12 @@ impl HarnessAdapter for DeepSeekHarnessAdapter {
         Ok(())
     }
 
-    async fn restart(&self) -> CoreResult<()> {
+    pub async fn restart(&self) -> CoreResult<()> {
         self.stop().await?;
         self.start().await
     }
 
-    async fn open_ui(&self) -> CoreResult<()> {
+    pub async fn open_ui(&self) -> CoreResult<()> {
         if !self.ui_reachable().await {
             return Err(CoreError::InvalidState(
                 "harness web UI is not running; start it first".to_string(),
@@ -402,55 +375,55 @@ impl HarnessAdapter for DeepSeekHarnessAdapter {
             .map_err(|err| CoreError::InvalidState(err.to_string()))
     }
 
-    async fn profiles(&self) -> CoreResult<Vec<Profile>> {
+    pub async fn profiles(&self) -> CoreResult<Vec<Profile>> {
         discover_profiles()
     }
 
-    async fn providers(&self) -> CoreResult<Vec<Provider>> {
+    pub async fn providers(&self) -> CoreResult<Vec<Provider>> {
         list_providers()
     }
 
-    async fn models(&self) -> CoreResult<Vec<Model>> {
+    pub async fn models(&self) -> CoreResult<Vec<Model>> {
         list_models()
     }
 
-    async fn upsert_provider(&self, provider: Provider) -> CoreResult<()> {
+    pub async fn upsert_provider(&self, provider: Provider) -> CoreResult<()> {
         SettingsEditor::upsert_provider(&provider)
     }
 
-    async fn remove_provider(&self, id: &str) -> CoreResult<()> {
+    pub async fn remove_provider(&self, id: &str) -> CoreResult<()> {
         SettingsEditor::remove_provider(id)
     }
 
-    async fn upsert_model(&self, provider: &str, model: Model) -> CoreResult<()> {
+    pub async fn upsert_model(&self, provider: &str, model: Model) -> CoreResult<()> {
         SettingsEditor::upsert_model(provider, &model)
     }
 
-    async fn remove_model(&self, provider: &str, id: &str) -> CoreResult<()> {
+    pub async fn remove_model(&self, provider: &str, id: &str) -> CoreResult<()> {
         SettingsEditor::remove_model(provider, id)
     }
 
-    async fn create_profile(&self, name: &str) -> CoreResult<()> {
+    pub async fn create_profile(&self, name: &str) -> CoreResult<()> {
         create_profile(name)
     }
 
-    async fn remove_profile(&self, name: &str) -> CoreResult<()> {
+    pub async fn remove_profile(&self, name: &str) -> CoreResult<()> {
         remove_profile(name)
     }
 
-    async fn plugins(&self) -> CoreResult<Vec<Plugin>> {
+    pub async fn plugins(&self) -> CoreResult<Vec<Plugin>> {
         list_all_plugins()
     }
 
-    async fn install_plugin(&self, profile: &str, spec: &str) -> CoreResult<()> {
+    pub async fn install_plugin(&self, profile: &str, spec: &str) -> CoreResult<()> {
         self.run_plugin(profile, &["add", spec]).await
     }
 
-    async fn remove_plugin(&self, profile: &str, id: &str) -> CoreResult<()> {
+    pub async fn remove_plugin(&self, profile: &str, id: &str) -> CoreResult<()> {
         self.run_plugin(profile, &["remove", id]).await
     }
 
-    async fn update_plugin(&self, profile: &str, id: Option<&str>) -> CoreResult<()> {
+    pub async fn update_plugin(&self, profile: &str, id: Option<&str>) -> CoreResult<()> {
         match id {
             Some(id) => self.run_plugin(profile, &["update", id]).await,
             None => self.run_plugin(profile, &["update"]).await,
@@ -462,7 +435,7 @@ impl HarnessAdapter for DeepSeekHarnessAdapter {
     // desktop UI can show a real progress log instead of a spinner. The
     // forwarded pnpm verb is derived from the operation kind, mirroring
     // `run_plugin`'s "never run a bare pnpm install" rule.
-    async fn stream_plugin_op(
+    pub async fn stream_plugin_op(
         &self,
         profile: &str,
         kind: PluginOpKind,
@@ -556,7 +529,7 @@ impl HarnessAdapter for DeepSeekHarnessAdapter {
         }
     }
 
-    async fn search_plugins(&self, query: &str) -> CoreResult<Vec<MarketEntry>> {
+    pub async fn search_plugins(&self, query: &str) -> CoreResult<Vec<MarketEntry>> {
         let market = market::Market::new(self.data_dir.clone(), self.http.clone());
         // The curated list is merged into every search so the curated source
         // is visible without a dedicated query. An empty query skips the npm
@@ -576,18 +549,18 @@ impl HarnessAdapter for DeepSeekHarnessAdapter {
         Ok(entries)
     }
 
-    async fn market_sources(&self) -> CoreResult<Vec<MarketSourceInfo>> {
+    pub async fn market_sources(&self) -> CoreResult<Vec<MarketSourceInfo>> {
         Ok(market::market_sources())
     }
 
-    // Compatibility is a registry contract: the harness version detected from
-    // the CLI is matched against the package's declared `engines` requirement.
-    async fn plugin_compat(&self, spec: &str) -> CoreResult<CompatReport> {
+    // Compatibility check: the harness version detected from the CLI is
+    // matched against the package's declared `engines` requirement.
+    pub async fn plugin_compat(&self, spec: &str) -> CoreResult<CompatReport> {
         let harness_version = self.cli_version();
         market::Market::compat(&self.http, spec, harness_version).await
     }
 
-    async fn doctor(&self) -> CoreResult<DoctorReport> {
+    pub async fn doctor(&self) -> CoreResult<DoctorReport> {
         let cli = self.find_cli();
         let mut checks = Vec::new();
 
@@ -640,52 +613,92 @@ impl HarnessAdapter for DeepSeekHarnessAdapter {
             });
         }
 
-        Ok(DoctorReport {
-            adapter_id: ADAPTER_ID.to_string(),
-            checks,
+        Ok(DoctorReport { checks })
+    }
+
+    // Capture the current harness inventory into a portable snapshot.
+    pub async fn capture_snapshot(&self) -> CoreResult<Snapshot> {
+        Ok(Snapshot {
+            format: SNAPSHOT_FORMAT.to_string(),
+            created: chrono::Utc::now().to_rfc3339(),
+            profiles: self.profiles().await?,
+            providers: self.providers().await?,
+            models: self.models().await?,
+            plugins: self.plugins().await?,
         })
+    }
+
+    // Apply a snapshot to this harness, merge-style. Every profile is
+    // created, every provider and model upserted, and every plugin installed.
+    // Existing items on the target are overwritten, never removed.
+    pub async fn apply_snapshot(&self, snapshot: &Snapshot) -> CoreResult<SnapshotReport> {
+        let mut report = SnapshotReport::default();
+
+        for profile in &snapshot.profiles {
+            self.create_profile(&profile.id).await?;
+            report.profiles += 1;
+        }
+        for provider in &snapshot.providers {
+            self.upsert_provider(provider.clone()).await?;
+            report.providers += 1;
+        }
+        for model in &snapshot.models {
+            let provider = model
+                .provider
+                .clone()
+                .ok_or_else(|| CoreError::InvalidState("model has no provider".to_string()))?;
+            self.upsert_model(&provider, model.clone()).await?;
+            report.models += 1;
+        }
+        for plugin in &snapshot.plugins {
+            // Plugins without an attributable profile cannot be reinstalled.
+            if plugin.profile.is_empty() {
+                continue;
+            }
+            self.install_plugin(&plugin.profile, &plugin.id).await?;
+            report.plugins += 1;
+        }
+
+        Ok(report)
     }
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use deepmate_platform::SystemPlatform;
 
-    #[tokio::test]
-    async fn adapter_metadata_is_stable() {
-        let adapter = DeepSeekHarnessAdapter::new(Arc::new(SystemPlatform));
-        assert_eq!(adapter.metadata().id, "deepseek-harness");
-    }
+    // Serializes DSH_HOME mutation against the dsh.rs tests.
+    pub(crate) use crate::dsh::tests::ENV_LOCK as DSH_ENV_LOCK;
 
     #[tokio::test]
     async fn detect_returns_not_found_in_clean_environment() {
-        let adapter = DeepSeekHarnessAdapter::new(Arc::new(SystemPlatform))
+        let harness = DeepSeekHarness::new(Arc::new(SystemPlatform))
             .with_cli_names(vec!["definitely-not-a-real-deepmate-command".to_string()]);
-        let detection = adapter.detect().await.unwrap();
+        let detection = harness.detect().await.unwrap();
         assert!(!detection.found);
     }
 
     #[test]
     fn ui_url_defaults_to_local_web_ui() {
-        let adapter = DeepSeekHarnessAdapter::new(Arc::new(SystemPlatform));
-        assert_eq!(adapter.ui_url(), DEFAULT_UI_URL);
+        let harness = DeepSeekHarness::new(Arc::new(SystemPlatform));
+        assert_eq!(harness.ui_url(), DEFAULT_UI_URL);
     }
 
     #[tokio::test]
     async fn ui_unreachable_when_nothing_listens() {
         // Port 1 is never a listening harness; the HTTP probe must report it
         // as unreachable rather than trusting a raw TCP connect.
-        let adapter =
-            DeepSeekHarnessAdapter::new(Arc::new(SystemPlatform)).with_ui_url("http://127.0.0.1:1");
-        assert!(!adapter.ui_reachable().await);
+        let harness =
+            DeepSeekHarness::new(Arc::new(SystemPlatform)).with_ui_url("http://127.0.0.1:1");
+        assert!(!harness.ui_reachable().await);
     }
 
     #[tokio::test]
     async fn open_ui_fails_when_not_running() {
-        let adapter =
-            DeepSeekHarnessAdapter::new(Arc::new(SystemPlatform)).with_ui_url("http://127.0.0.1:1");
-        let err = adapter.open_ui().await.unwrap_err();
+        let harness =
+            DeepSeekHarness::new(Arc::new(SystemPlatform)).with_ui_url("http://127.0.0.1:1");
+        let err = harness.open_ui().await.unwrap_err();
         assert!(err.to_string().contains("not running"));
     }
 
@@ -728,9 +741,9 @@ mod tests {
         ));
         let cli = fake_plugin_cli(&dir, 0);
         let recorded = dir.join("recorded-args");
-        let adapter = DeepSeekHarnessAdapter::new(Arc::new(SystemPlatform))
+        let harness = DeepSeekHarness::new(Arc::new(SystemPlatform))
             .with_cli_names(vec![cli.to_string_lossy().into_owned()]);
-        adapter.install_plugin("web", "dsh-mnemon").await.unwrap();
+        harness.install_plugin("web", "dsh-mnemon").await.unwrap();
         let args = std::fs::read_to_string(&recorded).unwrap();
         assert_eq!(
             args.lines().collect::<Vec<_>>(),
@@ -745,10 +758,10 @@ mod tests {
             std::env::temp_dir().join(format!("deepmate-plugin-verbs-test-{}", std::process::id()));
         let cli = fake_plugin_cli(&dir, 0);
         let recorded = dir.join("recorded-args");
-        let adapter = DeepSeekHarnessAdapter::new(Arc::new(SystemPlatform))
+        let harness = DeepSeekHarness::new(Arc::new(SystemPlatform))
             .with_cli_names(vec![cli.to_string_lossy().into_owned()]);
 
-        adapter.remove_plugin("headless", "old-pkg").await.unwrap();
+        harness.remove_plugin("headless", "old-pkg").await.unwrap();
         assert_eq!(
             std::fs::read_to_string(&recorded)
                 .unwrap()
@@ -757,7 +770,7 @@ mod tests {
             ["plugin", "--profile", "headless", "remove", "old-pkg"]
         );
 
-        adapter.update_plugin("web", None).await.unwrap();
+        harness.update_plugin("web", None).await.unwrap();
         assert_eq!(
             std::fs::read_to_string(&recorded)
                 .unwrap()
@@ -766,7 +779,7 @@ mod tests {
             ["plugin", "--profile", "web", "update"]
         );
 
-        adapter
+        harness
             .update_plugin("web", Some("dsh-mnemon"))
             .await
             .unwrap();
@@ -787,9 +800,9 @@ mod tests {
         let cli = fake_plugin_cli(&dir, 7);
         let recorded = dir.join("recorded-args");
         std::fs::write(&recorded, "").unwrap();
-        let adapter = DeepSeekHarnessAdapter::new(Arc::new(SystemPlatform))
+        let harness = DeepSeekHarness::new(Arc::new(SystemPlatform))
             .with_cli_names(vec![cli.to_string_lossy().into_owned()]);
-        let err = adapter.install_plugin("web", "bad-pkg").await.unwrap_err();
+        let err = harness.install_plugin("web", "bad-pkg").await.unwrap_err();
         let message = err.to_string();
         assert!(
             message.contains("Some(7)"),
@@ -797,7 +810,7 @@ mod tests {
         );
 
         // A missing CLI surfaces the not-found error before any forwarding.
-        let missing = DeepSeekHarnessAdapter::new(Arc::new(SystemPlatform))
+        let missing = DeepSeekHarness::new(Arc::new(SystemPlatform))
             .with_cli_names(vec!["definitely-not-a-command-xyz".to_string()]);
         assert!(missing.install_plugin("web", "pkg").await.is_err());
     }
@@ -814,9 +827,9 @@ mod tests {
         let mut perms = std::fs::metadata(&script).unwrap().permissions();
         perms.set_mode(0o755);
         std::fs::set_permissions(&script, perms).unwrap();
-        let adapter = DeepSeekHarnessAdapter::new(Arc::new(SystemPlatform))
+        let harness = DeepSeekHarness::new(Arc::new(SystemPlatform))
             .with_cli_names(vec![script.to_string_lossy().into_owned()]);
-        let detection = adapter.detect().await.unwrap();
+        let detection = harness.detect().await.unwrap();
         assert!(detection.found);
         assert_eq!(detection.harness.unwrap().version.as_deref(), Some("1.2.3"));
     }
@@ -840,13 +853,146 @@ mod tests {
         let mut perms = std::fs::metadata(&script).unwrap().permissions();
         perms.set_mode(0o755);
         std::fs::set_permissions(&script, perms).unwrap();
-        let adapter = DeepSeekHarnessAdapter::new(Arc::new(SystemPlatform))
+        let harness = DeepSeekHarness::new(Arc::new(SystemPlatform))
             .with_cli_names(vec![script.to_string_lossy().into_owned()]);
-        let detection = adapter.detect().await.unwrap();
+        let detection = harness.detect().await.unwrap();
         assert!(detection.found);
         assert_eq!(
             detection.harness.unwrap().version.as_deref(),
             Some("0.1.0-rc.6")
         );
+    }
+
+    // ---- snapshot capture / apply ----
+
+    fn snapshot_test_home(tag: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "deepmate-snapshot-harness-test-{tag}-{}",
+            std::process::id()
+        ))
+    }
+
+    #[cfg(unix)]
+    fn write_test_profile(home: &Path) {
+        let dir = home.join("profiles").join("web");
+        std::fs::create_dir_all(&dir).unwrap();
+        let manifest = serde_json::json!({
+            "name": "dsh-profile-web",
+            "private": true,
+            "dependencies": { "dsh-mnemon": "1.0.0" },
+            "dsh": { "profile": { "bundles": ["coding"] } },
+        });
+        std::fs::write(
+            dir.join("package.json"),
+            serde_json::to_string_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+    }
+
+    #[cfg(unix)]
+    fn write_test_settings(home: &Path) {
+        let settings = "\
+llm-pi-ai:
+  providers:
+    my-provider:
+      displayName: My Provider
+      baseURL: https://api.example.com/v1
+      apiKeyEnv: MY_PROVIDER_KEY
+      models:
+        - id: model-a
+          name: Model A
+          contextWindow: 128000
+";
+        std::fs::write(home.join("settings.yaml"), settings).unwrap();
+    }
+
+    // The env lock is deliberately held across the await: #[tokio::test] runs
+    // on a single-threaded runtime, so holding the std Mutex cannot deadlock.
+    #[cfg(unix)]
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn capture_snapshot_collects_inventory() {
+        let _guard = DSH_ENV_LOCK.lock().unwrap();
+        let previous = std::env::var_os("DSH_HOME");
+        let home = snapshot_test_home("capture");
+        let _ = std::fs::remove_dir_all(&home);
+        write_test_profile(&home);
+        write_test_settings(&home);
+        std::env::set_var("DSH_HOME", &home);
+
+        let harness = DeepSeekHarness::new(Arc::new(SystemPlatform))
+            .with_cli_names(vec!["definitely-not-a-real-deepmate-command".to_string()]);
+        let snapshot = harness.capture_snapshot().await.unwrap();
+
+        match previous {
+            Some(value) => std::env::set_var("DSH_HOME", value),
+            None => std::env::remove_var("DSH_HOME"),
+        }
+
+        assert_eq!(snapshot.format, SNAPSHOT_FORMAT);
+        // The always-composed deepseek route plus the seeded pi-ai provider.
+        assert_eq!(snapshot.profiles.len(), 1);
+        assert_eq!(snapshot.providers.len(), 2);
+        // Two built-in deepseek catalog models plus the seeded pi-ai model.
+        assert_eq!(snapshot.models.len(), 3);
+        // One base bundle plus one seeded dependency on the profile.
+        assert_eq!(snapshot.plugins.len(), 2);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn apply_snapshot_upserts_inventory() {
+        let _guard = DSH_ENV_LOCK.lock().unwrap();
+        let previous = std::env::var_os("DSH_HOME");
+        let home = snapshot_test_home("apply");
+        let _ = std::fs::remove_dir_all(&home);
+        std::env::set_var("DSH_HOME", &home);
+
+        let snapshot = Snapshot {
+            format: SNAPSHOT_FORMAT.to_string(),
+            created: chrono::Utc::now().to_rfc3339(),
+            profiles: vec![Profile {
+                id: "coding".to_string(),
+                name: "coding".to_string(),
+                description: None,
+            }],
+            providers: vec![Provider {
+                id: "imported".to_string(),
+                name: "Imported".to_string(),
+                kind: "pi-ai".to_string(),
+                api: None,
+                base_url: Some("https://api.example.com/v1".to_string()),
+                api_key_env: Some("IMPORTED_KEY".to_string()),
+                compat: None,
+            }],
+            models: vec![Model {
+                id: "model-a".to_string(),
+                name: "Model A".to_string(),
+                provider: Some("imported".to_string()),
+                context_window: None,
+                max_tokens: None,
+                input: None,
+                reasoning_efforts: None,
+                compat: None,
+            }],
+            plugins: vec![],
+        };
+
+        let harness = DeepSeekHarness::new(Arc::new(SystemPlatform))
+            .with_cli_names(vec!["definitely-not-a-real-deepmate-command".to_string()]);
+        let report = harness.apply_snapshot(&snapshot).await.unwrap();
+
+        match previous {
+            Some(value) => std::env::set_var("DSH_HOME", value),
+            None => std::env::remove_var("DSH_HOME"),
+        }
+
+        assert_eq!(report.profiles, 1);
+        assert_eq!(report.providers, 1);
+        assert_eq!(report.models, 1);
+        assert_eq!(report.plugins, 0);
+        let _ = std::fs::remove_dir_all(&home);
     }
 }

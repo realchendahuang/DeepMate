@@ -6,9 +6,8 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-deepmate-core = { path = "../../deepmate-core" }
-deepmate-platform = { path = "../../deepmate-platform" }
-async-trait.workspace = true
+deepmate-core = { path = "../deepmate-core" }
+deepmate-platform = { path = "../deepmate-platform" }
 chrono.workspace = true
 reqwest.workspace = true
 serde.workspace = true

@@ -2,7 +2,7 @@
 
 This document defines the current technical direction for DeepMate.
 
-DeepMate is a lightweight, cross-platform companion and control plane for AI harnesses. The first supported harness is DeepSeek Harness, but the architecture is designed around adapters so additional harnesses can be integrated later without rewriting the core product.
+DeepMate is a lightweight, cross-platform companion and control plane for AI harnesses. The supported harness is DeepSeek Harness; its integration lives in a dedicated service crate, which keeps the core a pure data layer.
 
 > DeepMate manages the harness. The harness does the work.
 
@@ -12,12 +12,11 @@ DeepMate is designed around a few constraints:
 
 - Stay lightweight enough to run comfortably as a tray companion.
 - Use a native desktop UI without embedding the Harness Web UI.
-- Keep the control core independent from any single harness.
+- Keep the control core a pure data layer with no harness-specific knowledge.
 - Treat the harness as the source of truth for harness-owned state.
-- Make adapters replaceable as upstream harness APIs evolve.
+- Isolate harness-specific behavior in the deepseek-harness service crate so it can move as upstream APIs evolve.
 - Keep DeepMate-owned data transparent, portable and easy to inspect.
-- Expose the same core capabilities to both the desktop app and CLI.
-- Leave room for third-party harness adapters in the future.
+- Expose the same management surface to both the desktop app and CLI.
 
 ## High-level architecture
 
@@ -31,21 +30,22 @@ DeepMate is designed around a few constraints:
               │       \         /      │
               │        \       /       │
               │        Control Core    │
-              │           Rust         │
+              │     pure data layer    │
               │                        │
               └───────────┬────────────┘
                           │
-                  Harness Adapter API
+                  Harness Service API
                           │
-             ┌────────────┴────────────┐
-             │                         │
-     DeepSeek Harness Adapter    Future Adapters
-             │                         │
-             ▼                         ▼
-      DeepSeek Harness          Other Harnesses
+                          ▼
+              ┌─────────────────────────┐
+              │  deepseek-harness crate │
+              └───────────┬─────────────┘
+                          │
+                          ▼
+                   DeepSeek Harness
 ```
 
-The desktop application and CLI are consumers of the same Rust core. Harness-specific behavior lives behind the adapter boundary.
+The desktop application and CLI are consumers of the same Rust core. Harness-specific behavior lives in the deepseek-harness service crate.
 
 ## Technology stack
 
@@ -53,7 +53,7 @@ The desktop application and CLI are consumers of the same Rust core. Harness-spe
 
 **Rust** is the primary implementation language for DeepMate.
 
-The control core, adapter interfaces, runtime management, configuration, marketplace logic, diagnostics and CLI should all live in Rust.
+The control core, the deepseek-harness service, runtime management, configuration, marketplace logic, diagnostics and CLI all live in Rust.
 
 ### Desktop UI
 
@@ -83,7 +83,7 @@ The desktop app should support:
 - marketplace requests
 - downloads
 - diagnostics
-- adapter communication
+- harness CLI communication
 
 The Tauri async runtime executes the command surface; background work
 (detection, health checks, plugin installation, marketplace requests,
@@ -104,8 +104,7 @@ The bridge also uses:
 - **`tauri::ipc::Channel` streaming** — `plugin_op_stream` runs a plugin
   operation (install / remove / update) while pushing `PluginOpEvent`
   (Started / Line / Finished) to the frontend, which renders a live progress
-  log; adapters that cannot stream the harness process fall back to the
-  trait's default Started/Finished wrapper
+  log.
 - **constants** — `appVersion` is exported from `CARGO_PKG_VERSION` so the
   UI never hard-codes the version
 
@@ -118,7 +117,6 @@ Typical consumers include:
 - marketplace sources
 - npm-compatible registries
 - GitHub-backed sources
-- adapter-specific HTTP APIs
 - update metadata
 
 ### Serialization and file formats
@@ -173,7 +171,7 @@ Diagnostics should preserve machine-readable error categories so the Doctor surf
 
 ### Secrets
 
-Harness-owned credentials remain owned by the harness and are accessed through the corresponding adapter.
+Harness-owned credentials remain owned by the harness and are never read or written by DeepMate.
 
 DeepMate-owned secrets, such as private registry credentials, should use the operating system's secure credential store through a cross-platform Rust keyring abstraction.
 
@@ -193,11 +191,9 @@ DeepMate/
 │
 ├── crates/
 │   ├── deepmate-core/
-│   ├── deepmate-protocol/
-│   ├── deepmate-market/
 │   ├── deepmate-platform/
-│   └── adapters/
-│       └── deepseek-harness/
+│   ├── deepmate-app/
+│   └── deepseek-harness/
 │
 └── apps/
     ├── desktop/
@@ -223,10 +219,9 @@ PluginManager
 MarketManager
 Doctor
 SnapshotManager
-AdapterRegistry
 ```
 
-The core does not know how DeepSeek Harness stores its settings or how another harness implements plugins. It works with normalized domain models exposed by adapters.
+The core does not know how DeepSeek Harness stores its settings. It holds normalized domain models; the deepseek-harness service produces and consumes them.
 
 Example normalized types:
 
@@ -237,23 +232,16 @@ Profile
 Provider
 Model
 Plugin
-PluginVersion
 DoctorReport
 Snapshot
-Capability
 ```
 
-## Harness adapter layer
+## DeepSeek Harness service layer
 
-The adapter boundary is the most important architectural contract in DeepMate.
-
-Conceptually, each adapter implements capabilities such as:
+Harness-specific behavior lives in one crate: `deepseek-harness`. It exposes a concrete `DeepSeekHarness` service with async methods for everything the UI and the CLI need:
 
 ```rust
-trait HarnessAdapter {
-    fn metadata(&self) -> AdapterMetadata;
-    fn capabilities(&self) -> AdapterCapabilities;
-
+impl DeepSeekHarness {
     async fn detect(&self) -> Result<Detection>;
     async fn status(&self) -> Result<RuntimeStatus>;
 
@@ -267,119 +255,28 @@ trait HarnessAdapter {
     async fn models(&self) -> Result<Vec<Model>>;
     async fn plugins(&self) -> Result<Vec<Plugin>>;
 
-    // Whether a market package fits the active harness. Adapters without a
-    // compatibility contract leave the default, which reports Unsupported.
+    // Whether a market package fits the detected harness.
     async fn plugin_compat(&self, spec: &str) -> Result<CompatReport>;
 
     async fn doctor(&self) -> Result<DoctorReport>;
+
+    async fn capture_snapshot(&self) -> Result<Snapshot>;
+    async fn apply_snapshot(&self, snapshot: &Snapshot) -> Result<SnapshotReport>;
 }
 ```
 
-The real Rust trait will be shaped by implementation experience. The important part is capability-based separation rather than exposing harness-specific files or commands directly to the UI.
-
-### Capability-driven UI
-
-Not every harness will support the same concepts.
-
-An adapter therefore declares capabilities, for example:
-
-```text
-runtime
-profiles
-providers
-models
-plugins
-marketplace
-skills
-mcp
-snapshots
-```
-
-The desktop UI and CLI should expose only the features supported by the active adapter.
-
-This lets DeepMate remain generic without forcing every harness into the same feature model.
-
-## DeepSeek Harness adapter
-
-The first adapter targets DeepSeek Harness.
-
-The adapter should prefer official DeepSeek Harness interfaces and commands whenever they cover the required operation.
-
-Initial integration order:
+The service prefers official DeepSeek Harness interfaces and commands whenever they cover the required operation:
 
 1. DeepSeek Harness CLI
 2. official runtime / remote / SDK surfaces as they become suitable
-3. a minimal DeepMate bridge only for capabilities that need an in-process Harness service
+3. a minimal DeepMate bridge only for operations that need an in-process Harness service
 4. direct file access only where it is part of a stable, documented contract
 
-For plugin operations, the adapter should use the official Harness plugin workflow so profile initialization, package management and bundle reconciliation remain owned by DeepSeek Harness.
+For plugin operations, the service uses the official Harness plugin workflow so profile initialization, package management and bundle reconciliation remain owned by DeepSeek Harness.
 
 Harness Web UI remains the working interface. DeepMate opens it with the operating system's default browser.
 
-## Adapter compatibility layer
-
-Upstream harnesses can change quickly. DeepMate should isolate version-specific behavior inside the adapter.
-
-Conceptually:
-
-```text
-DeepMate Core
-     │
-     ▼
-Harness Adapter
-     │
-     ├── compatibility rules
-     ├── feature detection
-     ├── CLI/API mapping
-     └── version-specific behavior
-```
-
-The rest of the product should not depend on individual Harness config keys, file paths or internal implementation details.
-
-## Third-party adapter protocol
-
-First-party adapters can be compiled into DeepMate.
-
-A future public third-party adapter system should use a process boundary rather than a language-specific binary ABI.
-
-Planned protocol direction:
-
-**JSON-RPC over stdio**
-
-```text
-DeepMate
-   │
-   │ JSON-RPC / stdio
-   ▼
-Third-party Adapter Process
-   │
-   ▼
-External Harness
-```
-
-This allows adapters to be implemented in Rust, Go, Python, Node.js or other languages while keeping the DeepMate host stable.
-
-A future adapter manifest could describe:
-
-```json
-{
-  "id": "deepseek-harness",
-  "name": "DeepSeek Harness",
-  "version": "1.0.0",
-  "protocol": 1,
-  "executable": "deepmate-adapter-dsh",
-  "capabilities": [
-    "runtime",
-    "profiles",
-    "providers",
-    "models",
-    "plugins",
-    "doctor"
-  ]
-}
-```
-
-The protocol should be versioned independently from the DeepMate application version.
+Upstream harnesses can change quickly, so version-specific behavior stays inside this crate: compatibility rules, feature detection, CLI/API mapping. The rest of the product never depends on individual Harness config keys, file paths or internal implementation details.
 
 ## Platform abstraction
 
@@ -411,7 +308,7 @@ Platform-specific conditionals should stay concentrated in this layer rather tha
 
 ## Runtime management
 
-DeepMate should support two runtime strategies where an adapter allows it.
+DeepMate supports two runtime strategies.
 
 ### System runtime
 
@@ -431,7 +328,7 @@ The desktop app itself should stay small even when a managed harness runtime is 
 
 DeepMate should avoid introducing a permanent application daemon unless a concrete feature requires one.
 
-The desktop process can remain in the system tray while active. Long-running harness processes should use the adapter's platform-appropriate runtime strategy.
+The desktop process can remain in the system tray while active. Long-running harness processes should use a platform-appropriate runtime strategy.
 
 Conceptually:
 
@@ -442,7 +339,7 @@ DeepMate Desktop
 DeepMate Core
       │
       ▼
-Platform / Harness Adapter
+Platform / Harness Service
       │
       ▼
 Harness Runtime
@@ -496,7 +393,7 @@ verified_source
 updated_at
 ```
 
-The marketplace layer is separate from the Harness adapter: discovery can be generic, while installation remains adapter-owned because each harness can have different installation semantics.
+The marketplace layer is separate from the harness service: discovery is generic, while installation is owned by the deepseek-harness service because installation semantics are harness-specific.
 
 ## Plugin trust metadata
 
@@ -525,9 +422,6 @@ Conceptual data layout:
 <DeepMate Data>/
 │
 ├── config.toml
-│
-├── adapters/
-│   └── deepseek-harness.toml
 │
 ├── cache/
 │   ├── marketplace.json
@@ -595,7 +489,7 @@ Example:
 
 ```json
 {"time":"...","action":"plugin.install","plugin":"example"}
-{"time":"...","action":"runtime.restart","adapter":"deepseek-harness"}
+{"time":"...","action":"runtime.restart"}
 {"time":"...","action":"profile.switch","profile":"web"}
 ```
 
@@ -618,7 +512,6 @@ Examples:
 - UI preferences
 - marketplace cache
 - favorites
-- adapter preferences
 - local action history
 - snapshots generated by DeepMate
 
@@ -633,7 +526,7 @@ Examples:
 - harness credentials
 - harness sessions
 
-Harness-owned state should be accessed through the active adapter and remain authoritative in the harness itself.
+Harness-owned state should be accessed through the deepseek-harness service and remain authoritative in the harness itself.
 
 ## Snapshots
 
@@ -642,8 +535,6 @@ Snapshots are portable JSON documents representing a normalized view of a setup.
 A snapshot may include:
 
 ```text
-adapter
-adapter version
 runtime metadata
 profiles
 providers
@@ -670,8 +561,9 @@ single portable JSON document (`deepmate-config/1` format). Export always
 writes the complete document and import replaces the active configuration
 with it — no partial merge, so an applied backup reproduces exactly what was
 exported. The document contains only preference values, never secrets.
-Unlike snapshots, backups are adapter-independent and are written to an
-explicit file path (via the CLI or a native save dialog in the desktop app).
+Unlike snapshots, backups concern only DeepMate's own preferences and are
+written to an explicit file path (via the CLI or a native save dialog in the
+desktop app).
 
 ## Plugin compatibility and trust signals
 
@@ -679,8 +571,8 @@ The market normalizes whatever trust signals a source publishes. For npm that
 is the search API's review scores (`popularity`, `quality`, clamped to
 0..1), surfaced on search results in both the CLI and the desktop app.
 
-Before an installation, the adapter contract offers `plugin_compat(spec)`: the
-DeepSeek Harness adapter resolves the package name from the spec, reads the
+Before an installation, the service offers `plugin_compat(spec)`: the
+DeepSeek Harness service resolves the package name from the spec, reads the
 latest version's `engines` entry from the registry packument, and matches it
 against the detected harness version with core semver logic
 (`model::compat_status`). The verdict is `Compatible`, `Incompatible` or
@@ -688,9 +580,8 @@ against the detected harness version with core semver logic
 
 - `Incompatible` refuses the install unless `--force` is given (CLI) — the
   desktop app surfaces the refusal as an error.
-- `Unknown` (nothing declared, unparsable values, or a failed lookup) and
-  `Unsupported` (adapter without a contract, e.g. pi-agent) never block;
-  they only note the fact.
+- `Unknown` (nothing declared, unparsable values, or a failed lookup) never
+  blocks; it only notes the fact.
 
 A running prerelease harness (e.g. `0.1.0-rc.6`) counts as its release line
 for range matching, so `^0.1` does not reject the harness's own prerelease.
@@ -710,7 +601,7 @@ port conflicts
 profile validity
 plugin compatibility
 provider configuration
-adapter compatibility
+harness version compatibility
 filesystem permissions
 update availability
 ```
@@ -779,7 +670,7 @@ sizes, weights or radii (see docs/DESIGN_SYSTEM.md).
 - Rust workspace
 - `deepmate-core`
 - platform abstraction
-- DeepSeek Harness adapter
+- DeepSeek Harness service
 - runtime detection
 - runtime start / stop / restart
 - `deepmate status`
@@ -799,7 +690,6 @@ sizes, weights or radii (see docs/DESIGN_SYSTEM.md).
 - profiles
 - providers
 - models
-- adapter capability detection
 - configuration editing through supported Harness interfaces
 
 Profiles, providers and models are exposed in both the CLI and the desktop
@@ -826,20 +716,12 @@ a later refinement.
 - private registries
 - portable setup workflows
 
-### Stage 6 — Adapter ecosystem (in progress)
-
-- additional harness adapters — the Pi Agent adapter shipped in v0.6.0 as
-  the second first-party adapter
-- public adapter protocol
-- JSON-RPC stdio host
-- adapter manifests
-
 ## Architectural rules
 
 The following rules should be treated as project invariants:
 
 1. **Desktop and CLI share the same core.**
-2. **Harness-specific behavior stays behind adapters.**
+2. **Harness-specific behavior lives in the deepseek-harness service crate; the core stays a pure data layer.**
 3. **Platform-specific behavior stays behind platform services.**
 4. **The harness remains authoritative for harness-owned state.**
 5. **DeepMate-owned persistent data uses transparent portable files.**
@@ -867,4 +749,4 @@ Open Harness
 
 The harness owns the actual agent work experience.
 
-That boundary is what allows DeepMate to stay small while still becoming a useful universal control layer for multiple AI harnesses over time.
+That boundary is what allows DeepMate to stay small while still becoming a useful control layer for DeepSeek Harness.

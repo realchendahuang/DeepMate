@@ -167,7 +167,7 @@ export const useStore = create<AppState>((set) => ({
   doctor: null,
   snapshots: [],
   busyAction: null,
-  language: "en",
+  language: "zh",
   theme: "system",
   checkUpdates: true,
   notifyUpdates: true,

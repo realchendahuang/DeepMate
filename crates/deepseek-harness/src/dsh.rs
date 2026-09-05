@@ -744,12 +744,12 @@ pub fn remove_profile(name: &str) -> CoreResult<()> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::sync::Mutex;
 
     // Env-var tests must not race each other.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    pub(crate) static ENV_LOCK: Mutex<()> = Mutex::new(());
     static FIXTURE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
     fn fixture_home() -> PathBuf {

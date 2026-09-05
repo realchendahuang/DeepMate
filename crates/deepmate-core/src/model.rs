@@ -7,7 +7,14 @@ pub struct HarnessInfo {
     pub id: String,
     pub name: String,
     pub version: Option<String>,
-    pub adapter_version: String,
+}
+
+// The result of a harness detection attempt.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct Detection {
+    pub found: bool,
+    pub harness: Option<HarnessInfo>,
+    pub detail: Option<String>,
 }
 
 // Coarse runtime status.
@@ -21,7 +28,7 @@ pub enum RuntimeStatusKind {
     Error,
 }
 
-// Runtime status returned by an adapter.
+// Coarse runtime status of the harness.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct RuntimeStatus {
     pub kind: RuntimeStatusKind,
@@ -86,7 +93,6 @@ pub enum CheckStatus {
 // A full Doctor report.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct DoctorReport {
-    pub adapter_id: String,
     pub checks: Vec<DoctorCheck>,
 }
 
@@ -148,8 +154,8 @@ pub struct Plugin {
     pub name: String,
     pub version: Option<String>,
     pub enabled: bool,
-    // The harness profile the plugin belongs to. Empty when the adapter
-    // cannot attribute the plugin to a profile.
+    // The harness profile the plugin belongs to. Empty when the plugin
+    // cannot be attributed to a profile.
     pub profile: String,
     // Latest version known from a marketplace check; `None` when no check
     // has been performed for this plugin.
@@ -290,9 +296,8 @@ pub enum PluginOpKind {
 //
 // The desktop UI renders these as a live progress log: `Started` opens the
 // operation, `Line` appends harness output, `Finished` closes it with the
-// outcome. Adapters that cannot stream the harness process still emit
-// `Started`/`Finished` around the blocking call, so the UI always gets a
-// bounded, well-formed stream.
+// outcome. The stream is always bounded and well-formed: `Started` first,
+// `Finished` last.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(tag = "phase", rename_all = "snake_case")]
 pub enum PluginOpEvent {

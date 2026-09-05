@@ -333,9 +333,6 @@ export function PluginsContent({ onTabChange }: PluginsContentProps) {
                     <Badge variant={source.source === "curated" ? "accent" : "neutral"}>
                       {source.name}
                     </Badge>
-                    {source.description && (
-                      <span className="text-small text-text-dim">{source.description}</span>
-                    )}
                   </div>
                 ))}
               </div>
@@ -351,11 +348,6 @@ export function PluginsContent({ onTabChange }: PluginsContentProps) {
           </EmptyState>
         ) : (
           <>
-            {query && (
-              <p className="text-small text-text-dim">
-                {t("plugins.results", { count: visibleEntries.length })}
-              </p>
-            )}
             <Card className="overflow-hidden">
               <div className="divide-y divide-border">
                 {visibleEntries.map((entry) => {
@@ -376,11 +368,6 @@ export function PluginsContent({ onTabChange }: PluginsContentProps) {
                           <Badge variant="skip" dot={false}>
                             v{entry.version}
                           </Badge>
-                        )}
-                        {entry.publisher && (
-                          <span className="text-small text-text-faint">
-                            {t("plugins.by", { publisher: entry.publisher })}
-                          </span>
                         )}
                         <span className="flex-1" />
                         {installed ? (
@@ -410,11 +397,6 @@ export function PluginsContent({ onTabChange }: PluginsContentProps) {
                           <p className="max-w-full truncate text-small text-accent">
                             {entry.repository}
                           </p>
-                        )}
-                        {entry.updated && (
-                          <span className="text-small text-text-faint">
-                            {t("plugins.updated", { date: entry.updated.toLocaleDateString() })}
-                          </span>
                         )}
                         <TrustMeter label={t("plugins.popularity")} value={entry.popularity} />
                         <TrustMeter label={t("plugins.quality")} value={entry.quality} />

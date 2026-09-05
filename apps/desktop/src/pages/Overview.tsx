@@ -21,21 +21,21 @@ import {
 import { useStore } from "../store";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
-import { Badge } from "../components/ui/badge";
 import { Skeleton } from "../components/ui/skeleton";
 import { EmptyState } from "../components/ui/empty-state";
 import { PageBody, PageHeader, SectionHeader } from "../components/ui/page";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../components/ui/tooltip";
-import type { CheckStatus } from "../api";
+import type { CheckStatus, RuntimeStatusKind } from "../api";
 import { cn } from "../lib/utils";
 import type { View } from "../components/layout/nav";
 
-const STATUS_TONE: Record<string, string> = {
-  running: "pass",
-  installed: "accent",
-  stopped: "neutral",
-  unknown: "skip",
-  error: "fail",
+// One tone word drives the status dot color everywhere.
+const STATUS_DOT: Record<RuntimeStatusKind, string> = {
+  running: "bg-pass",
+  installed: "bg-accent",
+  stopped: "bg-neutral",
+  unknown: "bg-skip",
+  error: "bg-fail",
 };
 
 const CHECK_ICON: Record<CheckStatus, typeof CheckCircle2> = {
@@ -89,11 +89,30 @@ export function OverviewPage({ onNavigate }: { onNavigate?: (view: View) => void
 
   const { detection, status, counts } = overview;
   const harnessFound = detection.found;
-  const statusTone = STATUS_TONE[status.kind] ?? "neutral";
+  const harness = detection.harness;
   const running = status.kind === "running";
   const refreshing = busyAction === "refresh";
   const installing = busyAction === "update-install";
   const busy = busyAction !== null;
+
+  // The status word is the hero: running/stopped/... when a harness was
+  // found, a detection failure otherwise.
+  const heroStatus = harnessFound ? t(`status.${status.kind}`) : t("overview.notDetected");
+  const dotTone = harnessFound ? STATUS_DOT[status.kind] : "bg-warn";
+
+  // Meta line: harness identity when present, the install hint when not.
+  const meta: string[] = [];
+  if (harnessFound && harness) {
+    meta.push(harness.name);
+    if (harness.version) {
+      meta.push(t("overview.versionShort", { version: harness.version }));
+    }
+    if (status.pid != null) {
+      meta.push(t("overview.pid", { pid: status.pid }));
+    }
+  } else {
+    meta.push(t("overview.notDetectedHint"));
+  }
 
   const stats = [
     {
@@ -167,82 +186,60 @@ export function OverviewPage({ onNavigate }: { onNavigate?: (view: View) => void
 
       <Card>
         <CardContent className="p-4 md:p-5">
-          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-            <div className="min-w-0 space-y-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-display font-bold text-text">
-                  {harnessFound ? detection.harness?.name : t("overview.notDetected")}
-                </h2>
-                <Badge variant={harnessFound ? "pass" : "warn"}>
-                  {harnessFound ? t("overview.detected") : t("overview.missing")}
-                </Badge>
-                {detection.harness?.version && (
-                  <span className="text-small text-text-dim">
-                    {t("overview.version", { version: detection.harness.version })}
-                  </span>
-                )}
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2.5">
+                <span className={cn("h-3 w-3 shrink-0 rounded-full", dotTone)} />
+                <h2 className="text-display font-bold text-text">{heroStatus}</h2>
               </div>
-              {detection.detail && <p className="text-small text-text-faint">{detection.detail}</p>}
-              <div className="flex flex-wrap items-center gap-2">
-                <span
-                  className={cn("h-2.5 w-2.5 rounded-full", {
-                    "bg-pass": statusTone === "pass",
-                    "bg-accent": statusTone === "accent",
-                    "bg-neutral": statusTone === "neutral",
-                    "bg-skip": statusTone === "skip",
-                    "bg-fail": statusTone === "fail",
-                  })}
-                />
-                <span className="text-body font-semibold text-text">
-                  {t(`status.${status.kind}`)}
-                </span>
-                {status.pid != null && (
-                  <span className="text-small text-text-faint">
-                    {t("overview.pid", { pid: status.pid })}
-                  </span>
-                )}
-              </div>
+              <p className="mt-1 truncate text-small text-text-dim">{meta.join(" · ")}</p>
             </div>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span>
-                  <Button variant="primary" onClick={openHarness} disabled={busy || !running}>
-                    <ExternalLink className="h-4 w-4" />
-                    {t("overview.openHarness")}
-                  </Button>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>{t("overview.openHarnessHint")}</TooltipContent>
-            </Tooltip>
-          </div>
-
-          {harnessFound && detection.harness && (
-            <div className="mt-4 flex flex-wrap gap-1.5 border-t border-border pt-4">
-              {["runtime", "profiles", "providers", "models", "plugins", "marketplace"].map(
-                (cap) => (
-                  <Badge key={cap} variant="accent" dot={false}>
-                    {cap}
-                  </Badge>
-                ),
+            <div className="flex flex-wrap items-center gap-2">
+              {!harnessFound && (
+                <Button onClick={runDoctor} disabled={busyAction === "doctor"}>
+                  <ShieldCheck className="h-4 w-4" />
+                  {busyAction === "doctor" ? t("overview.running") : t("overview.runDoctor")}
+                </Button>
+              )}
+              {harnessFound && running && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span>
+                      <Button variant="primary" onClick={openHarness} disabled={busy}>
+                        <ExternalLink className="h-4 w-4" />
+                        {t("overview.openHarness")}
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>{t("overview.openHarnessHint")}</TooltipContent>
+                </Tooltip>
+              )}
+              {harnessFound && !running && (
+                <Button variant="primary" onClick={runtimeStart} disabled={busy}>
+                  <Play className="h-4 w-4" />
+                  {t("overview.start")}
+                </Button>
+              )}
+              {harnessFound && running && (
+                <Button onClick={runtimeStop} disabled={busy || status.pid == null}>
+                  <Square className="h-4 w-4" />
+                  {t("overview.stop")}
+                </Button>
+              )}
+              {harnessFound && running && (
+                <Button onClick={runtimeRestart} disabled={busy || status.pid == null}>
+                  <RotateCw className="h-4 w-4" />
+                  {t("overview.restart")}
+                </Button>
               )}
             </div>
-          )}
-
-          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-4">
-            <div className="hidden flex-1 md:block" />
-            <Button onClick={runtimeStart} disabled={busy || running}>
-              <Play className="h-4 w-4" />
-              {t("overview.start")}
-            </Button>
-            <Button onClick={runtimeStop} disabled={busy || status.pid == null}>
-              <Square className="h-4 w-4" />
-              {t("overview.stop")}
-            </Button>
-            <Button onClick={runtimeRestart} disabled={busy || status.pid == null}>
-              <RotateCw className="h-4 w-4" />
-              {t("overview.restart")}
-            </Button>
           </div>
+
+          {status.kind === "error" && status.message && (
+            <p className="mt-4 border-t border-border pt-4 text-small text-fail">
+              {status.message}
+            </p>
+          )}
         </CardContent>
       </Card>
 
@@ -260,9 +257,7 @@ export function OverviewPage({ onNavigate }: { onNavigate?: (view: View) => void
                   <Icon className="h-[18px] w-[18px] text-accent" />
                 </div>
                 <div className="min-w-0">
-                  <div className="text-display font-bold text-text">
-                    {value == null ? "-" : value}
-                  </div>
+                  <div className="text-display font-bold text-text">{value}</div>
                   <div className="truncate text-small text-text-dim">{label}</div>
                 </div>
               </CardContent>

@@ -9,7 +9,7 @@ mod commands;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use deepmate_app::{build_registry, init_tracing, load_config_or_default};
+use deepmate_app::{build_harness, init_tracing, load_config_or_default};
 use deepmate_platform::{PlatformService, SystemPlatform};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -34,10 +34,7 @@ pub fn run() {
     let config = load_config_or_default(&layout);
     let _guard = init_tracing(&layout.logs_dir());
 
-    let registry = build_registry(&cli.adapter, &layout).expect("failed to build adapter registry");
-    let adapter = registry
-        .into_adapter(&cli.adapter)
-        .unwrap_or_else(|| panic!("adapter not found: {}", cli.adapter));
+    let harness = Arc::new(build_harness(&layout));
 
     // Close-to-tray lives behind an atomic so the window close handler always
     // reads the current preference, not the value captured at startup.
@@ -46,7 +43,7 @@ pub fn run() {
     let check_updates_on_start = config.general.check_updates && config.general.notify_updates;
 
     let state = AppState {
-        adapter: Arc::from(adapter),
+        harness,
         layout,
         close_to_tray: Arc::clone(&close_to_tray),
     };
@@ -55,12 +52,7 @@ pub fn run() {
     // React side can never drift from the Rust command surface. Release
     // builds skip the export and use the last generated file.
     #[cfg(debug_assertions)]
-    specta_builder()
-        .export(
-            specta_typescript::Typescript::default(),
-            "../src/bindings.ts",
-        )
-        .expect("failed to export TypeScript bindings");
+    export_bindings();
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -75,13 +67,18 @@ pub fn run() {
             show_main_window(app);
         }))
         // Auto-start registers the app with the OS login items; carry the
-        // active adapter so a login-started instance manages the same harness
-        // the user chose in the desktop session.
-        .plugin(
-            tauri_plugin_autostart::Builder::new()
-                .args(["--adapter", cli.adapter.as_str()])
-                .build(),
-        )
+        // data-dir override so a login-started instance manages the same
+        // data directory the user chose in the desktop session.
+        .plugin({
+            let mut builder = tauri_plugin_autostart::Builder::new();
+            if let Some(dir) = &cli.data_dir {
+                builder = builder.args([
+                    "--data-dir".to_string(),
+                    dir.to_string_lossy().into_owned(),
+                ]);
+            }
+            builder.build()
+        })
         .manage(state)
         .invoke_handler(specta_builder().invoke_handler())
         .setup(move |app| {
@@ -171,8 +168,8 @@ fn setup_tray(app: &tauri::App, language: &str) -> tauri::Result<()> {
                 "harness" => {
                     let handle = app.clone();
                     tauri::async_runtime::spawn(async move {
-                        let adapter = handle.state::<AppState>().adapter.clone();
-                        if let Err(err) = adapter.open_ui().await {
+                        let harness = handle.state::<AppState>().harness.clone();
+                        if let Err(err) = harness.open_ui().await {
                             let zh = language == "zh";
                             let title = if zh {
                                 "无法打开 Harness"
@@ -301,30 +298,39 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
         ])
 }
 
-// The desktop app accepts the same --adapter / --data-dir flags as the CLI.
+// The desktop app accepts the same --data-dir flag as the CLI.
 struct Cli {
-    adapter: String,
     data_dir: Option<std::path::PathBuf>,
 }
 
 fn parse_cli() -> Cli {
-    let mut adapter = "deepseek-harness".to_string();
     let mut data_dir = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--adapter" => {
-                if let Some(v) = args.next() {
-                    adapter = v;
-                }
+        if arg == "--data-dir" {
+            if let Some(v) = args.next() {
+                data_dir = Some(v.into());
             }
-            "--data-dir" => {
-                if let Some(v) = args.next() {
-                    data_dir = Some(v.into());
-                }
-            }
-            _ => {}
         }
     }
-    Cli { adapter, data_dir }
+    Cli { data_dir }
+}
+
+// Export the frontend's typed bindings. Runs on every debug launch, and can
+// also be triggered headlessly (no window) via:
+//   cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib export_bindings
+#[cfg(debug_assertions)]
+fn export_bindings() {
+    specta_builder()
+        .export(
+            specta_typescript::Typescript::default(),
+            "../src/bindings.ts",
+        )
+        .expect("failed to export TypeScript bindings");
+}
+
+#[cfg(debug_assertions)]
+#[test]
+fn export_bindings_headless() {
+    export_bindings();
 }

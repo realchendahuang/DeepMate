@@ -1,62 +1,30 @@
 // Application-level services shared by the DeepMate frontends.
 //
 // The CLI and the desktop app are both consumers of the same core; this crate
-// holds the small service layer they have in common: adapter registry
-// assembly, configuration loading, logging setup and action history. It has
-// no UI or command-line knowledge of its own.
+// holds the small service layer they have in common: harness assembly,
+// configuration loading, logging setup and action history. It has no UI or
+// command-line knowledge of its own.
 
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::anyhow;
-use deepmate_core::adapter::AdapterCapabilities;
-use deepmate_core::registry::AdapterRegistry;
-use deepmate_core::testkit::FakeAdapter;
 use deepmate_core::{ActionRecord, Config, DataLayout};
 use deepmate_platform::SystemPlatform;
-use deepseek_harness::DeepSeekHarnessAdapter;
-use pi_agent::PiAgentAdapter;
+use deepseek_harness::DeepSeekHarness;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer};
 
-// Assemble the adapter registry for the given adapter id.
+// Assemble the DeepSeek Harness service for the given data layout.
 //
-// Supported ids: `test` (deterministic fake adapter), `minimal` (fake adapter
-// with only runtime support, for exercising the capability gate),
-// `deepseek-harness` (the real harness; `DEEPMATE_HARNESS_UI_URL` overrides
-// the harness UI URL) and `pi-agent` (the Pi Agent coding assistant).
-pub fn build_registry(adapter_id: &str, layout: &DataLayout) -> anyhow::Result<AdapterRegistry> {
-    let mut registry = AdapterRegistry::new();
-    match adapter_id {
-        "test" => {
-            registry.register(Box::new(FakeAdapter::healthy()));
-        }
-        // A fake adapter with only runtime support, for exercising the
-        // capability gate without a real harness.
-        "minimal" => {
-            let mut adapter = FakeAdapter::new("minimal");
-            adapter.capabilities = AdapterCapabilities {
-                runtime: true,
-                ..Default::default()
-            };
-            registry.register(Box::new(adapter));
-        }
-        "deepseek-harness" => {
-            let platform = Arc::new(SystemPlatform);
-            let mut adapter = DeepSeekHarnessAdapter::new(platform);
-            if let Ok(url) = std::env::var("DEEPMATE_HARNESS_UI_URL") {
-                adapter = adapter.with_ui_url(url);
-            }
-            adapter = adapter.with_data_dir(layout.root().to_path_buf());
-            registry.register(Box::new(adapter));
-        }
-        "pi-agent" => {
-            registry.register(Box::new(PiAgentAdapter::new()));
-        }
-        other => return Err(anyhow!("unknown adapter: {other}")),
+// `DEEPMATE_HARNESS_UI_URL` overrides the harness UI URL.
+pub fn build_harness(layout: &DataLayout) -> DeepSeekHarness {
+    let platform = Arc::new(SystemPlatform);
+    let mut harness = DeepSeekHarness::new(platform);
+    if let Ok(url) = std::env::var("DEEPMATE_HARNESS_UI_URL") {
+        harness = harness.with_ui_url(url);
     }
-    Ok(registry)
+    harness.with_data_dir(layout.root().to_path_buf())
 }
 
 // Load the DeepMate configuration, falling back to defaults.
@@ -106,8 +74,8 @@ pub fn init_tracing(logs_dir: &Path) -> tracing_appender::non_blocking::WorkerGu
 //
 // History recording is best-effort: a read-only data directory must not
 // break the caller, so failures are logged instead of propagated.
-pub fn record_action(layout: &DataLayout, adapter_id: &str, action: String) {
-    let record = ActionRecord::new(action).with_adapter(adapter_id.to_string());
+pub fn record_action(layout: &DataLayout, action: String) {
+    let record = ActionRecord::new(action);
     if let Err(err) = layout.history().record(&record) {
         tracing::warn!(error = %err, "failed to record action history");
     }

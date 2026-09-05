@@ -80,6 +80,7 @@ export type {
   CheckStatus,
   CompatReport,
   DoctorReport,
+  RuntimeStatusKind,
   MarketEntry,
   MarketSourceInfo,
   Model,

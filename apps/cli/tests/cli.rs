@@ -19,12 +19,8 @@ fn deepmate_in(dir: &PathBuf, args: &[&str]) -> std::process::Output {
         .expect("failed to run deepmate binary")
 }
 
-fn deepmate(args: &[&str]) -> std::process::Output {
-    deepmate_in(&test_data_dir(), args)
-}
-
 fn deepmate_ok(args: &[&str]) -> String {
-    let output = deepmate(args);
+    let output = deepmate_in(&test_data_dir(), args);
     assert!(
         output.status.success(),
         "`deepmate {}` failed: {}",
@@ -35,112 +31,33 @@ fn deepmate_ok(args: &[&str]) -> String {
 }
 
 #[test]
-fn adapters_command_lists_test_adapter() {
-    let stdout = deepmate_ok(&["--adapter", "test", "adapters"]);
-    assert!(stdout.contains("test"));
-}
-
-#[test]
-fn detect_command_reports_fake_harness() {
-    let stdout = deepmate_ok(&["--adapter", "test", "detect"]);
-    assert!(stdout.contains("found: true"));
-    assert!(stdout.contains("harness: test"));
-}
-
-#[test]
 fn detect_command_supports_json_output() {
-    let stdout = deepmate_ok(&["--adapter", "test", "detect", "--json"]);
+    // Detection depends on whether the machine has the harness CLI, so the
+    // test only asserts the JSON envelope shape.
+    let stdout = deepmate_ok(&["detect", "--json"]);
     assert!(stdout.contains("\"found\""));
-    assert!(stdout.contains("9.9.9-test"));
 }
 
 #[test]
 fn status_command_supports_json_output() {
-    let stdout = deepmate_ok(&["--adapter", "test", "status", "--json"]);
+    let stdout = deepmate_ok(&["status", "--json"]);
     assert!(stdout.contains("\"kind\""));
-    assert!(stdout.contains("installed"));
 }
 
 #[test]
-fn doctor_command_returns_fake_check() {
-    let stdout = deepmate_ok(&["--adapter", "test", "doctor", "--json"]);
-    assert!(stdout.contains("fake.healthy"));
-}
-
-#[test]
-fn profile_list_returns_default_profile() {
-    let stdout = deepmate_ok(&["--adapter", "test", "profile", "list"]);
-    assert!(stdout.contains("default"));
-}
-
-#[test]
-fn provider_list_returns_demo_provider() {
-    let stdout = deepmate_ok(&["--adapter", "test", "provider", "list", "--json"]);
-    assert!(stdout.contains("demo"));
-    assert!(stdout.contains("openai-compatible"));
-}
-
-#[test]
-fn model_list_returns_demo_chat() {
-    let stdout = deepmate_ok(&["--adapter", "test", "model", "list"]);
-    assert!(stdout.contains("demo-chat"));
-}
-
-#[test]
-fn plugin_list_returns_fake_plugin() {
-    let stdout = deepmate_ok(&["--adapter", "test", "plugin", "list"]);
-    assert!(stdout.contains("fake-plugin"));
-    assert!(stdout.contains("enabled"));
+fn doctor_command_reports_checks() {
+    // Doctor always succeeds; the runtime check may pass or fail depending on
+    // whether the harness CLI is installed on the test machine.
+    let stdout = deepmate_ok(&["doctor", "--json"]);
+    assert!(stdout.contains("runtime.installed"));
 }
 
 #[test]
 fn market_list_returns_known_sources() {
-    let stdout = deepmate_ok(&["--adapter", "test", "market", "list"]);
+    // market_sources is static information; no network is involved.
+    let stdout = deepmate_ok(&["market", "list"]);
     assert!(stdout.contains("curated"));
     assert!(stdout.contains("community"));
-}
-
-#[test]
-fn market_search_returns_fake_entry() {
-    let stdout = deepmate_ok(&["--adapter", "test", "market", "search", "fake-market"]);
-    assert!(stdout.contains("fake-market-plugin"));
-    assert!(stdout.contains("fake-publisher"));
-}
-
-#[test]
-fn unknown_adapter_is_an_error() {
-    let output = deepmate(&["--adapter", "nope", "status"]);
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("unknown adapter"));
-}
-
-#[test]
-fn runtime_commands_accept_fake_adapter() {
-    for action in ["start", "stop", "restart"] {
-        let stdout = deepmate_ok(&["--adapter", "test", "runtime", action, "--json"]);
-        assert!(stdout.contains("\"ok\":true"), "runtime {action} failed");
-    }
-}
-
-#[test]
-fn capability_gate_blocks_unsupported_commands() {
-    // The `minimal` fake adapter only supports runtime; profile management
-    // must be rejected instead of silently returning empty lists.
-    for (command, what) in [
-        ("profile", "profiles"),
-        ("provider", "providers"),
-        ("model", "models"),
-        ("plugin", "plugins"),
-    ] {
-        let output = deepmate(&["--adapter", "minimal", command, "list"]);
-        assert!(!output.status.success(), "{command} list should be gated");
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(
-            stderr.contains(&format!("does not support {what}")),
-            "stderr: {stderr}"
-        );
-    }
 }
 
 fn write_profile_fixture(home: &Path, name: &str, deps: &[(&str, &str)]) {
@@ -173,7 +90,7 @@ fn profile_list_reads_dsh_home() {
     write_profile_fixture(&home, "web", &[]);
     write_profile_fixture(&home, "headless", &[]);
     let output = Command::new(env!("CARGO_BIN_EXE_deepmate"))
-        .args(["--adapter", "deepseek-harness", "profile", "list"])
+        .args(["profile", "list"])
         .env("DEEPMATE_DATA_DIR", &dir)
         .env("DSH_HOME", &home)
         .output()
@@ -194,7 +111,7 @@ fn plugin_list_reads_dsh_home() {
     let home = test_data_dir();
     write_profile_fixture(&home, "web", &[("turtle-ui", "^1.0.0")]);
     let output = Command::new(env!("CARGO_BIN_EXE_deepmate"))
-        .args(["--adapter", "deepseek-harness", "plugin", "list"])
+        .args(["plugin", "list"])
         .env("DEEPMATE_DATA_DIR", &dir)
         .env("DSH_HOME", &home)
         .output()
@@ -219,7 +136,7 @@ fn provider_and_model_list_read_settings() {
     )
     .unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_deepmate"))
-        .args(["--adapter", "deepseek-harness", "provider", "list"])
+        .args(["provider", "list"])
         .env("DEEPMATE_DATA_DIR", &dir)
         .env("DSH_HOME", &home)
         .output()
@@ -234,7 +151,7 @@ fn provider_and_model_list_read_settings() {
     assert!(stdout.contains("openai — OpenAI (pi-ai)"));
 
     let output = Command::new(env!("CARGO_BIN_EXE_deepmate"))
-        .args(["--adapter", "deepseek-harness", "model", "list"])
+        .args(["model", "list"])
         .env("DEEPMATE_DATA_DIR", &dir)
         .env("DSH_HOME", &home)
         .output()
@@ -252,25 +169,19 @@ fn provider_and_model_list_read_settings() {
 #[test]
 fn history_records_actions() {
     let dir = test_data_dir();
-    let output = deepmate_in(&dir, &["--adapter", "test", "status"]);
+    let output = deepmate_in(&dir, &["status"]);
     assert!(output.status.success());
     let history = dir.join("history").join("actions.jsonl");
     let text = std::fs::read_to_string(&history).expect("history file should exist");
     assert!(text.contains("\"action\":\"cli.status\""));
-    assert!(text.contains("\"adapter\":\"test\""));
+    assert!(!text.contains("adapter"));
 }
 
 #[test]
 fn data_dir_flag_overrides_default() {
     let dir = test_data_dir();
     let output = Command::new(env!("CARGO_BIN_EXE_deepmate"))
-        .args([
-            "--data-dir",
-            dir.to_str().unwrap(),
-            "--adapter",
-            "test",
-            "status",
-        ])
+        .args(["--data-dir", dir.to_str().unwrap(), "status"])
         .output()
         .expect("failed to run deepmate binary");
     assert!(output.status.success());
@@ -280,7 +191,7 @@ fn data_dir_flag_overrides_default() {
 #[test]
 fn default_config_is_written_on_first_run() {
     let dir = test_data_dir();
-    let output = deepmate_in(&dir, &["--adapter", "test", "status"]);
+    let output = deepmate_in(&dir, &["status"]);
     assert!(output.status.success());
     let config =
         std::fs::read_to_string(dir.join("config.toml")).expect("config should be written");
@@ -294,7 +205,6 @@ fn dsh_in(home: &Path, args: &[&str]) -> (String, String) {
     let dir = test_data_dir();
     std::fs::create_dir_all(home).unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_deepmate"))
-        .args(["--adapter", "deepseek-harness"])
         .args(args)
         .env("DEEPMATE_DATA_DIR", &dir)
         .env("DSH_HOME", home)
@@ -438,127 +348,19 @@ fn profile_create_and_remove_via_cli() {
 }
 
 #[test]
-fn config_edit_commands_are_capability_gated() {
-    // The `minimal` fake adapter only supports runtime; every config edit
-    // must be rejected rather than silently succeeding.
-    for (command, what) in [
-        (vec!["profile", "create", "x"], "profiles"),
-        (vec!["provider", "set", "x", "X"], "providers"),
-        (vec!["provider", "remove", "x"], "providers"),
-        (vec!["model", "set", "--provider", "p", "m"], "models"),
-        (vec!["model", "remove", "--provider", "p", "m"], "models"),
-    ] {
-        let output = deepmate_with_minimal(&command);
-        assert!(!output.status.success(), "{command:?} should be gated");
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(
-            stderr.contains(&format!("does not support {what}")),
-            "stderr: {stderr}"
-        );
-    }
-}
-
-fn deepmate_with_minimal(args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_deepmate"))
-        .args(["--adapter", "minimal"])
-        .args(args)
-        .output()
-        .expect("failed to run deepmate binary")
-}
-
-// Runs a pi-agent command against an isolated PI_HOME.
-fn pi_in(home: &Path, args: &[&str]) -> std::process::Output {
-    let dir = test_data_dir();
-    std::fs::create_dir_all(home).unwrap();
-    Command::new(env!("CARGO_BIN_EXE_deepmate"))
-        .args(["--adapter", "pi-agent"])
-        .args(args)
-        .env("DEEPMATE_DATA_DIR", &dir)
-        .env("PI_HOME", home)
-        .output()
-        .expect("failed to run deepmate binary")
-}
-
-fn write_pi_models(home: &Path) {
-    let agent = home.join("agent");
-    std::fs::create_dir_all(&agent).unwrap();
-    std::fs::write(
-        agent.join("models.json"),
-        r#"{
-  "providers": {
-    "ds": {
-      "name": "DeepSeek Official",
-      "baseUrl": "https://api.deepseek.com",
-      "api": "openai-responses",
-      "apiKey": "sk-secret",
-      "models": [
-        { "id": "deepseek-v4-flash", "name": "DeepSeek V4 Flash", "contextWindow": 1000000, "maxTokens": 131072 }
-      ]
-    }
-  }
-}"#,
-    )
-    .unwrap();
-}
-
-fn write_pi_settings(home: &Path) {
-    let agent = home.join("agent");
-    std::fs::create_dir_all(&agent).unwrap();
-    std::fs::write(
-        agent.join("settings.json"),
-        r#"{"packages": ["npm:pi-subagents"]}"#,
-    )
-    .unwrap();
-}
-
-#[test]
-fn pi_agent_lists_providers_models_plugins() {
-    let home = test_data_dir();
-    write_pi_models(&home);
-    write_pi_settings(&home);
-
-    let providers = pi_in(&home, &["provider", "list"]);
-    assert!(providers.status.success());
-    let stdout = String::from_utf8_lossy(&providers.stdout);
-    assert!(
-        stdout.contains("ds — DeepSeek Official (pi)"),
-        "stdout: {stdout}"
-    );
-    // The plaintext apiKey must never leak into output.
-    assert!(!stdout.contains("sk-secret"), "secret leaked: {stdout}");
-
-    let models = pi_in(&home, &["model", "list"]);
-    assert!(models.status.success());
-    assert!(String::from_utf8_lossy(&models.stdout).contains("deepseek-v4-flash"));
-
-    let plugins = pi_in(&home, &["plugin", "list"]);
-    assert!(plugins.status.success());
-    assert!(String::from_utf8_lossy(&plugins.stdout).contains("npm:pi-subagents"));
-}
-
-#[test]
-fn pi_agent_capability_gate_rejects_runtime_and_profiles() {
-    let home = test_data_dir();
-    write_pi_models(&home);
-
-    for (args, what) in [
-        (vec!["runtime", "start"], "runtime control"),
-        (vec!["profile", "list"], "profiles"),
-    ] {
-        let output = pi_in(&home, &args);
-        assert!(!output.status.success(), "{args:?} should be gated");
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(
-            stderr.contains(&format!("does not support {what}")),
-            "stderr: {stderr}"
-        );
-    }
-}
-
-#[test]
 fn snapshot_export_list_import_roundtrip() {
     let dir = test_data_dir();
-    let export = deepmate_in(&dir, &["--adapter", "test", "snapshot", "export", "coding"]);
+    // An isolated DSH_HOME keeps the capture hermetic; the built-in
+    // deepseek-official route still appears, so the roundtrip carries data.
+    let home = test_data_dir();
+    std::fs::create_dir_all(&home).unwrap();
+
+    let export = Command::new(env!("CARGO_BIN_EXE_deepmate"))
+        .args(["snapshot", "export", "coding"])
+        .env("DEEPMATE_DATA_DIR", &dir)
+        .env("DSH_HOME", &home)
+        .output()
+        .expect("failed to run deepmate binary");
     assert!(
         export.status.success(),
         "stderr: {}",
@@ -566,36 +368,24 @@ fn snapshot_export_list_import_roundtrip() {
     );
     assert!(dir.join("snapshots").join("coding.json").exists());
 
-    let list = deepmate_in(&dir, &["--adapter", "test", "snapshot", "list"]);
+    let list = Command::new(env!("CARGO_BIN_EXE_deepmate"))
+        .args(["snapshot", "list"])
+        .env("DEEPMATE_DATA_DIR", &dir)
+        .output()
+        .expect("failed to run deepmate binary");
     assert!(list.status.success());
     assert!(String::from_utf8_lossy(&list.stdout).contains("coding"));
 
-    let import = deepmate_in(&dir, &["--adapter", "test", "snapshot", "import", "coding"]);
+    let import = Command::new(env!("CARGO_BIN_EXE_deepmate"))
+        .args(["snapshot", "import", "coding"])
+        .env("DEEPMATE_DATA_DIR", &dir)
+        .env("DSH_HOME", &home)
+        .output()
+        .expect("failed to run deepmate binary");
     assert!(
         import.status.success(),
         "stderr: {}",
         String::from_utf8_lossy(&import.stderr)
     );
     assert!(String::from_utf8_lossy(&import.stdout).contains("imported snapshot coding"));
-}
-
-#[test]
-fn snapshot_import_rejects_mismatched_adapter() {
-    let dir = test_data_dir();
-    // Export from the fake adapter, then try to import into pi-agent using
-    // the same data dir (so the snapshot is found) but a different adapter.
-    let export = deepmate_in(&dir, &["--adapter", "test", "snapshot", "export", "coding"]);
-    assert!(export.status.success());
-
-    let home = test_data_dir();
-    write_pi_models(&home);
-    let import = Command::new(env!("CARGO_BIN_EXE_deepmate"))
-        .args(["--adapter", "pi-agent", "snapshot", "import", "coding"])
-        .env("DEEPMATE_DATA_DIR", &dir)
-        .env("PI_HOME", &home)
-        .output()
-        .expect("failed to run deepmate binary");
-    assert!(!import.status.success());
-    let stderr = String::from_utf8_lossy(&import.stderr);
-    assert!(stderr.contains("adapter 'test'"), "stderr: {stderr}");
 }

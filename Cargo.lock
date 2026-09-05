@@ -89,17 +89,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
-name = "async-trait"
-version = "0.1.92"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82f6aeea286b8eb4dd3431a1be1b59d290ace00f5bfd8e2a159bc2a05e2c1667"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 3.0.3",
-]
-
-[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -303,7 +292,6 @@ dependencies = [
  "deepmate-core",
  "deepmate-platform",
  "deepseek-harness",
- "pi-agent",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
@@ -318,6 +306,7 @@ dependencies = [
  "deepmate-app",
  "deepmate-core",
  "deepmate-platform",
+ "deepseek-harness",
  "flate2",
  "futures",
  "reqwest",
@@ -332,7 +321,6 @@ dependencies = [
 name = "deepmate-core"
 version = "0.7.0"
 dependencies = [
- "async-trait",
  "chrono",
  "semver",
  "serde",
@@ -340,7 +328,6 @@ dependencies = [
  "sha2",
  "specta",
  "thiserror",
- "tokio",
  "toml",
 ]
 
@@ -355,7 +342,6 @@ dependencies = [
 name = "deepseek-harness"
 version = "0.7.0"
 dependencies = [
- "async-trait",
  "chrono",
  "deepmate-core",
  "deepmate-platform",
@@ -975,18 +961,6 @@ name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
-
-[[package]]
-name = "pi-agent"
-version = "0.7.0"
-dependencies = [
- "async-trait",
- "deepmate-core",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
-]
 
 [[package]]
 name = "pin-project-lite"

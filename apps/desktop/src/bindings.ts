@@ -4,254 +4,205 @@ import { invoke as __TAURI_INVOKE, Channel } from "@tauri-apps/api/core";
 
 /** Commands */
 export const commands = {
-  refreshAll: () => typedError<Overview, string>(__TAURI_INVOKE("refresh_all")),
-  runtimeStart: () => typedError<null, string>(__TAURI_INVOKE("runtime_start")),
-  runtimeStop: () => typedError<null, string>(__TAURI_INVOKE("runtime_stop")),
-  runtimeRestart: () => typedError<null, string>(__TAURI_INVOKE("runtime_restart")),
-  openHarness: () => typedError<null, string>(__TAURI_INVOKE("open_harness")),
-  runDoctor: () => typedError<DoctorReport, string>(__TAURI_INVOKE("run_doctor")),
-  listProfiles: () => typedError<Profile[], string>(__TAURI_INVOKE("list_profiles")),
-  listProviders: () => typedError<Provider[], string>(__TAURI_INVOKE("list_providers")),
-  listModels: () => typedError<Model[], string>(__TAURI_INVOKE("list_models")),
-  upsertProvider: (provider: Provider) =>
-    typedError<null, string>(__TAURI_INVOKE("upsert_provider", { provider })),
-  removeProvider: (id: string) =>
-    typedError<null, string>(__TAURI_INVOKE("remove_provider", { id })),
-  upsertModel: (provider: string, model: Model) =>
-    typedError<null, string>(__TAURI_INVOKE("upsert_model", { provider, model })),
-  removeModel: (provider: string, id: string) =>
-    typedError<null, string>(__TAURI_INVOKE("remove_model", { provider, id })),
-  createProfile: (name: string) =>
-    typedError<null, string>(__TAURI_INVOKE("create_profile", { name })),
-  removeProfile: (name: string) =>
-    typedError<null, string>(__TAURI_INVOKE("remove_profile", { name })),
-  listPlugins: () => typedError<Plugin[], string>(__TAURI_INVOKE("list_plugins")),
-  pluginInstall: (profile: string, spec: string) =>
-    typedError<null, string>(__TAURI_INVOKE("plugin_install", { profile, spec })),
-  pluginRemove: (profile: string, id: string) =>
-    typedError<null, string>(__TAURI_INVOKE("plugin_remove", { profile, id })),
-  pluginUpdate: (profile: string, id: string) =>
-    typedError<null, string>(__TAURI_INVOKE("plugin_update", { profile, id })),
-  pluginOpStream: (
-    channel: Channel<PluginOpEvent>,
-    profile: string,
-    kind: PluginOpKind,
-    target: string,
-  ) =>
-    typedError<null, string>(
-      __TAURI_INVOKE("plugin_op_stream", { channel, profile, kind, target }),
-    ),
-  listMarketSources: () =>
-    typedError<MarketSourceInfo[], string>(__TAURI_INVOKE("list_market_sources")),
-  marketSearch: (query: string) =>
-    typedError<MarketEntry[], string>(__TAURI_INVOKE("market_search", { query })).then(
-      (v) =>
-        (v.status === "ok"
-          ? {
-              ...v,
-              data: v.data.map((i) => ({
-                ...i,
-                updated: i.updated == null ? i.updated : new Date(i.updated),
-              })),
-            }
-          : v) as typeof v,
-    ),
-  pluginCheck: (spec: string) =>
-    typedError<CompatReport, string>(__TAURI_INVOKE("plugin_check", { spec })),
-  snapshotExport: (name: string) =>
-    typedError<null, string>(__TAURI_INVOKE("snapshot_export", { name })),
-  snapshotImport: (name: string) =>
-    typedError<null, string>(__TAURI_INVOKE("snapshot_import", { name })),
-  snapshotList: () => typedError<string[], string>(__TAURI_INVOKE("snapshot_list")),
-  snapshotDelete: (name: string) =>
-    typedError<null, string>(__TAURI_INVOKE("snapshot_delete", { name })),
-  configExport: () => typedError<string | null, string>(__TAURI_INVOKE("config_export")),
-  configImport: () => typedError<string | null, string>(__TAURI_INVOKE("config_import")),
-  setLanguage: (language: string) =>
-    typedError<null, string>(__TAURI_INVOKE("set_language", { language })),
-  setTheme: (theme: string) => typedError<null, string>(__TAURI_INVOKE("set_theme", { theme })),
-  setCloseToTray: (enabled: boolean) =>
-    typedError<null, string>(__TAURI_INVOKE("set_close_to_tray", { enabled })),
-  setCheckUpdates: (enabled: boolean) =>
-    typedError<null, string>(__TAURI_INVOKE("set_check_updates", { enabled })),
-  setNotifyUpdates: (enabled: boolean) =>
-    typedError<null, string>(__TAURI_INVOKE("set_notify_updates", { enabled })),
-  autostartGet: () => typedError<boolean, string>(__TAURI_INVOKE("autostart_get")),
-  autostartSet: (enabled: boolean) =>
-    typedError<null, string>(__TAURI_INVOKE("autostart_set", { enabled })),
-  checkUpdate: () =>
-    typedError<
-      {
-        current_version: string;
-        latest_version: string;
-        url: string;
-        published_at: string;
-      } | null,
-      string
-    >(__TAURI_INVOKE("check_update")),
-  updateInstall: () => typedError<UpdateInstallOutcome, string>(__TAURI_INVOKE("update_install")),
-  openUrl: (url: string) => typedError<null, string>(__TAURI_INVOKE("open_url", { url })),
-  getConfig: () => typedError<UiPrefs, string>(__TAURI_INVOKE("get_config")),
+	refreshAll: () => typedError<Overview, string>(__TAURI_INVOKE("refresh_all")),
+	runtimeStart: () => typedError<null, string>(__TAURI_INVOKE("runtime_start")),
+	runtimeStop: () => typedError<null, string>(__TAURI_INVOKE("runtime_stop")),
+	runtimeRestart: () => typedError<null, string>(__TAURI_INVOKE("runtime_restart")),
+	openHarness: () => typedError<null, string>(__TAURI_INVOKE("open_harness")),
+	runDoctor: () => typedError<DoctorReport, string>(__TAURI_INVOKE("run_doctor")),
+	listProfiles: () => typedError<Profile[], string>(__TAURI_INVOKE("list_profiles")),
+	listProviders: () => typedError<Provider[], string>(__TAURI_INVOKE("list_providers")),
+	listModels: () => typedError<Model[], string>(__TAURI_INVOKE("list_models")),
+	upsertProvider: (provider: Provider) => typedError<null, string>(__TAURI_INVOKE("upsert_provider", { provider })),
+	removeProvider: (id: string) => typedError<null, string>(__TAURI_INVOKE("remove_provider", { id })),
+	upsertModel: (provider: string, model: Model) => typedError<null, string>(__TAURI_INVOKE("upsert_model", { provider, model })),
+	removeModel: (provider: string, id: string) => typedError<null, string>(__TAURI_INVOKE("remove_model", { provider, id })),
+	createProfile: (name: string) => typedError<null, string>(__TAURI_INVOKE("create_profile", { name })),
+	removeProfile: (name: string) => typedError<null, string>(__TAURI_INVOKE("remove_profile", { name })),
+	listPlugins: () => typedError<Plugin[], string>(__TAURI_INVOKE("list_plugins")),
+	pluginInstall: (profile: string, spec: string) => typedError<null, string>(__TAURI_INVOKE("plugin_install", { profile, spec })),
+	pluginRemove: (profile: string, id: string) => typedError<null, string>(__TAURI_INVOKE("plugin_remove", { profile, id })),
+	pluginUpdate: (profile: string, id: string) => typedError<null, string>(__TAURI_INVOKE("plugin_update", { profile, id })),
+	pluginOpStream: (channel: Channel<PluginOpEvent>, profile: string, kind: PluginOpKind, target: string) => typedError<null, string>(__TAURI_INVOKE("plugin_op_stream", { channel, profile, kind, target })),
+	listMarketSources: () => typedError<MarketSourceInfo[], string>(__TAURI_INVOKE("list_market_sources")),
+	marketSearch: (query: string) => typedError<MarketEntry[], string>(__TAURI_INVOKE("market_search", { query })).then((v) => ((v.status === "ok" ? { ...v, data: v.data.map(i=>({...i,updated:i.updated==null?i.updated:new Date(i.updated)})) } : v) as typeof v)),
+	pluginCheck: (spec: string) => typedError<CompatReport, string>(__TAURI_INVOKE("plugin_check", { spec })),
+	snapshotExport: (name: string) => typedError<null, string>(__TAURI_INVOKE("snapshot_export", { name })),
+	snapshotImport: (name: string) => typedError<null, string>(__TAURI_INVOKE("snapshot_import", { name })),
+	snapshotList: () => typedError<string[], string>(__TAURI_INVOKE("snapshot_list")),
+	snapshotDelete: (name: string) => typedError<null, string>(__TAURI_INVOKE("snapshot_delete", { name })),
+	configExport: () => typedError<string | null, string>(__TAURI_INVOKE("config_export")),
+	configImport: () => typedError<string | null, string>(__TAURI_INVOKE("config_import")),
+	setLanguage: (language: string) => typedError<null, string>(__TAURI_INVOKE("set_language", { language })),
+	setTheme: (theme: string) => typedError<null, string>(__TAURI_INVOKE("set_theme", { theme })),
+	setCloseToTray: (enabled: boolean) => typedError<null, string>(__TAURI_INVOKE("set_close_to_tray", { enabled })),
+	setCheckUpdates: (enabled: boolean) => typedError<null, string>(__TAURI_INVOKE("set_check_updates", { enabled })),
+	setNotifyUpdates: (enabled: boolean) => typedError<null, string>(__TAURI_INVOKE("set_notify_updates", { enabled })),
+	autostartGet: () => typedError<boolean, string>(__TAURI_INVOKE("autostart_get")),
+	autostartSet: (enabled: boolean) => typedError<null, string>(__TAURI_INVOKE("autostart_set", { enabled })),
+	checkUpdate: () => typedError<{
+	current_version: string,
+	latest_version: string,
+	url: string,
+	published_at: string,
+} | null, string>(__TAURI_INVOKE("check_update")),
+	updateInstall: () => typedError<UpdateInstallOutcome, string>(__TAURI_INVOKE("update_install")),
+	openUrl: (url: string) => typedError<null, string>(__TAURI_INVOKE("open_url", { url })),
+	getConfig: () => typedError<UiPrefs, string>(__TAURI_INVOKE("get_config")),
 };
 
 /* Constants */
 export const appVersion = "0.7.0" as const;
 
 /* Types */
-export type CapabilityCounts = {
-  profiles: number | null;
-  providers: number | null;
-  models: number | null;
-  plugins: number | null;
-};
-
 export type CheckStatus = "pass" | "warn" | "fail" | "skip";
 
 export type CompatReport = {
-  status: CompatStatus;
-  harness_version: string | null;
-  required_range: string | null;
-  message: string;
+	status: CompatStatus,
+	harness_version: string | null,
+	required_range: string | null,
+	message: string,
 };
 
 export type CompatStatus = "compatible" | "incompatible" | "unknown";
 
 export type Detection = {
-  found: boolean;
-  harness: HarnessInfo | null;
-  detail: string | null;
+	found: boolean,
+	harness: HarnessInfo | null,
+	detail: string | null,
 };
 
 export type DoctorCheck = {
-  id: string;
-  status: CheckStatus;
-  summary: string;
-  details: string | null;
-  suggested_action: string | null;
+	id: string,
+	status: CheckStatus,
+	summary: string,
+	details: string | null,
+	suggested_action: string | null,
 };
 
 export type DoctorReport = {
-  adapter_id: string;
-  checks: DoctorCheck[];
+	checks: DoctorCheck[],
 };
 
 export type HarnessInfo = {
-  id: string;
-  name: string;
-  version: string | null;
-  adapter_version: string;
+	id: string,
+	name: string,
+	version: string | null,
+};
+
+export type InventoryCounts = {
+	profiles: number,
+	providers: number,
+	models: number,
+	plugins: number,
 };
 
 export type MarketEntry = {
-  id: string;
-  name: string;
-  description: string | null;
-  version: string | null;
-  source: MarketSource;
-  repository: string | null;
-  publisher: string | null;
-  updated: Date | null;
-  category?: string | null;
-  popularity?: number | null;
-  quality?: number | null;
+	id: string,
+	name: string,
+	description: string | null,
+	version: string | null,
+	source: MarketSource,
+	repository: string | null,
+	publisher: string | null,
+	updated: Date | null,
+	category?: string | null,
+	popularity?: number | null,
+	quality?: number | null,
 };
 
 export type MarketSource = "curated" | "community";
 
 export type MarketSourceInfo = {
-  id: string;
-  name: string;
-  description: string;
-  source: MarketSource;
+	id: string,
+	name: string,
+	description: string,
+	source: MarketSource,
 };
 
 export type Model = {
-  id: string;
-  name: string;
-  provider: string | null;
-  context_window: number | null;
-  max_tokens: number | null;
-  input: string[] | null;
-  reasoning_efforts: string | null;
-  compat: string | null;
+	id: string,
+	name: string,
+	provider: string | null,
+	context_window: number | null,
+	max_tokens: number | null,
+	input: string[] | null,
+	reasoning_efforts: string | null,
+	compat: string | null,
 };
 
 export type Overview = {
-  detection: Detection;
-  status: RuntimeStatus;
-  counts: CapabilityCounts;
+	detection: Detection,
+	status: RuntimeStatus,
+	counts: InventoryCounts,
 };
 
 export type Plugin = {
-  id: string;
-  name: string;
-  version: string | null;
-  enabled: boolean;
-  profile: string;
-  latest: string | null;
-  outdated: boolean;
+	id: string,
+	name: string,
+	version: string | null,
+	enabled: boolean,
+	profile: string,
+	latest: string | null,
+	outdated: boolean,
 };
 
-export type PluginOpEvent =
-  | { phase: "started"; op: PluginOpKind; target: string }
-  | { phase: "line"; text: string }
-  | { phase: "finished"; ok: boolean; detail: string | null };
+export type PluginOpEvent = { phase: "started"; op: PluginOpKind; target: string } | { phase: "line"; text: string } | { phase: "finished"; ok: boolean; detail: string | null };
 
 export type PluginOpKind = "install" | "remove" | "update";
 
 export type Profile = {
-  id: string;
-  name: string;
-  description: string | null;
+	id: string,
+	name: string,
+	description: string | null,
 };
 
 export type Provider = {
-  id: string;
-  name: string;
-  kind: string;
-  api: string | null;
-  base_url: string | null;
-  api_key_env: string | null;
-  compat: string | null;
+	id: string,
+	name: string,
+	kind: string,
+	api: string | null,
+	base_url: string | null,
+	api_key_env: string | null,
+	compat: string | null,
 };
 
 export type RuntimeStatus = {
-  kind: RuntimeStatusKind;
-  pid: number | null;
-  message: string | null;
+	kind: RuntimeStatusKind,
+	pid: number | null,
+	message: string | null,
 };
 
 export type RuntimeStatusKind = "unknown" | "installed" | "running" | "stopped" | "error";
 
 export type UiPrefs = {
-  language: string;
-  theme: string;
-  check_updates: boolean;
-  notify_updates: boolean;
-  close_to_tray: boolean;
+	language: string,
+	theme: string,
+	check_updates: boolean,
+	notify_updates: boolean,
+	close_to_tray: boolean,
 };
 
 export type UpdateInfo = {
-  current_version: string;
-  latest_version: string;
-  url: string;
-  published_at: string;
+	current_version: string,
+	latest_version: string,
+	url: string,
+	published_at: string,
 };
 
 export type UpdateInstallOutcome = {
-  status: string;
-  path: string | null;
-  version: string | null;
+	status: string,
+	path: string | null,
+	version: string | null,
 };
 
 /* Tauri Specta runtime */
-async function typedError<T, E>(
-  result: Promise<T>,
-): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {
-  try {
-    return { status: "ok", data: await result };
-  } catch (e) {
-    if (e instanceof Error) throw e;
-    return { status: "error", error: e as any };
-  }
+async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {
+    try {
+        return { status: "ok", data: await result };
+    } catch (e) {
+        if (e instanceof Error) throw e;
+        return { status: "error", error: e as any };
+    }
 }
+

@@ -8,7 +8,7 @@ import { NavItem } from "./nav-item";
 interface AppSidebarProps {
   view: View;
   onNavigate: (view: View) => void;
-  adapterId?: string;
+  harnessName?: string;
 }
 
 interface SidebarNavProps {
@@ -53,21 +53,27 @@ export function SidebarNav({ view, onNavigate, footer }: SidebarNavProps) {
   );
 }
 
-export function AppSidebar({ view, onNavigate, adapterId }: AppSidebarProps) {
+export function AppSidebar({ view, onNavigate, harnessName }: AppSidebarProps) {
   return (
     <aside className="hidden w-sidebar shrink-0 flex-col border-r border-border bg-sidebar md:flex">
       <div className="flex h-[52px] shrink-0 items-center gap-2.5 border-b border-border px-4">
-        <img src="/logo.png" alt="DeepMate" className="h-6 w-6" />
+        <img src="/logo.png" alt="DeepMate" className="h-6 w-6 rounded-sm inline dark:hidden" />
+        <img
+          src="/logo-dark.png"
+          alt=""
+          aria-hidden
+          className="hidden dark:inline h-6 w-6 rounded-sm border border-border"
+        />
         <span className="text-brand text-text">DeepMate</span>
       </div>
       <SidebarNav
         view={view}
         onNavigate={onNavigate}
         footer={
-          adapterId ? (
+          harnessName ? (
             <div className="mt-3 flex items-center gap-1.5 px-2 text-caption text-text-faint">
               <Cpu className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate">{adapterId}</span>
+              <span className="truncate">{harnessName}</span>
             </div>
           ) : undefined
         }

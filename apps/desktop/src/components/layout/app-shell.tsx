@@ -16,7 +16,7 @@ export function AppShell() {
   const [view, setView] = useState<View>("overview");
   const [navOpen, setNavOpen] = useState(false);
 
-  const adapterId = useStore((s) => s.overview?.detection.harness?.id ?? "");
+  const harnessName = useStore((s) => s.overview?.detection.harness?.name ?? "");
 
   const navigate = (next: View) => {
     setView(next);
@@ -27,7 +27,7 @@ export function AppShell() {
     <TooltipProvider>
       <div className="flex h-screen bg-bg text-text">
         {/* Desktop navigation. */}
-        <AppSidebar view={view} onNavigate={navigate} adapterId={adapterId} />
+        <AppSidebar view={view} onNavigate={navigate} harnessName={harnessName} />
 
         <div className="flex min-w-0 flex-1 flex-col">
           {/* Compact top bar, only below md (the sidebar handles desktop navigation). */}
@@ -43,14 +43,24 @@ export function AppShell() {
               <Menu className="h-4 w-4" />
             </Button>
             <div className="flex items-center gap-2.5">
-              <img src="/logo.png" alt="DeepMate" className="h-6 w-6" />
+              <img
+                src="/logo.png"
+                alt="DeepMate"
+                className="h-6 w-6 rounded-sm inline dark:hidden"
+              />
+              <img
+                src="/logo-dark.png"
+                alt=""
+                aria-hidden
+                className="hidden dark:inline h-6 w-6 rounded-sm border border-border"
+              />
               <span className="text-brand text-text">DeepMate</span>
             </div>
             <div className="flex-1" />
-            {adapterId && (
+            {harnessName && (
               <div className="flex min-w-0 items-center gap-1.5 text-caption text-text-faint">
                 <Cpu className="h-3.5 w-3.5 shrink-0" />
-                <span className="truncate">{adapterId}</span>
+                <span className="truncate">{harnessName}</span>
               </div>
             )}
           </header>

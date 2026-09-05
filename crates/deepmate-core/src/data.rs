@@ -3,7 +3,7 @@
 // DeepMate-owned state is transparent and portable: TOML for human-owned
 // configuration, JSONL for append-oriented history. Harness-owned state is
 // never stored here; it stays with the harness and is reached through the
-// active adapter.
+// harness service layer.
 
 use std::fs;
 use std::io::Write;
@@ -36,10 +36,6 @@ impl DataLayout {
         self.root.join("config.toml")
     }
 
-    pub fn adapters_dir(&self) -> PathBuf {
-        self.root.join("adapters")
-    }
-
     pub fn cache_dir(&self) -> PathBuf {
         self.root.join("cache")
     }
@@ -63,7 +59,6 @@ impl DataLayout {
     // Create the data directory tree if it does not exist yet.
     pub fn ensure(&self) -> CoreResult<()> {
         for dir in [
-            self.adapters_dir(),
             self.cache_dir(),
             self.history_dir(),
             self.snapshots_dir(),
@@ -119,7 +114,7 @@ pub struct MarketConfig {
 impl Default for GeneralConfig {
     fn default() -> Self {
         Self {
-            language: "en".to_string(),
+            language: "zh".to_string(),
             // Auto-start is opt-in: enabling it registers the app with the
             // operating system's login items, which must never happen without
             // an explicit user action.
@@ -178,8 +173,6 @@ pub struct ActionRecord {
     pub time: String,
     pub action: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub adapter: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
 }
 
@@ -188,14 +181,8 @@ impl ActionRecord {
         Self {
             time: chrono::Utc::now().to_rfc3339(),
             action: action.into(),
-            adapter: None,
             detail: None,
         }
-    }
-
-    pub fn with_adapter(mut self, adapter: impl Into<String>) -> Self {
-        self.adapter = Some(adapter.into());
-        self
     }
 
     pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
@@ -271,7 +258,7 @@ mod tests {
         let dir = temp_dir();
         let config = Config::load(&dir.join("config.toml")).unwrap();
         assert_eq!(config, Config::default());
-        assert_eq!(config.general.language, "en");
+        assert_eq!(config.general.language, "zh");
         assert_eq!(config.market.refresh_interval_seconds, 3600);
     }
 
@@ -301,7 +288,7 @@ mod tests {
         let dir = temp_dir();
         let layout = DataLayout::new(&dir);
         layout.ensure().unwrap();
-        for sub in ["adapters", "cache", "history", "snapshots", "state", "logs"] {
+        for sub in ["cache", "history", "snapshots", "state", "logs"] {
             assert!(dir.join(sub).is_dir(), "missing {sub}");
         }
         assert_eq!(layout.config_path(), dir.join("config.toml"));
@@ -313,14 +300,11 @@ mod tests {
         let layout = DataLayout::new(&dir);
         layout.ensure().unwrap();
         let history = layout.history();
-        history
-            .record(&ActionRecord::new("test.one").with_adapter("test"))
-            .unwrap();
+        history.record(&ActionRecord::new("test.one")).unwrap();
         history.record(&ActionRecord::new("test.two")).unwrap();
         let records = history.read().unwrap();
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].action, "test.one");
-        assert_eq!(records[0].adapter.as_deref(), Some("test"));
         assert_eq!(records[1].action, "test.two");
     }
 

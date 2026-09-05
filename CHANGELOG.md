@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- The harness-adapter abstraction is gone; DeepSeek Harness is now the one
+  hard-wired harness:
+  - Deleted the `HarnessAdapter` trait, `AdapterCapabilities` and all
+    capability gating (CLI `require_capability`, desktop command gates,
+    capability-gated overview counts), the `AdapterRegistry`, and the
+    `testkit` fake adapter from `deepmate-core`.
+  - Deleted the `pi-agent` crate. `deepseek-harness` moved from
+    `crates/adapters/deepseek-harness` to `crates/deepseek-harness` and its
+    struct was renamed `DeepSeekHarnessAdapter` → `DeepSeekHarness` with the
+    trait impl converted into inherent methods (snapshot capture/apply are
+    now service methods; the core keeps only the snapshot data model and
+    store).
+  - Removed the `--adapter` flag from the CLI and the desktop app, and the
+    `deepmate adapters` subcommand. `deepmate-core` stays a pure data layer;
+    the CI core purity gate is unchanged.
+
+### Changed
+
+- Desktop Overview page redesigned: the runtime status is the hero (large
+  status word with a tone-colored dot, a meta line with harness name,
+  version and PID, and a state-driven primary action — Open Harness while
+  running, Start otherwise, Run Doctor when the harness is missing). The
+  removed decorative capability badges and the old detection badges are gone;
+  the sidebar footer shows the harness name instead of the adapter id.
+- `HarnessInfo` no longer carries `adapter_version`, `DoctorReport` no longer
+  carries `adapter_id`, and the desktop overview `counts` are plain numbers
+  (`InventoryCounts`) instead of nullable capability-gated values.
+- CLI `status`/`doctor` output no longer print an `adapter:` line, and
+  `detect` no longer prints `adapter version:`. Deterministic fake-adapter
+  CLI tests were replaced by isolated `DSH_HOME` fixture tests; snapshot
+  roundtrip tests run against a temp `DSH_HOME` instead of `--adapter test`.
+- Snapshot files no longer carry `adapter`/`adapter_version` fields and the
+  format moved to `deepmate-snapshot/2`; the cross-harness rejection in
+  `snapshot import` is gone. The action-history JSONL no longer records a
+  harness attribute at all.
+- The on-disk data layout no longer creates an `adapters/` subdirectory.
+
 ### Added
 
 - Curated plugin list:

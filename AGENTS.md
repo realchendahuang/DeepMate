@@ -38,7 +38,7 @@
    awk -v marker="## [x.y.z]" 'index($0, marker) == 1 { found=1; next } found && /^## \[/ { exit } found { print }' CHANGELOG.md > release-notes.md
    gh release create vX.Y.Z --title "DeepMate vX.Y.Z" --notes-file release-notes.md dist/<产物…>
    ```
-8. **发布后验证：** `gh release view vX.Y.Z` 核对标题、body、产物数量；用产物二进制做冒烟测试（如 `--adapter test snapshot export/list/import`、`doctor`）。
+8. **发布后验证：** `gh release view vX.Y.Z` 核对标题、body、产物数量；用产物二进制做冒烟测试（如 `DSH_HOME=$(mktemp -d) deepmate snapshot export/list/import`、`doctor`）。
 
 ### 发版铁律
 

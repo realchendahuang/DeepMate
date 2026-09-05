@@ -37,6 +37,6 @@ specta-typescript = "0.0.12"
 deepmate-core = { path = "../../../crates/deepmate-core" }
 deepmate-platform = { path = "../../../crates/deepmate-platform" }
 deepmate-app = { path = "../../../crates/deepmate-app" }
-deepseek-harness = { path = "../../../crates/adapters/deepseek-harness" }
+deepseek-harness = { path = "../../../crates/deepseek-harness" }
 tauri-plugin-window-state = "2"
 tauri-plugin-single-instance = "2"

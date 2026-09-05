@@ -214,10 +214,7 @@ async fn search_npm(client: &reqwest::Client, query: &str) -> CoreResult<Vec<Mar
                     .package
                     .publisher
                     .and_then(|publisher| publisher.username.or(publisher.name)),
-                updated: obj
-                    .package
-                    .date
-                    .and_then(|date| parse_updated(&date)),
+                updated: obj.package.date.and_then(|date| parse_updated(&date)),
                 category: None,
                 popularity,
                 quality,

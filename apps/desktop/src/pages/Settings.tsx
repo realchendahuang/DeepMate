@@ -52,20 +52,11 @@ const SECTIONS = [
 type SectionKey = (typeof SECTIONS)[number]["key"];
 
 // A labelled form row used inside the edit dialogs.
-function Field({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1">
       <Label>{label}</Label>
       {children}
-      {hint && <p className="text-small text-text-faint">{hint}</p>}
     </div>
   );
 }
@@ -217,488 +208,457 @@ export function SettingsPage() {
     <PageBody className="space-y-5">
       <PageHeader title={t("settings.title")} />
 
-      <Card>
-        <CardContent className="flex flex-col gap-4 p-4 md:flex-row md:gap-0 md:p-0">
-          {/* Section sub-nav: vertical on desktop, a horizontal chip strip on
-              mobile. */}
-          <nav
-            aria-label={t("settings.title")}
-            className="flex shrink-0 gap-1 overflow-x-auto pb-1 md:w-subnav md:flex-col md:gap-0.5 md:overflow-visible md:border-r md:border-border md:p-2 md:pb-2"
-          >
-            {SECTIONS.map(({ key, icon: Icon }) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setSection(key)}
-                aria-current={section === key ? "true" : undefined}
-                className={cn(
-                  "flex h-8 shrink-0 items-center gap-2 rounded-md px-2.5 text-body font-medium whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
-                  section === key
-                    ? "bg-accent-soft text-accent"
-                    : "text-text-dim hover:bg-hover hover:text-text",
-                )}
-              >
-                {Icon && <Icon className="h-4 w-4 shrink-0" />}
-                <span className="truncate">{t(`settings.${key}`)}</span>
-              </button>
-            ))}
-          </nav>
+      {/* Notion-style two-column settings: a quiet sub-nav on the left and
+          the active section on the right, separated by whitespace instead of
+          a box. Below md the sub-nav folds into a chip strip. */}
+      <div className="flex flex-col gap-4 md:flex-row md:gap-8">
+        <nav
+          aria-label={t("settings.title")}
+          className="flex shrink-0 gap-1 overflow-x-auto pb-1 md:w-subnav md:flex-col md:gap-0.5 md:overflow-visible md:pb-0"
+        >
+          {SECTIONS.map(({ key, icon: Icon }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setSection(key)}
+              aria-current={section === key ? "true" : undefined}
+              className={cn(
+                "flex h-8 shrink-0 items-center gap-2 rounded-md px-2.5 text-body font-medium whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+                section === key
+                  ? "bg-accent-soft text-accent"
+                  : "text-text-dim hover:bg-hover hover:text-text",
+              )}
+            >
+              {Icon && <Icon className="h-4 w-4 shrink-0" />}
+              <span className="truncate">{t(`settings.${key}`)}</span>
+            </button>
+          ))}
+        </nav>
 
-          {/* Section content. */}
-          <div className="min-w-0 flex-1 space-y-5 md:p-5">
-            {section === "profiles" && (
-              <section className="space-y-3">
-                <SectionHeader title={t("settings.profiles")} actions={profileActions} />
-                {!loaded ? (
-                  <Skeleton className="h-24 w-full" />
-                ) : profiles.length === 0 ? (
-                  <EmptyState icon={<Layers className="h-8 w-8 text-text-faint" />}>
-                    {t("settings.noProfiles")}
-                  </EmptyState>
-                ) : (
-                  <Card className="overflow-hidden">
-                    <div className="divide-y divide-border">
-                      {profiles.map((profile) => (
-                        <div
-                          key={profile.id}
-                          className="flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-hover md:px-5"
-                        >
-                          <div className="min-w-0 flex-1">
-                            <div className="truncate text-body font-semibold text-text">
-                              {profile.name}
-                            </div>
-                            <div className="mt-0.5 truncate text-small text-text-faint lg:hidden">
-                              {profile.id}
-                            </div>
+        <div className="min-w-0 flex-1 space-y-5">
+          {section === "profiles" && (
+            <section className="space-y-3">
+              <SectionHeader title={t("settings.profiles")} actions={profileActions} />
+              {!loaded ? (
+                <Skeleton className="h-24 w-full" />
+              ) : profiles.length === 0 ? (
+                <EmptyState icon={<Layers className="h-8 w-8 text-text-faint" />}>
+                  {t("settings.noProfiles")}
+                </EmptyState>
+              ) : (
+                <Card className="overflow-hidden">
+                  <div className="divide-y divide-border">
+                    {profiles.map((profile) => (
+                      <div
+                        key={profile.id}
+                        className="flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-hover md:px-5"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-body font-semibold text-text">
+                            {profile.name}
                           </div>
-                          <div className="hidden shrink-0 text-small text-text-dim lg:block">
+                          <div className="mt-0.5 truncate text-small text-text-faint lg:hidden">
                             {profile.id}
                           </div>
-                          <div className="hidden min-w-0 flex-1 truncate text-small text-text-faint lg:block">
-                            {profile.description ?? ""}
-                          </div>
-                          <Button
-                            variant="danger"
-                            size="sm"
-                            onClick={() =>
-                              setConfirm({ kind: "profile", id: profile.id, name: profile.name })
-                            }
-                            disabled={profile.id === "web"}
-                            title={
-                              profile.id === "web" ? t("settings.protectedProfile") : undefined
-                            }
-                          >
-                            <Trash2 className="h-4 w-4" />
-                            {t("settings.remove")}
-                          </Button>
                         </div>
-                      ))}
-                    </div>
-                  </Card>
-                )}
-              </section>
-            )}
+                        <div className="hidden shrink-0 text-small text-text-dim lg:block">
+                          {profile.id}
+                        </div>
+                        <div className="hidden min-w-0 flex-1 truncate text-small text-text-faint lg:block">
+                          {profile.description ?? ""}
+                        </div>
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          onClick={() =>
+                            setConfirm({ kind: "profile", id: profile.id, name: profile.name })
+                          }
+                          disabled={profile.id === "web"}
+                          title={profile.id === "web" ? t("settings.protectedProfile") : undefined}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          {t("settings.remove")}
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              )}
+            </section>
+          )}
 
-            {section === "providers" && (
-              <section className="space-y-3">
-                <SectionHeader
-                  title={t("settings.providers")}
-                  actions={
-                    <Button variant="secondary" size="sm" onClick={() => setProviderDialog("new")}>
-                      <Plus className="h-4 w-4" />
-                      {t("settings.addProvider")}
-                    </Button>
-                  }
-                />
-                {!loaded ? (
-                  <Skeleton className="h-24 w-full" />
-                ) : providers.length === 0 ? (
-                  <EmptyState icon={<Cloud className="h-8 w-8 text-text-faint" />}>
-                    {t("settings.noProviders")}
-                  </EmptyState>
-                ) : (
-                  <Card className="overflow-hidden">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>{t("settings.name")}</TableHead>
-                          <TableHead className="w-[150px]">{t("settings.kind")}</TableHead>
-                          <TableHead className="hidden lg:table-cell">ID</TableHead>
-                          <TableHead className="w-[80px]" />
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {providers.map((provider) => (
-                          <TableRow key={provider.id}>
-                            <TableCell className="font-semibold text-text">
-                              {provider.name}
-                            </TableCell>
-                            <TableCell className="text-text-dim">{provider.kind}</TableCell>
-                            <TableCell className="hidden text-text-faint lg:table-cell">
-                              {provider.id}
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex items-center gap-1">
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => setProviderDialog(provider)}
-                                >
-                                  <Pencil className="h-4 w-4" />
-                                </Button>
-                                {provider.id !== "deepseek-official" && (
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={() =>
-                                      setConfirm({
-                                        kind: "provider",
-                                        id: provider.id,
-                                        name: provider.name,
-                                      })
-                                    }
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </Button>
-                                )}
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </Card>
-                )}
-              </section>
-            )}
-
-            {section === "models" && (
-              <section className="space-y-3">
-                <SectionHeader
-                  title={t("settings.models")}
-                  actions={
-                    <Button variant="secondary" size="sm" onClick={() => setModelDialog("new")}>
-                      <Plus className="h-4 w-4" />
-                      {t("settings.addModel")}
-                    </Button>
-                  }
-                />
-                {!loaded ? (
-                  <Skeleton className="h-24 w-full" />
-                ) : models.length === 0 ? (
-                  <EmptyState icon={<Cpu className="h-8 w-8 text-text-faint" />}>
-                    {t("settings.noModels")}
-                  </EmptyState>
-                ) : (
-                  <Card className="overflow-hidden">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>{t("settings.name")}</TableHead>
-                          <TableHead className="w-[170px]">{t("settings.provider")}</TableHead>
-                          <TableHead className="hidden lg:table-cell">ID</TableHead>
-                          <TableHead className="w-[80px]" />
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {models.map((model) => (
-                          <TableRow key={`${model.provider ?? ""}/${model.id}`}>
-                            <TableCell className="font-semibold text-text">{model.name}</TableCell>
-                            <TableCell className="text-text-dim">{model.provider ?? "-"}</TableCell>
-                            <TableCell className="hidden text-text-faint lg:table-cell">
-                              {model.id}
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex items-center gap-1">
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => setModelDialog(model)}
-                                >
-                                  <Pencil className="h-4 w-4" />
-                                </Button>
+          {section === "providers" && (
+            <section className="space-y-3">
+              <SectionHeader
+                title={t("settings.providers")}
+                actions={
+                  <Button variant="secondary" size="sm" onClick={() => setProviderDialog("new")}>
+                    <Plus className="h-4 w-4" />
+                    {t("settings.addProvider")}
+                  </Button>
+                }
+              />
+              {!loaded ? (
+                <Skeleton className="h-24 w-full" />
+              ) : providers.length === 0 ? (
+                <EmptyState icon={<Cloud className="h-8 w-8 text-text-faint" />}>
+                  {t("settings.noProviders")}
+                </EmptyState>
+              ) : (
+                <Card className="overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>{t("settings.name")}</TableHead>
+                        <TableHead className="w-[150px]">{t("settings.kind")}</TableHead>
+                        <TableHead className="hidden lg:table-cell">ID</TableHead>
+                        <TableHead className="w-[80px]" />
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {providers.map((provider) => (
+                        <TableRow key={provider.id}>
+                          <TableCell className="font-semibold text-text">{provider.name}</TableCell>
+                          <TableCell className="text-text-dim">{provider.kind}</TableCell>
+                          <TableCell className="hidden text-text-faint lg:table-cell">
+                            {provider.id}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => setProviderDialog(provider)}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              {provider.id !== "deepseek-official" && (
                                 <Button
                                   variant="ghost"
                                   size="icon"
                                   onClick={() =>
-                                    model.provider &&
                                     setConfirm({
-                                      kind: "model",
-                                      id: `${model.provider}/${model.id}`,
-                                      name: model.name,
+                                      kind: "provider",
+                                      id: provider.id,
+                                      name: provider.name,
                                     })
                                   }
                                 >
                                   <Trash2 className="h-4 w-4" />
                                 </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </Card>
-                )}
-              </section>
-            )}
-
-            {section === "snapshots" && (
-              <section className="space-y-3">
-                <SectionHeader title={t("settings.snapshots")} />
-                <Card>
-                  <CardContent className="flex flex-col gap-2 p-4 md:flex-row">
-                    <Input
-                      value={snapshotName}
-                      onChange={(event) => setSnapshotName(event.target.value)}
-                      placeholder={t("settings.snapshotName")}
-                      className="flex-1"
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" && snapshotName.trim()) {
-                          snapshotExport(snapshotName.trim());
-                          setSnapshotName("");
-                        }
-                      }}
-                    />
-                    <Button
-                      variant="primary"
-                      onClick={() => {
-                        if (snapshotName.trim()) {
-                          snapshotExport(snapshotName.trim());
-                          setSnapshotName("");
-                        }
-                      }}
-                      disabled={!snapshotName.trim()}
-                    >
-                      <Plus className="h-4 w-4" />
-                      {t("settings.exportSnapshot")}
-                    </Button>
-                  </CardContent>
-                </Card>
-
-                {!loaded ? (
-                  <Skeleton className="h-24 w-full" />
-                ) : snapshots.length === 0 ? (
-                  <EmptyState icon={<Layers className="h-8 w-8 text-text-faint" />}>
-                    {t("settings.noSnapshots")}
-                  </EmptyState>
-                ) : (
-                  <Card className="overflow-hidden">
-                    <div className="divide-y divide-border">
-                      {snapshots.map((name) => (
-                        <div
-                          key={name}
-                          className="flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-hover md:px-5"
-                        >
-                          <div className="min-w-0 flex-1 truncate text-body font-semibold text-text">
-                            {name}
-                          </div>
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => setConfirm({ kind: "snapshot-import", id: name, name })}
-                          >
-                            {t("settings.importSnapshot")}
-                          </Button>
-                          <Button
-                            variant="danger"
-                            size="sm"
-                            onClick={() => setConfirm({ kind: "snapshot", id: name, name })}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                            {t("settings.deleteSnapshot")}
-                          </Button>
-                        </div>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
                       ))}
-                    </div>
-                  </Card>
-                )}
-              </section>
-            )}
+                    </TableBody>
+                  </Table>
+                </Card>
+              )}
+            </section>
+          )}
 
-            {section === "preferences" && (
-              <section className="space-y-3">
-                <SectionHeader title={t("settings.preferences")} />
-                <Card>
+          {section === "models" && (
+            <section className="space-y-3">
+              <SectionHeader
+                title={t("settings.models")}
+                actions={
+                  <Button variant="secondary" size="sm" onClick={() => setModelDialog("new")}>
+                    <Plus className="h-4 w-4" />
+                    {t("settings.addModel")}
+                  </Button>
+                }
+              />
+              {!loaded ? (
+                <Skeleton className="h-24 w-full" />
+              ) : models.length === 0 ? (
+                <EmptyState icon={<Cpu className="h-8 w-8 text-text-faint" />}>
+                  {t("settings.noModels")}
+                </EmptyState>
+              ) : (
+                <Card className="overflow-hidden">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>{t("settings.name")}</TableHead>
+                        <TableHead className="w-[170px]">{t("settings.provider")}</TableHead>
+                        <TableHead className="hidden lg:table-cell">ID</TableHead>
+                        <TableHead className="w-[80px]" />
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {models.map((model) => (
+                        <TableRow key={`${model.provider ?? ""}/${model.id}`}>
+                          <TableCell className="font-semibold text-text">{model.name}</TableCell>
+                          <TableCell className="text-text-dim">{model.provider ?? "-"}</TableCell>
+                          <TableCell className="hidden text-text-faint lg:table-cell">
+                            {model.id}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => setModelDialog(model)}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() =>
+                                  model.provider &&
+                                  setConfirm({
+                                    kind: "model",
+                                    id: `${model.provider}/${model.id}`,
+                                    name: model.name,
+                                  })
+                                }
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </Card>
+              )}
+            </section>
+          )}
+
+          {section === "snapshots" && (
+            <section className="space-y-3">
+              <SectionHeader title={t("settings.snapshots")} />
+              <Card>
+                <CardContent className="flex flex-col gap-2 p-4 md:flex-row">
+                  <Input
+                    value={snapshotName}
+                    onChange={(event) => setSnapshotName(event.target.value)}
+                    placeholder={t("settings.snapshotName")}
+                    className="flex-1"
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && snapshotName.trim()) {
+                        snapshotExport(snapshotName.trim());
+                        setSnapshotName("");
+                      }
+                    }}
+                  />
+                  <Button
+                    variant="primary"
+                    onClick={() => {
+                      if (snapshotName.trim()) {
+                        snapshotExport(snapshotName.trim());
+                        setSnapshotName("");
+                      }
+                    }}
+                    disabled={!snapshotName.trim()}
+                  >
+                    <Plus className="h-4 w-4" />
+                    {t("settings.exportSnapshot")}
+                  </Button>
+                </CardContent>
+              </Card>
+
+              {!loaded ? (
+                <Skeleton className="h-24 w-full" />
+              ) : snapshots.length === 0 ? (
+                <EmptyState icon={<Layers className="h-8 w-8 text-text-faint" />}>
+                  {t("settings.noSnapshots")}
+                </EmptyState>
+              ) : (
+                <Card className="overflow-hidden">
                   <div className="divide-y divide-border">
-                    <div className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <div className="text-heading font-semibold text-text">
-                          {t("settings.language")}
+                    {snapshots.map((name) => (
+                      <div
+                        key={name}
+                        className="flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-hover md:px-5"
+                      >
+                        <div className="min-w-0 flex-1 truncate text-body font-semibold text-text">
+                          {name}
                         </div>
-                        <div className="text-small text-text-dim">{t("settings.general")}</div>
-                      </div>
-                      <Select value={language} onValueChange={(value) => setLanguage(value)}>
-                        <SelectTrigger className="w-[140px]">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="en">English</SelectItem>
-                          <SelectItem value="zh">简体中文</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <div className="text-heading font-semibold text-text">
-                          {t("settings.theme")}
-                        </div>
-                        <div className="text-small text-text-dim">{t("settings.appearance")}</div>
-                      </div>
-                      <Select value={theme} onValueChange={(value) => setTheme(value)}>
-                        <SelectTrigger className="w-[140px]">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="system">System</SelectItem>
-                          <SelectItem value="light">Light</SelectItem>
-                          <SelectItem value="dark">Dark</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <div className="text-heading font-semibold text-text">
-                          {t("settings.autoStart")}
-                        </div>
-                        <div className="text-small text-text-dim">
-                          {t("settings.autoStartHint")}
-                        </div>
-                      </div>
-                      <Switch
-                        checked={autostart}
-                        onCheckedChange={setAutostart}
-                        aria-label={t("settings.autoStart")}
-                      />
-                    </div>
-                    <div className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <div className="text-heading font-semibold text-text">
-                          {t("settings.closeToTray")}
-                        </div>
-                        <div className="text-small text-text-dim">
-                          {t("settings.closeToTrayHint")}
-                        </div>
-                      </div>
-                      <Switch
-                        checked={closeToTray}
-                        onCheckedChange={setCloseToTray}
-                        aria-label={t("settings.closeToTray")}
-                      />
-                    </div>
-                    <div className="space-y-3 p-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <div className="text-heading font-semibold text-text">
-                            {t("settings.updates")}
-                          </div>
-                          <div className="text-small text-text-dim">
-                            {t("settings.updatesHint")}
-                          </div>
-                        </div>
-                        <Switch
-                          checked={checkUpdates}
-                          onCheckedChange={setCheckUpdates}
-                          aria-label={t("settings.updates")}
-                        />
-                      </div>
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <div className="text-heading font-semibold text-text">
-                            {t("settings.notifications")}
-                          </div>
-                          <div className="text-small text-text-dim">
-                            {t("settings.notificationsHint")}
-                          </div>
-                        </div>
-                        <Switch
-                          checked={notifyUpdates}
-                          onCheckedChange={setNotifyUpdates}
-                          aria-label={t("settings.notifications")}
-                        />
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Button variant="secondary" size="sm" onClick={checkUpdate} disabled={busy}>
-                          {t("settings.checkNow")}
-                        </Button>
-                        {updateInfo && (
-                          <>
-                            <Button
-                              variant="primary"
-                              size="sm"
-                              onClick={installUpdate}
-                              disabled={busy}
-                            >
-                              {t("settings.installUpdate")}
-                            </Button>
-                            <Button
-                              variant="primary"
-                              size="sm"
-                              onClick={() => openRelease(updateInfo.url)}
-                              title={updateInfo.url}
-                            >
-                              {t("settings.updateAvailable", {
-                                version: updateInfo.latest_version,
-                              })}
-                            </Button>
-                          </>
-                        )}
-                        {updateChecked && !updateInfo && (
-                          <span className="text-small text-text-dim">{t("settings.upToDate")}</span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
-                      <div>
-                        <div className="text-heading font-semibold text-text">
-                          {t("settings.ownSettings")}
-                        </div>
-                        <div className="text-small text-text-dim">
-                          {t("settings.ownSettingsHint")}
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
                         <Button
                           variant="secondary"
                           size="sm"
-                          onClick={configExport}
-                          disabled={busy}
+                          onClick={() => setConfirm({ kind: "snapshot-import", id: name, name })}
                         >
-                          {t("settings.exportSettings")}
+                          {t("settings.importSnapshot")}
                         </Button>
                         <Button
-                          variant="secondary"
+                          variant="danger"
                           size="sm"
-                          onClick={() => setConfirm({ kind: "config-import", id: "", name: "" })}
-                          disabled={busy}
+                          onClick={() => setConfirm({ kind: "snapshot", id: name, name })}
                         >
-                          {t("settings.importSettings")}
+                          <Trash2 className="h-4 w-4" />
+                          {t("settings.deleteSnapshot")}
                         </Button>
                       </div>
-                    </div>
+                    ))}
                   </div>
                 </Card>
-              </section>
-            )}
+              )}
+            </section>
+          )}
 
-            {section === "about" && (
-              <section className="space-y-3">
-                <SectionHeader title={t("settings.about")} />
-                <Card>
-                  <CardContent className="p-4">
-                    <div className="text-heading font-semibold text-text">DeepMate</div>
-                    <div className="mt-1 text-small text-text-dim">
-                      {t("settings.aboutVersion", { version: appVersion })}
+          {section === "preferences" && (
+            <section className="space-y-3">
+              <SectionHeader title={t("settings.preferences")} />
+              <Card>
+                <div className="divide-y divide-border">
+                  <div className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <div className="text-heading font-semibold text-text">
+                        {t("settings.language")}
+                      </div>
                     </div>
-                    <div className="mt-3 text-small text-text-dim">
-                      {t("settings.aboutDescription")}
+                    <Select value={language} onValueChange={(value) => setLanguage(value)}>
+                      <SelectTrigger className="w-[140px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="en">English</SelectItem>
+                        <SelectItem value="zh">简体中文</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <div className="text-heading font-semibold text-text">
+                        {t("settings.theme")}
+                      </div>
                     </div>
-                  </CardContent>
-                </Card>
-              </section>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+                    <Select value={theme} onValueChange={(value) => setTheme(value)}>
+                      <SelectTrigger className="w-[140px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="system">System</SelectItem>
+                        <SelectItem value="light">Light</SelectItem>
+                        <SelectItem value="dark">Dark</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <div className="text-heading font-semibold text-text">
+                        {t("settings.autoStart")}
+                      </div>
+                    </div>
+                    <Switch
+                      checked={autostart}
+                      onCheckedChange={setAutostart}
+                      aria-label={t("settings.autoStart")}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <div className="text-heading font-semibold text-text">
+                        {t("settings.closeToTray")}
+                      </div>
+                    </div>
+                    <Switch
+                      checked={closeToTray}
+                      onCheckedChange={setCloseToTray}
+                      aria-label={t("settings.closeToTray")}
+                    />
+                  </div>
+                  <div className="space-y-3 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-heading font-semibold text-text">
+                          {t("settings.updates")}
+                        </div>
+                      </div>
+                      <Switch
+                        checked={checkUpdates}
+                        onCheckedChange={setCheckUpdates}
+                        aria-label={t("settings.updates")}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-heading font-semibold text-text">
+                          {t("settings.notifications")}
+                        </div>
+                      </div>
+                      <Switch
+                        checked={notifyUpdates}
+                        onCheckedChange={setNotifyUpdates}
+                        aria-label={t("settings.notifications")}
+                      />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button variant="secondary" size="sm" onClick={checkUpdate} disabled={busy}>
+                        {t("settings.checkNow")}
+                      </Button>
+                      {updateInfo && (
+                        <>
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={installUpdate}
+                            disabled={busy}
+                          >
+                            {t("settings.installUpdate")}
+                          </Button>
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={() => openRelease(updateInfo.url)}
+                            title={updateInfo.url}
+                          >
+                            {t("settings.updateAvailable", {
+                              version: updateInfo.latest_version,
+                            })}
+                          </Button>
+                        </>
+                      )}
+                      {updateChecked && !updateInfo && (
+                        <span className="text-small text-text-dim">{t("settings.upToDate")}</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <div className="text-heading font-semibold text-text">
+                        {t("settings.ownSettings")}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button variant="secondary" size="sm" onClick={configExport} disabled={busy}>
+                        {t("settings.exportSettings")}
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => setConfirm({ kind: "config-import", id: "", name: "" })}
+                        disabled={busy}
+                      >
+                        {t("settings.importSettings")}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </Card>
+            </section>
+          )}
+
+          {section === "about" && (
+            <section className="space-y-3">
+              <SectionHeader title={t("settings.about")} />
+              <Card>
+                <CardContent className="p-4">
+                  <div className="text-heading font-semibold text-text">DeepMate</div>
+                  <div className="mt-1 text-small text-text-dim">
+                    {t("settings.aboutVersion", { version: appVersion })}
+                  </div>
+                </CardContent>
+              </Card>
+            </section>
+          )}
+        </div>
+      </div>
 
       <ProviderDialog
         key={providerDialog === "new" ? "new" : (providerDialog?.id ?? "closed")}
@@ -775,7 +735,7 @@ function ProviderDialog({
         <div className="space-y-3">
           <Field
             label={t("settings.id")}
-            hint={isDeepseek ? t("settings.deepseekRoute") : undefined}
+
           >
             <Input
               value={id}
@@ -805,14 +765,14 @@ function ProviderDialog({
               placeholder="https://api.example.com/v1"
             />
           </Field>
-          <Field label={t("settings.apiKeyEnv")} hint={t("settings.apiKeyEnvHint")}>
+          <Field label={t("settings.apiKeyEnv")}>
             <Input
               value={apiKeyEnv}
               onChange={(event) => setApiKeyEnv(event.target.value)}
               placeholder="MY_API_KEY"
             />
           </Field>
-          <Field label={t("settings.compat")} hint={t("settings.compatHint")}>
+          <Field label={t("settings.compat")}>
             <Textarea
               value={compat}
               onChange={(event) => setCompat(event.target.value)}
@@ -940,14 +900,14 @@ function ModelDialog({
               />
             </Field>
           </div>
-          <Field label={t("settings.input")} hint={t("settings.inputHint")}>
+          <Field label={t("settings.input")}>
             <Input
               value={input}
               onChange={(event) => setInput(event.target.value)}
               placeholder="text,image"
             />
           </Field>
-          <Field label={t("settings.reasoningEfforts")} hint={t("settings.compatHint")}>
+          <Field label={t("settings.reasoningEfforts")}>
             <Textarea
               value={reasoning}
               onChange={(event) => setReasoning(event.target.value)}
@@ -955,7 +915,7 @@ function ModelDialog({
               placeholder='{"max":"max"}'
             />
           </Field>
-          <Field label={t("settings.compat")} hint={t("settings.compatHint")}>
+          <Field label={t("settings.compat")}>
             <Textarea
               value={compat}
               onChange={(event) => setCompat(event.target.value)}

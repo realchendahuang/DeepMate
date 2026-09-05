@@ -3,7 +3,7 @@
 // These commands mirror the old Slint bridge's UiCommand/UiEvent surface
 // (see git history: apps/desktop/src/bridge.rs). The core models are already
 // Serialize/Deserialize, so they flow straight back to the React frontend as
-// JSON. Capability gating and action-history recording mirror the CLI.
+// JSON. Action-history recording mirrors the CLI.
 //
 // Every command carries `#[specta::specta]` so the build generates the
 // frontend's typed bindings (src/bindings.ts) from these signatures — the
@@ -19,12 +19,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use deepmate_app::record_action;
-use deepmate_core::adapter::HarnessAdapter;
 use deepmate_core::data::DataLayout;
 use deepmate_core::model::{
-    CompatReport, DoctorReport, MarketEntry, MarketSourceInfo, Model, Plugin, PluginOpEvent,
-    PluginOpKind, Profile, Provider, RuntimeStatus,
+    CompatReport, Detection, DoctorReport, MarketEntry, MarketSourceInfo, Model, Plugin,
+    PluginOpEvent, PluginOpKind, Profile, Provider, RuntimeStatus,
 };
+use deepseek_harness::DeepSeekHarness;
 use deepmate_core::CoreResult;
 use deepmate_platform::{PlatformService, SystemPlatform};
 use serde::{Deserialize, Serialize};
@@ -33,32 +33,32 @@ use tauri::{AppHandle, Manager};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_dialog::DialogExt;
 
-// Shared application state: the active adapter and the data layout. The
-// adapter is Send + Sync, so it can live behind an Arc in Tauri state and be
+// Shared application state: the harness service and the data layout. The
+// service is Send + Sync, so it can live behind an Arc in Tauri state and be
 // called from async commands.
 pub struct AppState {
-    pub adapter: Arc<dyn HarnessAdapter>,
+    pub harness: Arc<DeepSeekHarness>,
     pub layout: DataLayout,
     // Mirrors config.ui.close_to_tray and is updated when the preference
     // changes, so the window close handler always reads the current value.
     pub close_to_tray: Arc<AtomicBool>,
 }
 
-// The overview payload: detection, runtime status, and capability-gated
-// inventory counts. `None` means the adapter does not declare the capability.
+// The overview payload: harness detection, runtime status and inventory
+// counts.
 #[derive(Serialize, Type)]
 pub struct Overview {
-    pub detection: deepmate_core::adapter::Detection,
+    pub detection: Detection,
     pub status: RuntimeStatus,
-    pub counts: CapabilityCounts,
+    pub counts: InventoryCounts,
 }
 
 #[derive(Serialize, Default, Type)]
-pub struct CapabilityCounts {
-    pub profiles: Option<u32>,
-    pub providers: Option<u32>,
-    pub models: Option<u32>,
-    pub plugins: Option<u32>,
+pub struct InventoryCounts {
+    pub profiles: u32,
+    pub providers: u32,
+    pub models: u32,
+    pub plugins: u32,
 }
 
 // The persisted preferences so the frontend can restore them on startup and
@@ -95,35 +95,16 @@ pub struct UpdateInstallOutcome {
 
 // ---- Command plumbing ----
 
-// The capability gate every adapter-backed command passes through: reject
-// with the same wording the CLI uses when the active adapter does not declare
-// the capability.
-fn require_capability(
-    adapter: &dyn HarnessAdapter,
-    supported: bool,
-    what: &str,
-) -> Result<(), String> {
-    if supported {
-        Ok(())
-    } else {
-        Err(format!(
-            "adapter '{}' does not support {what}",
-            adapter.metadata().id
-        ))
-    }
-}
-
-// Run an adapter operation, record it in the action history and normalize the
+// Run a harness operation, record it in the action history and normalize the
 // error to the human-readable string the frontend surfaces.
 async fn run_action(
     state: &AppState,
     action: &'static str,
     op: impl std::future::Future<Output = CoreResult<()>>,
 ) -> Result<(), String> {
-    let adapter = state.adapter.as_ref();
     match op.await {
         Ok(()) => {
-            record_action(&state.layout, &adapter.metadata().id, action.to_string());
+            record_action(&state.layout, action.to_string());
             Ok(())
         }
         Err(e) => Err(format!("{e}")),
@@ -136,22 +117,21 @@ async fn run_action(
 #[specta::specta]
 pub async fn refresh_all(app: AppHandle) -> Result<Overview, String> {
     let state = app.state::<AppState>();
-    let adapter = state.adapter.as_ref();
-    let capabilities = adapter.capabilities();
+    let harness = state.harness.as_ref();
 
-    let detection = adapter
+    let detection = harness
         .detect()
         .await
         .map_err(|e| format!("detect failed: {e}"))?;
-    let status = adapter
+    let status = harness
         .status()
         .await
         .map_err(|e| format!("status failed: {e}"))?;
-    let counts = CapabilityCounts {
-        profiles: gated_count(capabilities.profiles, adapter.profiles()).await,
-        providers: gated_count(capabilities.providers, adapter.providers()).await,
-        models: gated_count(capabilities.models, adapter.models()).await,
-        plugins: gated_count(capabilities.plugins, adapter.plugins()).await,
+    let counts = InventoryCounts {
+        profiles: count(harness.profiles().await)?,
+        providers: count(harness.providers().await)?,
+        models: count(harness.models().await)?,
+        plugins: count(harness.plugins().await)?,
     };
     Ok(Overview {
         detection,
@@ -160,14 +140,11 @@ pub async fn refresh_all(app: AppHandle) -> Result<Overview, String> {
     })
 }
 
-async fn gated_count<T>(
-    supported: bool,
-    list: impl std::future::Future<Output = CoreResult<Vec<T>>>,
-) -> Option<u32> {
-    if !supported {
-        return None;
-    }
-    list.await.ok().map(|items| items.len() as u32)
+// A list result reduced to its item count for the overview payload.
+fn count<T>(items: CoreResult<Vec<T>>) -> Result<u32, String> {
+    items
+        .map(|items| items.len() as u32)
+        .map_err(|e| format!("{e}"))
 }
 
 // ---- Runtime ----
@@ -198,16 +175,15 @@ enum RuntimeOp {
 
 async fn runtime_op(app: &AppHandle, op: RuntimeOp, action: &'static str) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let adapter = state.adapter.as_ref();
-    require_capability(adapter, adapter.capabilities().runtime, "runtime control")?;
+    let harness = state.harness.as_ref();
     let result = match op {
-        RuntimeOp::Start => adapter.start().await,
-        RuntimeOp::Stop => adapter.stop().await,
-        RuntimeOp::Restart => adapter.restart().await,
+        RuntimeOp::Start => harness.start().await,
+        RuntimeOp::Stop => harness.stop().await,
+        RuntimeOp::Restart => harness.restart().await,
     };
     match result {
         Ok(()) => {
-            record_action(&state.layout, &adapter.metadata().id, action.to_string());
+            record_action(&state.layout, action.to_string());
             Ok(())
         }
         Err(e) => Err(format!("{e}")),
@@ -218,21 +194,16 @@ async fn runtime_op(app: &AppHandle, op: RuntimeOp, action: &'static str) -> Res
 #[specta::specta]
 pub async fn open_harness(app: AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
-    run_action(&state, "desktop.open", state.adapter.open_ui()).await
+    run_action(&state, "desktop.open", state.harness.open_ui()).await
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn run_doctor(app: AppHandle) -> Result<DoctorReport, String> {
     let state = app.state::<AppState>();
-    let adapter = state.adapter.as_ref();
-    match adapter.doctor().await {
+    match state.harness.doctor().await {
         Ok(report) => {
-            record_action(
-                &state.layout,
-                &adapter.metadata().id,
-                "desktop.doctor".to_string(),
-            );
+            record_action(&state.layout, "desktop.doctor".to_string());
             Ok(report)
         }
         Err(e) => Err(format!("{e}")),
@@ -245,27 +216,21 @@ pub async fn run_doctor(app: AppHandle) -> Result<DoctorReport, String> {
 #[specta::specta]
 pub async fn list_profiles(app: AppHandle) -> Result<Vec<Profile>, String> {
     let state = app.state::<AppState>();
-    let adapter = state.adapter.as_ref();
-    require_capability(adapter, adapter.capabilities().profiles, "profiles")?;
-    adapter.profiles().await.map_err(|e| format!("{e}"))
+    state.harness.profiles().await.map_err(|e| format!("{e}"))
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn list_providers(app: AppHandle) -> Result<Vec<Provider>, String> {
     let state = app.state::<AppState>();
-    let adapter = state.adapter.as_ref();
-    require_capability(adapter, adapter.capabilities().providers, "providers")?;
-    adapter.providers().await.map_err(|e| format!("{e}"))
+    state.harness.providers().await.map_err(|e| format!("{e}"))
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn list_models(app: AppHandle) -> Result<Vec<Model>, String> {
     let state = app.state::<AppState>();
-    let adapter = state.adapter.as_ref();
-    require_capability(adapter, adapter.capabilities().models, "models")?;
-    adapter.models().await.map_err(|e| format!("{e}"))
+    state.harness.models().await.map_err(|e| format!("{e}"))
 }
 
 // ---- Configuration editing ----
@@ -274,12 +239,10 @@ pub async fn list_models(app: AppHandle) -> Result<Vec<Model>, String> {
 #[specta::specta]
 pub async fn upsert_provider(app: AppHandle, provider: Provider) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let adapter = state.adapter.as_ref();
-    require_capability(adapter, adapter.capabilities().providers, "providers")?;
     run_action(
         &state,
         "desktop.provider.set",
-        adapter.upsert_provider(provider),
+        state.harness.upsert_provider(provider),
     )
     .await
 }
@@ -288,12 +251,10 @@ pub async fn upsert_provider(app: AppHandle, provider: Provider) -> Result<(), S
 #[specta::specta]
 pub async fn remove_provider(app: AppHandle, id: String) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let adapter = state.adapter.as_ref();
-    require_capability(adapter, adapter.capabilities().providers, "providers")?;
     run_action(
         &state,
         "desktop.provider.remove",
-        adapter.remove_provider(&id),
+        state.harness.remove_provider(&id),
     )
     .await
 }
@@ -302,12 +263,10 @@ pub async fn remove_provider(app: AppHandle, id: String) -> Result<(), String> {
 #[specta::specta]
 pub async fn upsert_model(app: AppHandle, provider: String, model: Model) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let adapter = state.adapter.as_ref();
-    require_capability(adapter, adapter.capabilities().models, "models")?;
     run_action(
         &state,
         "desktop.model.set",
-        adapter.upsert_model(&provider, model),
+        state.harness.upsert_model(&provider, model),
     )
     .await
 }
@@ -316,12 +275,10 @@ pub async fn upsert_model(app: AppHandle, provider: String, model: Model) -> Res
 #[specta::specta]
 pub async fn remove_model(app: AppHandle, provider: String, id: String) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let adapter = state.adapter.as_ref();
-    require_capability(adapter, adapter.capabilities().models, "models")?;
     run_action(
         &state,
         "desktop.model.remove",
-        adapter.remove_model(&provider, &id),
+        state.harness.remove_model(&provider, &id),
     )
     .await
 }
@@ -330,12 +287,10 @@ pub async fn remove_model(app: AppHandle, provider: String, id: String) -> Resul
 #[specta::specta]
 pub async fn create_profile(app: AppHandle, name: String) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let adapter = state.adapter.as_ref();
-    require_capability(adapter, adapter.capabilities().profiles, "profiles")?;
     run_action(
         &state,
         "desktop.profile.create",
-        adapter.create_profile(&name),
+        state.harness.create_profile(&name),
     )
     .await
 }
@@ -344,12 +299,10 @@ pub async fn create_profile(app: AppHandle, name: String) -> Result<(), String> 
 #[specta::specta]
 pub async fn remove_profile(app: AppHandle, name: String) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let adapter = state.adapter.as_ref();
-    require_capability(adapter, adapter.capabilities().profiles, "profiles")?;
     run_action(
         &state,
         "desktop.profile.remove",
-        adapter.remove_profile(&name),
+        state.harness.remove_profile(&name),
     )
     .await
 }
@@ -358,9 +311,7 @@ pub async fn remove_profile(app: AppHandle, name: String) -> Result<(), String> 
 #[specta::specta]
 pub async fn list_plugins(app: AppHandle) -> Result<Vec<Plugin>, String> {
     let state = app.state::<AppState>();
-    let adapter = state.adapter.as_ref();
-    require_capability(adapter, adapter.capabilities().plugins, "plugins")?;
-    adapter.plugins().await.map_err(|e| format!("{e}"))
+    state.harness.plugins().await.map_err(|e| format!("{e}"))
 }
 
 // ---- Plugins ----
@@ -369,12 +320,10 @@ pub async fn list_plugins(app: AppHandle) -> Result<Vec<Plugin>, String> {
 #[specta::specta]
 pub async fn plugin_install(app: AppHandle, profile: String, spec: String) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let adapter = state.adapter.as_ref();
-    require_capability(adapter, adapter.capabilities().plugins, "plugins")?;
     run_action(
         &state,
         "desktop.plugin.install",
-        adapter.install_plugin(&profile, &spec),
+        state.harness.install_plugin(&profile, &spec),
     )
     .await
 }
@@ -383,12 +332,10 @@ pub async fn plugin_install(app: AppHandle, profile: String, spec: String) -> Re
 #[specta::specta]
 pub async fn plugin_remove(app: AppHandle, profile: String, id: String) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let adapter = state.adapter.as_ref();
-    require_capability(adapter, adapter.capabilities().plugins, "plugins")?;
     run_action(
         &state,
         "desktop.plugin.remove",
-        adapter.remove_plugin(&profile, &id),
+        state.harness.remove_plugin(&profile, &id),
     )
     .await
 }
@@ -397,12 +344,10 @@ pub async fn plugin_remove(app: AppHandle, profile: String, id: String) -> Resul
 #[specta::specta]
 pub async fn plugin_update(app: AppHandle, profile: String, id: String) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let adapter = state.adapter.as_ref();
-    require_capability(adapter, adapter.capabilities().plugins, "plugins")?;
     run_action(
         &state,
         "desktop.plugin.update",
-        adapter.update_plugin(&profile, Some(&id)),
+        state.harness.update_plugin(&profile, Some(&id)),
     )
     .await
 }
@@ -422,20 +367,16 @@ pub async fn plugin_op_stream(
     target: String,
 ) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let adapter = state.adapter.as_ref();
-    require_capability(adapter, adapter.capabilities().plugins, "plugins")?;
 
     let (tx, mut rx) = tokio::sync::mpsc::channel::<PluginOpEvent>(64);
-    let adapter = Arc::clone(&state.adapter);
-    let layout = state.layout.clone();
-    let adapter_id = adapter.metadata().id.clone();
+    let harness = Arc::clone(&state.harness);
     let action = match kind {
         PluginOpKind::Install => "desktop.plugin.install",
         PluginOpKind::Remove => "desktop.plugin.remove",
         PluginOpKind::Update => "desktop.plugin.update",
     };
 
-    // Forward events from the adapter's stream to the webview channel.
+    // Forward events from the harness's stream to the webview channel.
     let forwarder = tauri::async_runtime::spawn(async move {
         while let Some(event) = rx.recv().await {
             if channel.send(event).is_err() {
@@ -444,7 +385,7 @@ pub async fn plugin_op_stream(
         }
     });
 
-    let result = adapter
+    let result = harness
         .stream_plugin_op(&profile, kind, Some(&target), tx)
         .await;
     // The forwarder drains the channel and exits on its own once the sender
@@ -452,7 +393,7 @@ pub async fn plugin_op_stream(
     std::mem::drop(forwarder);
     match result {
         Ok(()) => {
-            record_action(&layout, &adapter_id, action.to_string());
+            record_action(&state.layout, action.to_string());
             Ok(())
         }
         Err(e) => Err(format!("{e}")),
@@ -465,37 +406,28 @@ pub async fn plugin_op_stream(
 #[specta::specta]
 pub async fn list_market_sources(app: AppHandle) -> Result<Vec<MarketSourceInfo>, String> {
     let state = app.state::<AppState>();
-    let adapter = state.adapter.as_ref();
-    require_capability(adapter, adapter.capabilities().marketplace, "marketplace")?;
-    adapter.market_sources().await.map_err(|e| format!("{e}"))
+    state.harness.market_sources().await.map_err(|e| format!("{e}"))
 }
 
 #[tauri::command]
 #[specta::specta]
 pub async fn market_search(app: AppHandle, query: String) -> Result<Vec<MarketEntry>, String> {
     let state = app.state::<AppState>();
-    let adapter = state.adapter.as_ref();
-    require_capability(adapter, adapter.capabilities().marketplace, "marketplace")?;
-    adapter
+    state
+        .harness
         .search_plugins(&query)
         .await
         .map_err(|e| format!("{e}"))
 }
 
 // Check a market package's compatibility with the detected harness before an
-// installation. Capability-gated on marketplace, like the CLI's
-// `deepmate plugin check`.
+// installation, like the CLI's `deepmate plugin check`.
 #[tauri::command]
 #[specta::specta]
 pub async fn plugin_check(app: AppHandle, spec: String) -> Result<CompatReport, String> {
     let state = app.state::<AppState>();
-    let adapter = state.adapter.as_ref();
-    require_capability(
-        adapter,
-        adapter.capabilities().marketplace,
-        "compatibility checks",
-    )?;
-    adapter
+    state
+        .harness
         .plugin_compat(&spec)
         .await
         .map_err(|e| format!("{e}"))
@@ -507,17 +439,11 @@ pub async fn plugin_check(app: AppHandle, spec: String) -> Result<CompatReport, 
 #[specta::specta]
 pub async fn snapshot_export(app: AppHandle, name: String) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let adapter = state.adapter.as_ref();
-    require_capability(adapter, adapter.capabilities().snapshots, "snapshots")?;
     let store = deepmate_core::SnapshotStore::new(state.layout.snapshots_dir());
-    match deepmate_core::Snapshot::capture(adapter).await {
+    match state.harness.capture_snapshot().await {
         Ok(snapshot) => match store.save(&name, &snapshot) {
             Ok(()) => {
-                record_action(
-                    &state.layout,
-                    &adapter.metadata().id,
-                    "desktop.snapshot.export".to_string(),
-                );
+                record_action(&state.layout, "desktop.snapshot.export".to_string());
                 Ok(())
             }
             Err(e) => Err(format!("{e}")),
@@ -530,17 +456,11 @@ pub async fn snapshot_export(app: AppHandle, name: String) -> Result<(), String>
 #[specta::specta]
 pub async fn snapshot_import(app: AppHandle, name: String) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let adapter = state.adapter.as_ref();
-    require_capability(adapter, adapter.capabilities().snapshots, "snapshots")?;
     let store = deepmate_core::SnapshotStore::new(state.layout.snapshots_dir());
     match store.load(&name) {
-        Ok(snapshot) => match snapshot.apply(adapter).await {
+        Ok(snapshot) => match state.harness.apply_snapshot(&snapshot).await {
             Ok(_) => {
-                record_action(
-                    &state.layout,
-                    &adapter.metadata().id,
-                    "desktop.snapshot.import".to_string(),
-                );
+                record_action(&state.layout, "desktop.snapshot.import".to_string());
                 Ok(())
             }
             Err(e) => Err(format!("{e}")),
@@ -553,8 +473,6 @@ pub async fn snapshot_import(app: AppHandle, name: String) -> Result<(), String>
 #[specta::specta]
 pub async fn snapshot_list(app: AppHandle) -> Result<Vec<String>, String> {
     let state = app.state::<AppState>();
-    let adapter = state.adapter.as_ref();
-    require_capability(adapter, adapter.capabilities().snapshots, "snapshots")?;
     let store = deepmate_core::SnapshotStore::new(state.layout.snapshots_dir());
     store.list().map_err(|e| format!("{e}"))
 }
@@ -563,8 +481,6 @@ pub async fn snapshot_list(app: AppHandle) -> Result<Vec<String>, String> {
 #[specta::specta]
 pub async fn snapshot_delete(app: AppHandle, name: String) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let adapter = state.adapter.as_ref();
-    require_capability(adapter, adapter.capabilities().snapshots, "snapshots")?;
     let store = deepmate_core::SnapshotStore::new(state.layout.snapshots_dir());
     store.delete(&name).map_err(|e| format!("{e}"))
 }
@@ -675,7 +591,7 @@ pub async fn config_export(app: AppHandle) -> Result<Option<String>, String> {
     deepmate_core::ConfigBackup::capture(&config)
         .save(&path)
         .map_err(|e| format!("{e}"))?;
-    record_action(&state.layout, "app", "desktop.config.export".to_string());
+    record_action(&state.layout, "desktop.config.export".to_string());
     Ok(Some(path.display().to_string()))
 }
 
@@ -696,7 +612,7 @@ pub async fn config_import(app: AppHandle) -> Result<Option<String>, String> {
         .config
         .save(&state.layout.config_path())
         .map_err(|e| format!("{e}"))?;
-    record_action(&state.layout, "app", "desktop.config.import".to_string());
+    record_action(&state.layout, "desktop.config.import".to_string());
     Ok(Some(path.display().to_string()))
 }
 
@@ -889,7 +805,7 @@ pub async fn update_install(app: AppHandle) -> Result<UpdateInstallOutcome, Stri
 
     open_with_platform(&dmg_path).map_err(|e| format!("failed to open the installer: {e}"))?;
     let state = app.state::<AppState>();
-    record_action(&state.layout, "app", "desktop.update.install".to_string());
+    record_action(&state.layout, "desktop.update.install".to_string());
     Ok(UpdateInstallOutcome {
         status: "downloaded".to_string(),
         path: Some(dmg_path.display().to_string()),

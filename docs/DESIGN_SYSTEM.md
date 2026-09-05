@@ -8,8 +8,9 @@ colors, sizes, weights, radii or durations.
 
 **Principles**
 
-- **Quiet by default.** Near-black neutrals with a cool tint, one confident
-  indigo accent, muted semantic tones. Chrome recedes; content reads first.
+- **Quiet by default.** Near-black neutrals with a cool tint, a Notion-style
+  monochrome interaction color, muted semantic tones. Chrome recedes; content
+  reads first.
 - **Two themes, one stylesheet.** Every color token is a CSS variable defined
   for dark (`:root`) and flipped by the `.light` class on `<html>`, driven by
   the theme preference (system / light / dark). Dark separates surfaces
@@ -48,9 +49,9 @@ Surfaces stack from the window up to elevated controls:
 | `text` | `220 15% 93%` | `220 20% 13%` | primary text |
 | `text-dim` | `222 12% 65%` | `220 10% 40%` | secondary text, descriptions |
 | `text-faint` | `222 10% 44%` | `220 10% 58%` | meta text, placeholders, disabled labels |
-| `accent` | `231 100% 75%` | `231 75% 58%` | brand indigo — actions, selection, focus |
-| `accent-soft` | 16% alpha | 10% alpha | accent-tinted surfaces (active nav, capability chips) |
-| `on-accent` | `0 0% 100%` | `0 0% 100%` | text/icons on accent fill |
+| `accent` | `0 0% 96%` | `0 0% 13%` | interaction color — actions, selection, focus. Monochrome *inversion*: near-white fill on dark, near-black on light, like Notion's buttons |
+| `accent-soft` | `222 20% 15%` | `220 25% 90%` | gray wash for selected surfaces (active nav, filter chips) |
+| `on-accent` | `0 0% 0%` | `0 0% 100%` | text/icons on accent fill (the inverted partner) |
 | `shadow` | transparent | `220 50% 8% / 0.06` | card elevation |
 
 Semantic tones — `pass` `158 50% 52%`/`158 70% 36%`, `warn`
@@ -77,8 +78,8 @@ only the display label.
 - Radius: `rounded-lg` 12 (cards) · `rounded-md` 8 (controls) · `rounded-sm`
   6 (segments, chips)
 - Width: `w-sidebar` 200px (navigation rail) · `w-subnav` 180px (settings
-  sub-nav) · `max-w-content` 860px (page column cap)
-- Shadows: `shadow-card`, `shadow-accent-glow` (primary buttons)
+  sub-nav) · `max-w-content` 1000px (page column cap)
+- Shadows: `shadow-card`
 - Control heights: 20 (badges) · 26 (`size="sm"` buttons) · 30 (buttons,
   nav items) · 32 (inputs, dialogs)
 - Icon sizes: 14 (in buttons) · 16 (nav, inline status) · 18 (list-row
@@ -133,15 +134,15 @@ content column — no per-page top bars and no page-to-page jumps.
   content column to its right is the only scroll region. The rail stacks a
   brand row (52px, logo + wordmark), the primary nav (Overview, Plugins),
   and a footer area separated by a hairline that pins Settings with the
-  adapter identity underneath.
+  harness identity underneath.
 - **Mobile (<md):** the rail is hidden and a compact top bar (52px) shows a
-  menu button, brand, and the adapter identity. The menu button opens a left
+  menu button, brand, and the harness identity. The menu button opens a left
   drawer (same 200px width, same navigation items) over a scrim; it closes
   on selection, Escape, or a scrim click.
 - Navigation is local component state (`View = overview | plugins |
   settings`) — no router. `AppShell` renders the sidebar + the content column
   + the mobile nav; `NavItem` is the 32px nav row (active = `accent-soft`
-  fill + accent text, idle = dim text + hover wash).
+  gray wash + full text color, idle = dim text + hover wash).
 
 ## Pages
 
@@ -152,14 +153,16 @@ Providers / Models / Snapshots / Preferences). Plugins was promoted out of
 Settings because its install / update / remove / market workflow made the
 settings page too heavy.
 
-**Settings sub-nav.** Settings hosts five sections behind a two-column
-layout: a vertical sub-nav (180px, same visual language as the sidebar nav)
-on the left, the section content on the right. Below `md` the sub-nav folds
-into a horizontal chip strip above the content. The section state is local
+**Settings sub-nav.** Settings hosts five sections behind a Notion-style
+two-column layout: a quiet vertical sub-nav (180px, same visual language as
+the sidebar nav) on the left, the section content on the right, separated by
+whitespace — no enclosing card. Below `md` the sub-nav folds into a
+horizontal chip strip above the content. The section state is local
 (`SectionKey`), no router.
 
-**Page width.** Every page column is capped at `max-w-content` (860px) and
-stays left-aligned, so lines stay readable on wide windows.
+**Page width.** Every page column is fluid, capped at `max-w-content`
+(1000px), and **centered** past the cap (`mx-auto`) — resizing the window
+keeps the column centered instead of pinning it to the left edge.
 
 ## Page recipe
 

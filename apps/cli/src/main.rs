@@ -3,22 +3,17 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
 use clap::{Parser, Subcommand};
-use deepmate_app::{build_registry, init_tracing, load_config_or_default, record_action};
-use deepmate_core::adapter::HarnessAdapter;
+use deepmate_app::{build_harness, init_tracing, load_config_or_default, record_action};
 use deepmate_core::model::{
     is_outdated, CompatStatus, MarketEntry, MarketSourceInfo, Model, Plugin, Profile, Provider,
 };
-use deepmate_core::registry::AdapterRegistry;
 use deepmate_core::DataLayout;
 use deepmate_platform::{PlatformService, SystemPlatform};
+use deepseek_harness::DeepSeekHarness;
 
 #[derive(Debug, Parser)]
 #[command(name = "deepmate", version, about = "DeepMate control plane CLI")]
 struct Cli {
-    /// Adapter to use. Use "test" for a deterministic fake adapter.
-    #[arg(long, global = true, default_value = "deepseek-harness")]
-    adapter: String,
-
     /// Print machine-readable JSON output.
     #[arg(long, global = true)]
     json: bool,
@@ -33,8 +28,6 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// List registered adapters.
-    Adapters,
     /// Detect the active harness.
     Detect,
     /// Show the active harness runtime status.
@@ -241,7 +234,7 @@ enum SnapshotAction {
         /// Snapshot name (stored as `snapshots/<name>.json`).
         name: String,
     },
-    /// Apply a snapshot to the active adapter (merge-style).
+    /// Apply a stored snapshot (merge-style).
     Import {
         /// Snapshot name to import.
         name: String,
@@ -282,31 +275,25 @@ async fn main() -> anyhow::Result<()> {
 
     let _guard = init_tracing(&layout.logs_dir());
     tracing::debug!(
-        adapter = %cli.adapter,
         json = cli.json,
         data_dir = %layout.root().display(),
         ?config,
         "deepmate startup"
     );
 
-    let registry = build_registry(&cli.adapter, &layout)?;
-    let action = run(&cli, &registry, &layout).await?;
+    let harness = build_harness(&layout);
+    let action = run(&cli, &harness, &layout).await?;
 
     // History recording is best-effort: a read-only data directory must not
     // break the command itself.
-    record_action(&layout, &cli.adapter, action);
+    record_action(&layout, action);
     Ok(())
 }
 
 // Dispatch the command and return the history action name on success.
-async fn run(cli: &Cli, registry: &AdapterRegistry, layout: &DataLayout) -> anyhow::Result<String> {
-    if matches!(cli.command, Command::Adapters) {
-        print_adapters(registry, cli.json)?;
-        return Ok("cli.adapters".to_string());
-    }
-
-    // DeepMate's own settings are adapter-independent, so the backup commands
-    // run before any adapter is resolved. The self-update is the same: it
+async fn run(cli: &Cli, harness: &DeepSeekHarness, layout: &DataLayout) -> anyhow::Result<String> {
+    // DeepMate's own settings are harness-independent, so the backup commands
+    // run before the harness is consulted. The self-update is the same: it
     // replaces the running binary and has nothing to do with a harness.
     if matches!(cli.command, Command::Update) {
         update_self(cli.json).await?;
@@ -345,16 +332,11 @@ async fn run(cli: &Cli, registry: &AdapterRegistry, layout: &DataLayout) -> anyh
         };
     }
 
-    let adapter = registry
-        .get(&cli.adapter)
-        .with_context(|| format!("adapter not found: {}", cli.adapter))?;
-
     let action = match &cli.command {
-        Command::Adapters => unreachable!(),
         Command::Config { .. } => unreachable!(),
         Command::Update => unreachable!(),
         Command::Detect => {
-            let detection = adapter.detect().await?;
+            let detection = harness.detect().await?;
             if cli.json {
                 println!("{}", serde_json::to_string_pretty(&detection)?);
             } else {
@@ -364,7 +346,6 @@ async fn run(cli: &Cli, registry: &AdapterRegistry, layout: &DataLayout) -> anyh
                     if let Some(version) = &harness.version {
                         println!("version: {version}");
                     }
-                    println!("adapter version: {}", harness.adapter_version);
                 }
                 if let Some(detail) = &detection.detail {
                     println!("detail: {detail}");
@@ -373,11 +354,10 @@ async fn run(cli: &Cli, registry: &AdapterRegistry, layout: &DataLayout) -> anyh
             "cli.detect".to_string()
         }
         Command::Status => {
-            let status = adapter.status().await?;
+            let status = harness.status().await?;
             if cli.json {
                 println!("{}", serde_json::to_string_pretty(&status)?);
             } else {
-                println!("adapter: {}", adapter.metadata().id);
                 println!("status: {:?}", status.kind);
                 if let Some(pid) = status.pid {
                     println!("pid: {pid}");
@@ -389,7 +369,7 @@ async fn run(cli: &Cli, registry: &AdapterRegistry, layout: &DataLayout) -> anyh
             "cli.status".to_string()
         }
         Command::Open => {
-            adapter.open_ui().await?;
+            harness.open_ui().await?;
             if cli.json {
                 println!("{}", serde_json::json!({ "opened": true }));
             } else {
@@ -398,11 +378,10 @@ async fn run(cli: &Cli, registry: &AdapterRegistry, layout: &DataLayout) -> anyh
             "cli.open".to_string()
         }
         Command::Doctor => {
-            let report = adapter.doctor().await?;
+            let report = harness.doctor().await?;
             if cli.json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
-                println!("adapter: {}", report.adapter_id);
                 for check in report.checks {
                     let status = format!("{:?}", check.status).to_lowercase();
                     println!("- [{}] {} ({})", status, check.summary, check.id);
@@ -417,11 +396,10 @@ async fn run(cli: &Cli, registry: &AdapterRegistry, layout: &DataLayout) -> anyh
             "cli.doctor".to_string()
         }
         Command::Runtime { action } => {
-            require_capability(adapter, adapter.capabilities().runtime, "runtime control")?;
             match action {
-                RuntimeAction::Start => adapter.start().await?,
-                RuntimeAction::Stop => adapter.stop().await?,
-                RuntimeAction::Restart => adapter.restart().await?,
+                RuntimeAction::Start => harness.start().await?,
+                RuntimeAction::Stop => harness.stop().await?,
+                RuntimeAction::Restart => harness.restart().await?,
             }
             if cli.json {
                 println!("{}", serde_json::json!({ "ok": true }));
@@ -436,14 +414,13 @@ async fn run(cli: &Cli, registry: &AdapterRegistry, layout: &DataLayout) -> anyh
             format!("cli.runtime.{name}")
         }
         Command::Profile { action } => {
-            require_capability(adapter, adapter.capabilities().profiles, "profiles")?;
             let action_name = match action {
                 ProfileAction::List => {
-                    print_list("profiles", adapter.profiles().await?, cli.json)?;
+                    print_list("profiles", harness.profiles().await?, cli.json)?;
                     "list"
                 }
                 ProfileAction::Create { name } => {
-                    adapter.create_profile(name).await?;
+                    harness.create_profile(name).await?;
                     if cli.json {
                         println!("{}", serde_json::json!({ "ok": true }));
                     } else {
@@ -452,7 +429,7 @@ async fn run(cli: &Cli, registry: &AdapterRegistry, layout: &DataLayout) -> anyh
                     "create"
                 }
                 ProfileAction::Remove { name } => {
-                    adapter.remove_profile(name).await?;
+                    harness.remove_profile(name).await?;
                     if cli.json {
                         println!("{}", serde_json::json!({ "ok": true }));
                     } else {
@@ -464,10 +441,9 @@ async fn run(cli: &Cli, registry: &AdapterRegistry, layout: &DataLayout) -> anyh
             format!("cli.profile.{action_name}")
         }
         Command::Provider { action } => {
-            require_capability(adapter, adapter.capabilities().providers, "providers")?;
             let action_name = match action {
                 ProviderAction::List => {
-                    print_list("providers", adapter.providers().await?, cli.json)?;
+                    print_list("providers", harness.providers().await?, cli.json)?;
                     "list"
                 }
                 ProviderAction::Set {
@@ -491,7 +467,7 @@ async fn run(cli: &Cli, registry: &AdapterRegistry, layout: &DataLayout) -> anyh
                         api_key_env: api_key_env.clone(),
                         compat: compat.clone(),
                     };
-                    adapter.upsert_provider(provider).await?;
+                    harness.upsert_provider(provider).await?;
                     if cli.json {
                         println!("{}", serde_json::json!({ "ok": true }));
                     } else {
@@ -500,7 +476,7 @@ async fn run(cli: &Cli, registry: &AdapterRegistry, layout: &DataLayout) -> anyh
                     "set"
                 }
                 ProviderAction::Remove { id } => {
-                    adapter.remove_provider(id).await?;
+                    harness.remove_provider(id).await?;
                     if cli.json {
                         println!("{}", serde_json::json!({ "ok": true }));
                     } else {
@@ -512,10 +488,9 @@ async fn run(cli: &Cli, registry: &AdapterRegistry, layout: &DataLayout) -> anyh
             format!("cli.provider.{action_name}")
         }
         Command::Model { action } => {
-            require_capability(adapter, adapter.capabilities().models, "models")?;
             let action_name = match action {
                 ModelAction::List => {
-                    print_list("models", adapter.models().await?, cli.json)?;
+                    print_list("models", harness.models().await?, cli.json)?;
                     "list"
                 }
                 ModelAction::Set {
@@ -546,7 +521,7 @@ async fn run(cli: &Cli, registry: &AdapterRegistry, layout: &DataLayout) -> anyh
                         reasoning_efforts: reasoning_efforts.clone(),
                         compat: compat.clone(),
                     };
-                    adapter.upsert_model(provider, model).await?;
+                    harness.upsert_model(provider, model).await?;
                     if cli.json {
                         println!("{}", serde_json::json!({ "ok": true }));
                     } else {
@@ -555,7 +530,7 @@ async fn run(cli: &Cli, registry: &AdapterRegistry, layout: &DataLayout) -> anyh
                     "set"
                 }
                 ModelAction::Remove { provider, id } => {
-                    adapter.remove_model(provider, id).await?;
+                    harness.remove_model(provider, id).await?;
                     if cli.json {
                         println!("{}", serde_json::json!({ "ok": true }));
                     } else {
@@ -566,98 +541,81 @@ async fn run(cli: &Cli, registry: &AdapterRegistry, layout: &DataLayout) -> anyh
             };
             format!("cli.model.{action_name}")
         }
-        Command::Plugin { action } => {
-            require_capability(adapter, adapter.capabilities().plugins, "plugins")?;
-            match action {
-                PluginAction::List { check_updates } => {
-                    let mut plugins = adapter.plugins().await?;
-                    if *check_updates {
-                        require_capability(
-                            adapter,
-                            adapter.capabilities().marketplace,
-                            "marketplace",
-                        )?;
-                        plugins = check_for_updates(adapter, plugins).await;
-                    }
-                    print_list("plugins", plugins, cli.json)?;
-                    "cli.plugin.list".to_string()
+        Command::Plugin { action } => match action {
+            PluginAction::List { check_updates } => {
+                let mut plugins = harness.plugins().await?;
+                if *check_updates {
+                    plugins = check_for_updates(harness, plugins).await;
                 }
-                PluginAction::Install {
-                    spec,
-                    profile,
-                    force,
-                } => {
-                    preflight_compat(adapter, spec, *force).await?;
-                    adapter.install_plugin(profile, spec).await?;
-                    if cli.json {
-                        println!("{}", serde_json::json!({ "ok": true }));
-                    } else {
-                        println!("installed {spec} into profile {profile}");
-                    }
-                    "cli.plugin.install".to_string()
-                }
-                PluginAction::Check { spec } => {
-                    require_capability(
-                        adapter,
-                        adapter.capabilities().marketplace,
-                        "compatibility checks",
-                    )?;
-                    let report = adapter.plugin_compat(spec).await?;
-                    if cli.json {
-                        println!("{}", serde_json::to_string_pretty(&report)?);
-                    } else {
-                        println!("{}: {}", spec, compat_word(report.status));
-                        println!("  {}", report.message);
-                        if let Some(version) = &report.harness_version {
-                            println!("  harness version: {version}");
-                        }
-                    }
-                    "cli.plugin.check".to_string()
-                }
-                PluginAction::Remove { id, profile } => {
-                    adapter.remove_plugin(profile, id).await?;
-                    if cli.json {
-                        println!("{}", serde_json::json!({ "ok": true }));
-                    } else {
-                        println!("removed {id} from profile {profile}");
-                    }
-                    "cli.plugin.remove".to_string()
-                }
-                PluginAction::Update { id, profile } => {
-                    adapter.update_plugin(profile, id.as_deref()).await?;
-                    if cli.json {
-                        println!("{}", serde_json::json!({ "ok": true }));
-                    } else {
-                        match id {
-                            Some(id) => println!("updated {id} in profile {profile}"),
-                            None => println!("updated all plugins in profile {profile}"),
-                        }
-                    }
-                    "cli.plugin.update".to_string()
-                }
+                print_list("plugins", plugins, cli.json)?;
+                "cli.plugin.list".to_string()
             }
-        }
-        Command::Market { action } => {
-            require_capability(adapter, adapter.capabilities().marketplace, "marketplace")?;
-            match action {
-                MarketAction::List => {
-                    let sources = adapter.market_sources().await?;
-                    print_list("sources", sources, cli.json)?;
-                    "cli.market.list".to_string()
+            PluginAction::Install {
+                spec,
+                profile,
+                force,
+            } => {
+                preflight_compat(harness, spec, *force).await?;
+                harness.install_plugin(profile, spec).await?;
+                if cli.json {
+                    println!("{}", serde_json::json!({ "ok": true }));
+                } else {
+                    println!("installed {spec} into profile {profile}");
                 }
-                MarketAction::Search { query } => {
-                    let entries = adapter.search_plugins(query).await?;
-                    print_list("market", entries, cli.json)?;
-                    "cli.market.search".to_string()
-                }
+                "cli.plugin.install".to_string()
             }
-        }
+            PluginAction::Check { spec } => {
+                let report = harness.plugin_compat(spec).await?;
+                if cli.json {
+                    println!("{}", serde_json::to_string_pretty(&report)?);
+                } else {
+                    println!("{}: {}", spec, compat_word(report.status));
+                    println!("  {}", report.message);
+                    if let Some(version) = &report.harness_version {
+                        println!("  harness version: {version}");
+                    }
+                }
+                "cli.plugin.check".to_string()
+            }
+            PluginAction::Remove { id, profile } => {
+                harness.remove_plugin(profile, id).await?;
+                if cli.json {
+                    println!("{}", serde_json::json!({ "ok": true }));
+                } else {
+                    println!("removed {id} from profile {profile}");
+                }
+                "cli.plugin.remove".to_string()
+            }
+            PluginAction::Update { id, profile } => {
+                harness.update_plugin(profile, id.as_deref()).await?;
+                if cli.json {
+                    println!("{}", serde_json::json!({ "ok": true }));
+                } else {
+                    match id {
+                        Some(id) => println!("updated {id} in profile {profile}"),
+                        None => println!("updated all plugins in profile {profile}"),
+                    }
+                }
+                "cli.plugin.update".to_string()
+            }
+        },
+        Command::Market { action } => match action {
+            MarketAction::List => {
+                let sources = harness.market_sources().await?;
+                print_list("sources", sources, cli.json)?;
+                "cli.market.list".to_string()
+            }
+            MarketAction::Search { query } => {
+                let entries = harness.search_plugins(query).await?;
+                print_list("market", entries, cli.json)?;
+                "cli.market.search".to_string()
+            }
+        },
         Command::Snapshot { action } => {
-            require_capability(adapter, adapter.capabilities().snapshots, "snapshots")?;
             let store = deepmate_core::SnapshotStore::new(layout.snapshots_dir());
             match action {
                 SnapshotAction::Export { name } => {
-                    let snapshot = deepmate_core::Snapshot::capture(adapter).await?;
+                    let snapshot = harness.capture_snapshot().await?;
                     store.save(name, &snapshot)?;
                     if cli.json {
                         println!("{}", serde_json::to_string_pretty(&snapshot)?);
@@ -674,7 +632,7 @@ async fn run(cli: &Cli, registry: &AdapterRegistry, layout: &DataLayout) -> anyh
                 }
                 SnapshotAction::Import { name } => {
                     let snapshot = store.load(name)?;
-                    let report = snapshot.apply(adapter).await?;
+                    let report = harness.apply_snapshot(&snapshot).await?;
                     if cli.json {
                         println!("{}", serde_json::to_string_pretty(&report)?);
                     } else {
@@ -710,11 +668,11 @@ async fn run(cli: &Cli, registry: &AdapterRegistry, layout: &DataLayout) -> anyh
 // stderr and let the install proceed — a missing signal must never block the
 // workflow.
 async fn preflight_compat(
-    adapter: &dyn HarnessAdapter,
+    harness: &DeepSeekHarness,
     spec: &str,
     force: bool,
 ) -> anyhow::Result<()> {
-    let report = match adapter.plugin_compat(spec).await {
+    let report = match harness.plugin_compat(spec).await {
         Ok(report) => report,
         Err(err) => {
             eprintln!("note: compatibility check unavailable, continuing: {err}");
@@ -753,12 +711,12 @@ fn compat_word(status: CompatStatus) -> &'static str {
 //
 // The market lookups run concurrently so checking N plugins costs one round
 // trip rather than N sequential ones.
-async fn check_for_updates(adapter: &dyn HarnessAdapter, plugins: Vec<Plugin>) -> Vec<Plugin> {
+async fn check_for_updates(harness: &DeepSeekHarness, plugins: Vec<Plugin>) -> Vec<Plugin> {
     let lookups = plugins.iter().map(|plugin| {
         let id = plugin.id.clone();
         let installed = plugin.version.clone();
         async move {
-            match adapter.search_plugins(&id).await {
+            match harness.search_plugins(&id).await {
                 Ok(entries) => {
                     let latest = entries
                         .iter()
@@ -960,34 +918,6 @@ fn replace_self(new_binary: &std::path::Path) -> anyhow::Result<std::path::PathB
     }
     let _ = std::fs::remove_file(&backup);
     Ok(exe)
-}
-
-// Reject commands the active adapter does not declare support for, instead
-// of silently returning empty results.
-fn require_capability(
-    adapter: &dyn HarnessAdapter,
-    supported: bool,
-    what: &str,
-) -> anyhow::Result<()> {
-    if supported {
-        Ok(())
-    } else {
-        Err(anyhow!(
-            "adapter '{}' does not support {what}",
-            adapter.metadata().id
-        ))
-    }
-}
-
-fn print_adapters(registry: &AdapterRegistry, json: bool) -> anyhow::Result<()> {
-    if json {
-        println!("{}", serde_json::to_string_pretty(&registry.list())?);
-    } else {
-        for metadata in registry.list() {
-            println!("{} ({})", metadata.id, metadata.name);
-        }
-    }
-    Ok(())
 }
 
 // Print a normalized entity list in JSON or human-readable form.

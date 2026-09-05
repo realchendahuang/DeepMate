@@ -3,9 +3,6 @@ use std::io;
 // Errors produced by the DeepMate core.
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
-    #[error("adapter not found: {0}")]
-    AdapterNotFound(String),
-
     #[error("unsupported operation: {0}")]
     Unsupported(String),
 

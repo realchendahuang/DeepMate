@@ -21,9 +21,9 @@
   --text: 220 15% 93%;
   --text-dim: 222 12% 65%;
   --text-faint: 222 10% 44%;
-  --accent: 231 100% 75%;
-  --accent-soft: 231 100% 75% / 0.16;
-  --on-accent: 0 0% 100%;
+  --accent: 0 0% 96%;
+  --accent-soft: 222 20% 15%;
+  --on-accent: 0 0% 0%;
   --pass: 158 50% 52%;
   --warn: 40 70% 63%;
   --fail: 0 70% 68%;
@@ -50,7 +50,10 @@
   --muted-foreground: var(--text-dim);
   --destructive: var(--fail);
   --destructive-foreground: 0 0% 100%;
-  --border: var(--border);
+  /* No `--border` alias here: shadcn and DeepMate use the same name, and
+     `--border: var(--border)` is a self-cycle — the token computes to
+     guaranteed-invalid and every border falls back to currentColor. The
+     DeepMate token at the top of this block serves both roles. */
   --input: var(--border);
   --ring: var(--accent);
   --radius: 8px;
@@ -75,8 +78,8 @@
   --text: 220 20% 13%;
   --text-dim: 220 10% 40%;
   --text-faint: 220 10% 58%;
-  --accent: 231 75% 58%;
-  --accent-soft: 231 75% 58% / 0.1;
+  --accent: 0 0% 13%;
+  --accent-soft: 220 25% 90%;
   --on-accent: 0 0% 100%;
   --pass: 158 70% 36%;
   --warn: 40 80% 38%;
@@ -143,7 +146,7 @@
   --radius-xl: 12px;
   --width-sidebar: 200px;
   --width-subnav: 180px;
-  --max-width-content: 860px;
+  --max-width-content: 1000px;
 
   /* Typography. */
   --text-display: 22px;
@@ -168,8 +171,12 @@
 
   /* Shadows. */
   --shadow-card: 0 2px 12px hsl(var(--shadow));
-  --shadow-accent-glow: 0 2px 10px hsl(var(--accent) / 0.3);
 }
+
+/* Theme flip is a `.light` class on <html> (dark is the default, no class).
+   The `dark:` variant mirrors that convention for the few places (the logo
+   swap) where two theme-specific assets replace a token. */
+@custom-variant dark (&:where(:not(.light) *));
 
 @layer base {
   * {

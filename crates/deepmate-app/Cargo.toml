@@ -8,8 +8,7 @@ repository.workspace = true
 [dependencies]
 deepmate-core = { path = "../deepmate-core" }
 deepmate-platform = { path = "../deepmate-platform" }
-deepseek-harness = { path = "../adapters/deepseek-harness" }
-pi-agent = { path = "../adapters/pi-agent" }
+deepseek-harness = { path = "../deepseek-harness" }
 anyhow.workspace = true
 tracing.workspace = true
 tracing-appender.workspace = true

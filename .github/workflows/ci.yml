@@ -42,8 +42,8 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
-      # Architectural gate: the control core must stay harness-agnostic.
-      # Harness-specific names belong in crates/adapters, never in the core.
+      # Architectural gate: the control core stays a pure data layer.
+      # Harness-specific names live in crates/deepseek-harness, never in the core.
       - name: Core purity gate
         shell: bash
         run: |

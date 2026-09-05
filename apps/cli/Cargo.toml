@@ -13,6 +13,7 @@ path = "src/main.rs"
 deepmate-app = { path = "../../crates/deepmate-app" }
 deepmate-core = { path = "../../crates/deepmate-core" }
 deepmate-platform = { path = "../../crates/deepmate-platform" }
+deepseek-harness = { path = "../../crates/deepseek-harness" }
 anyhow.workspace = true
 clap.workspace = true
 flate2.workspace = true

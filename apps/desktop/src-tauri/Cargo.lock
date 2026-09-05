@@ -714,7 +714,6 @@ dependencies = [
  "deepmate-core",
  "deepmate-platform",
  "deepseek-harness",
- "pi-agent",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
@@ -724,7 +723,6 @@ dependencies = [
 name = "deepmate-core"
 version = "0.7.0"
 dependencies = [
- "async-trait",
  "chrono",
  "semver",
  "serde",
@@ -732,7 +730,6 @@ dependencies = [
  "sha2",
  "specta",
  "thiserror 2.0.20",
- "tokio",
  "toml 0.8.2",
 ]
 
@@ -775,7 +772,6 @@ dependencies = [
 name = "deepseek-harness"
 version = "0.7.0"
 dependencies = [
- "async-trait",
  "chrono",
  "deepmate-core",
  "deepmate-platform",
@@ -2702,17 +2698,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e57fef6bc5981e38c2ce2d63bfa546861309f875b8a75f092d1d54ae2d64f266"
 dependencies = [
  "siphasher",
-]
-
-[[package]]
-name = "pi-agent"
-version = "0.7.0"
-dependencies = [
- "async-trait",
- "deepmate-core",
- "serde",
- "serde_json",
- "tracing",
 ]
 
 [[package]]

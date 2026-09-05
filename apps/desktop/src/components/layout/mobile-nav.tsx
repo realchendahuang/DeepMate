@@ -21,7 +21,8 @@ export function MobileNav({ open, view, onNavigate, onClose }: MobileNavProps) {
         <SheetTitle className="sr-only">{t("nav.menu")}</SheetTitle>
         <div className="flex h-[52px] shrink-0 items-center justify-between gap-2 border-b border-border px-3">
           <div className="flex items-center gap-2.5">
-            <img src="/logo.png" alt="DeepMate" className="h-6 w-6" />
+            <img src="/logo.png" alt="DeepMate" className="h-6 w-6 rounded-sm inline dark:hidden" />
+            <img src="/logo-dark.png" alt="" aria-hidden className="hidden dark:inline h-6 w-6 rounded-sm border border-border" />
             <span className="text-brand text-text">DeepMate</span>
           </div>
         </div>
