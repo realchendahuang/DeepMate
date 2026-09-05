@@ -1,7 +1,21 @@
+<p align="center">
+  <img src="logo/logo.png" alt="DeepMate" width="220" />
+</p>
+
 # DeepMate
 
 **A lightweight companion and control plane for AI harnesses.**  
 **Starting with DeepSeek Harness.**
+
+<p align="center">
+  <a href="https://github.com/realchendahuang/DeepMate/releases"><img src="https://img.shields.io/github/v/release/realchendahuang/DeepMate?sort=semver&label=release" alt="release" /></a>
+  <a href="LICENSE-MIT"><img src="https://img.shields.io/badge/license-MIT%20%7C%20Apache--2.0-blue" alt="license: MIT or Apache-2.0" /></a>
+  <a href="https://github.com/realchendahuang/DeepMate/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/realchendahuang/DeepMate/ci.yml?branch=main&label=CI" alt="CI" /></a>
+  <a href="https://github.com/realchendahuang/DeepMate/stargazers"><img src="https://img.shields.io/github/stars/realchendahuang/DeepMate?label=stars" alt="stars" /></a>
+  <a href="https://github.com/realchendahuang/DeepMate/releases"><img src="https://img.shields.io/github/downloads/realchendahuang/DeepMate/total?label=downloads" alt="downloads" /></a>
+  <a href="https://github.com/realchendahuang/DeepMate/issues"><img src="https://img.shields.io/github/issues/realchendahuang/DeepMate?label=open%20issues" alt="open issues" /></a>
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey" alt="platforms: macOS, Linux, Windows" />
+</p>
 
 DeepMate is a lightweight, cross-platform companion for managing an AI harness without replacing the harness itself.
 
@@ -10,6 +24,23 @@ It is designed to handle the things around the agent runtime — installation, l
 For DeepSeek Harness, that means DeepMate can become the place where you manage the environment, then open the official Harness Web UI in your system browser when you are ready to work.
 
 > DeepMate manages the harness. The harness does the work.
+
+## Table of contents
+
+- [Why DeepMate?](#why-deepmate)
+- [What DeepMate is](#what-deepmate-is)
+- [What DeepMate is not](#what-deepmate-is-not)
+- [Architecture](#architecture)
+- [Design principles](#design-principles)
+- [Technology stack](#technology-stack)
+- [Getting started](#getting-started)
+- [Data layout](#data-layout)
+- [Roadmap](#roadmap)
+- [Project status](#project-status)
+- [Related project](#related-project)
+- [Star history](#star-history)
+- [Contributing](#contributing)
+- [License](#license)
 
 ## Why DeepMate?
 
@@ -359,6 +390,23 @@ rather than rush into a large feature set.
 ## Related project
 
 - [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
+
+## Star history
+
+[![Star History Chart](https://api.star-history.com/svg?repos=realchendahuang/DeepMate&type=Date)](https://star-history.com/#realchendahuang/DeepMate&Date)
+
+## Contributing
+
+DeepMate is in early development and every contribution counts — bug reports,
+feature ideas, documentation fixes and pull requests are all welcome.
+
+- Found a bug or have an idea? [Open an issue](https://github.com/realchendahuang/DeepMate/issues/new)
+- Want to change something? Open a pull request and run `make ci` before pushing
+- Follow the project conventions in [AGENTS.md](AGENTS.md) and
+  [docs/DESIGN_SYSTEM.md](docs/DESIGN_SYSTEM.md)
+
+If DeepMate is useful to you, starring the repository helps it stay visible —
+thank you! ⭐
 
 ## License
 
