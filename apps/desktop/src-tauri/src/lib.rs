@@ -72,10 +72,8 @@ pub fn run() {
         .plugin({
             let mut builder = tauri_plugin_autostart::Builder::new();
             if let Some(dir) = &cli.data_dir {
-                builder = builder.args([
-                    "--data-dir".to_string(),
-                    dir.to_string_lossy().into_owned(),
-                ]);
+                builder =
+                    builder.args(["--data-dir".to_string(), dir.to_string_lossy().into_owned()]);
             }
             builder.build()
         })
@@ -259,8 +257,11 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::runtime_start,
             commands::runtime_stop,
             commands::runtime_restart,
+            commands::runtime_list,
+            commands::task_run,
             commands::open_harness,
             commands::run_doctor,
+            commands::doctor_fix,
             commands::list_profiles,
             commands::list_providers,
             commands::list_models,
@@ -269,11 +270,17 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::upsert_model,
             commands::remove_model,
             commands::create_profile,
+            commands::create_scenario,
             commands::remove_profile,
+            commands::rename_profile,
             commands::list_plugins,
             commands::plugin_install,
             commands::plugin_remove,
             commands::plugin_update,
+            commands::plugin_disable,
+            commands::plugin_enable,
+            commands::list_disabled_plugins,
+            commands::plugin_forget,
             commands::plugin_op_stream,
             commands::list_market_sources,
             commands::market_search,

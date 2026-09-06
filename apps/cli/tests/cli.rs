@@ -333,14 +333,70 @@ fn deepseek_official_route_edits_llm_deepseek() {
 #[test]
 fn profile_create_and_remove_via_cli() {
     let home = test_data_dir();
-    let (_, stderr) = dsh_in(&home, &["profile", "create", "tui"]);
-    assert!(stderr.is_empty(), "stderr: {stderr}");
-    let (stdout, _) = dsh_in(&home, &["profile", "list"]);
+    // Scenario creation bootstraps the surface bundles through the engine;
+    // a fake `dsh` keeps the test hermetic (no npm traffic) while recording
+    // the exact pnpm arguments.
+    let work = test_data_dir();
+    std::fs::create_dir_all(&work).unwrap();
+    let recorded = work.join("recorded-args");
+    let fake = work.join("fake-dsh");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::write(
+            &fake,
+            format!(
+                "#!/bin/sh\n[ \"$1\" = \"--version\" ] && exit 0\nprintf '%s\\n' \"$@\" > \"{}\"\nexit 0\n",
+                recorded.display()
+            ),
+        )
+        .unwrap();
+        let mut perms = std::fs::metadata(&fake).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&fake, perms).unwrap();
+    }
+
+    let run = |args: &[&str]| {
+        let dir = test_data_dir();
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_deepmate"))
+            .args(args)
+            .env("DEEPMATE_DATA_DIR", &dir)
+            .env("DSH_HOME", &home)
+            .env("DEEPMATE_DSH_BIN", &fake)
+            .output()
+            .expect("failed to run deepmate binary");
+        (
+            String::from_utf8_lossy(&output.stdout).into_owned(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        )
+    };
+
+    let (_, stderr) = run(&["profile", "create", "tui"]);
+    // DeepMate's own INFO tracing may land on stderr; only errors matter.
+    assert!(!stderr.to_lowercase().contains("error"), "stderr: {stderr}");
+    // The bootstrap forwarded the base + web-app bundles to the profile.
+    let recorded_args = std::fs::read_to_string(&recorded).unwrap();
+    let args: Vec<&str> = recorded_args.lines().collect();
+    assert_eq!(
+        args,
+        [
+            "plugin",
+            "--profile",
+            "tui",
+            "add",
+            "@deepseek-ai/dsh-base",
+            "@deepseek-ai/dsh-web-app"
+        ]
+    );
+    // The scenario got its own settings document redirection.
+    assert!(home.join("profiles/tui/cordis.patch.yml").is_file());
+
+    let (stdout, _) = run(&["profile", "list"]);
     assert!(stdout.contains("tui"), "stdout: {stdout}");
 
-    let (_, stderr) = dsh_in(&home, &["profile", "remove", "tui"]);
+    let (_, stderr) = run(&["profile", "remove", "tui"]);
     assert!(stderr.is_empty(), "stderr: {stderr}");
-    let (stdout, _) = dsh_in(&home, &["profile", "list"]);
+    let (stdout, _) = run(&["profile", "list"]);
     assert!(
         !stdout.contains("tui"),
         "profile should be removed: {stdout}"

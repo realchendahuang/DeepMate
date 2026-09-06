@@ -4,9 +4,11 @@
 
 import { create } from "zustand";
 import { toast } from "sonner";
+import i18n from "./i18n";
 import { api } from "./api";
 import { mapError } from "./lib/errors";
 import type {
+  DisabledPlugin,
   DoctorReport,
   MarketEntry,
   MarketSourceInfo,
@@ -17,6 +19,8 @@ import type {
   PluginOpKind,
   Profile,
   Provider,
+  RuntimeInstance,
+  Surface,
   UpdateInfo,
 } from "./api";
 
@@ -27,6 +31,7 @@ export type BusyAction =
   | "refresh"
   | "runtime"
   | "doctor"
+  | "doctor-fix"
   | "load"
   | "search"
   | "install"
@@ -48,6 +53,9 @@ const MUTATING: ReadonlySet<BusyAction> = new Set([
   "update-install",
   "config",
   "snapshot",
+  // A doctor fix mutates the profile (installs/removes/updates plugins or
+  // starts the runtime), so it must exclude other mutating operations.
+  "doctor-fix",
 ]);
 
 // A read-only operation never blocks anything; a mutating operation blocks
@@ -66,6 +74,14 @@ interface AppState {
   providers: Provider[];
   models: Model[];
   plugins: Plugin[];
+  // Every scenario's runtime state (per-scenario instances).
+  instances: RuntimeInstance[];
+  // The scenario the UI is currently focused on (drives the scenario home
+  // and its per-scene providers/models/plugins). Defaults to `web`.
+  selectedScenario: string;
+  // Plugins the user disabled: uninstalled but remembered, so the installed
+  // list can offer a one-click re-enable.
+  disabledPlugins: DisabledPlugin[];
   marketSources: MarketSourceInfo[];
   marketEntries: MarketEntry[];
   doctor: DoctorReport | null;
@@ -86,22 +102,33 @@ interface AppState {
   opActive: boolean;
 
   // Actions.
+  setSelectedScenario: (profile: string) => void;
   refreshAll: () => Promise<void>;
-  runtimeStart: () => Promise<void>;
-  runtimeStop: () => Promise<void>;
-  runtimeRestart: () => Promise<void>;
-  openHarness: () => Promise<void>;
+  runtimeStart: (profile: string) => Promise<void>;
+  runtimeStop: (profile: string) => Promise<void>;
+  runtimeRestart: (profile: string) => Promise<void>;
+  openHarness: (profile: string) => Promise<void>;
+  loadInstances: () => Promise<void>;
   runDoctor: () => Promise<void>;
+  fixDoctor: (checkId: string, mode: string) => Promise<void>;
   loadProfiles: () => Promise<void>;
-  loadProviders: () => Promise<void>;
-  loadModels: () => Promise<void>;
-  upsertProvider: (provider: Provider) => Promise<void>;
-  removeProvider: (id: string) => Promise<void>;
-  upsertModel: (provider: string, model: Model) => Promise<void>;
-  removeModel: (provider: string, id: string) => Promise<void>;
+  loadProviders: (profile: string) => Promise<void>;
+  loadModels: (profile: string) => Promise<void>;
+  upsertProvider: (profile: string, provider: Provider) => Promise<void>;
+  removeProvider: (profile: string, id: string) => Promise<void>;
+  upsertModel: (profile: string, provider: string, model: Model) => Promise<void>;
+  removeModel: (profile: string, provider: string, id: string) => Promise<void>;
   createProfile: (name: string) => Promise<void>;
+  createScenario: (name: string, surface: Surface) => Promise<void>;
   removeProfile: (name: string) => Promise<void>;
+  renameProfile: (old: string, newName: string) => Promise<void>;
   loadPlugins: () => Promise<void>;
+  loadDisabledPlugins: () => Promise<void>;
+  // Toggle a plugin: disabling uninstalls it (with its spec remembered for a
+  // later re-enable), enabling reinstalls the remembered spec.
+  setPluginEnabled: (profile: string, id: string, enabled: boolean) => Promise<void>;
+  // Forget a disabled-plugin record without reinstalling it.
+  forgetPlugin: (profile: string, id: string) => Promise<void>;
   loadMarketSources: () => Promise<void>;
   searchMarket: (query: string) => Promise<void>;
   installPlugin: (profile: string, spec: string) => Promise<void>;
@@ -129,6 +156,7 @@ interface AppState {
   // Hide the update banner until the next check finds a newer release.
   dismissUpdate: () => void;
   openRelease: (url: string) => Promise<void>;
+  openExternal: (url: string) => Promise<void>;
   configExport: () => Promise<void>;
   configImport: () => Promise<void>;
   loadPrefs: () => Promise<void>;
@@ -139,7 +167,8 @@ interface AppState {
 }
 
 // Wrap a command with busy/error handling. Failures surface as a toast with
-// a friendly message; the raw error is rethrown for callers that need it.
+// a friendly, localized message; the raw error is rethrown for callers that
+// need it.
 async function run<T>(
   set: (partial: Partial<AppState>) => void,
   action: BusyAction,
@@ -149,7 +178,7 @@ async function run<T>(
   try {
     return await fn();
   } catch (e) {
-    toast.error(mapError(e));
+    toast.error(i18n.t(`common.errors.${mapError(e)}`));
     throw e;
   } finally {
     set({ busyAction: null });
@@ -162,6 +191,9 @@ export const useStore = create<AppState>((set) => ({
   providers: [],
   models: [],
   plugins: [],
+  instances: [],
+  selectedScenario: "web",
+  disabledPlugins: [],
   marketSources: [],
   marketEntries: [],
   doctor: null,
@@ -178,69 +210,133 @@ export const useStore = create<AppState>((set) => ({
   opLog: [],
   opActive: false,
 
+  setSelectedScenario: (profile: string) => {
+    set({ selectedScenario: profile });
+  },
   refreshAll: async () => {
     const overview = await run(set, "refresh", () => api.refreshAll());
     set({ overview });
+    // Diagnostics is best-effort during every refresh (including after
+    // runtime start/stop) so the Overview health cards stay current; a failed
+    // probe keeps the previous report instead of surfacing a toast.
+    try {
+      set({ doctor: await api.runDoctor() });
+    } catch {
+      // keep the previous report
+    }
   },
-  runtimeStart: async () => {
-    await run(set, "runtime", () => api.runtimeStart());
-    await useStore.getState().refreshAll();
+  runtimeStart: async (profile: string) => {
+    await run(set, "runtime", () => api.runtimeStart(profile));
+    await Promise.all([useStore.getState().refreshAll(), useStore.getState().loadInstances()]);
   },
-  runtimeStop: async () => {
-    await run(set, "runtime", () => api.runtimeStop());
-    await useStore.getState().refreshAll();
+  runtimeStop: async (profile: string) => {
+    await run(set, "runtime", () => api.runtimeStop(profile));
+    await Promise.all([useStore.getState().refreshAll(), useStore.getState().loadInstances()]);
   },
-  runtimeRestart: async () => {
-    await run(set, "runtime", () => api.runtimeRestart());
-    await useStore.getState().refreshAll();
+  runtimeRestart: async (profile: string) => {
+    await run(set, "runtime", () => api.runtimeRestart(profile));
+    await Promise.all([useStore.getState().refreshAll(), useStore.getState().loadInstances()]);
   },
-  openHarness: async () => {
-    await run(set, "refresh", () => api.openHarness());
+  openHarness: async (profile: string) => {
+    await run(set, "refresh", () => api.openHarness(profile));
+  },
+  loadInstances: async () => {
+    const instances = await run(set, "load", () => api.runtimeList());
+    set({ instances });
   },
   runDoctor: async () => {
     const doctor = await run(set, "doctor", () => api.runDoctor());
     set({ doctor });
   },
+  // One-click repair for a failing doctor check: clear stale declarations,
+  // reinstall/update affected plugins, or start the console. The result is
+  // toasted and the report is re-run so the fixed check flips to green.
+  fixDoctor: async (checkId: string, mode: string) => {
+    const report = await run(set, "doctor-fix", () => api.doctorFix(checkId, mode));
+    const key =
+      mode === "clear"
+        ? "doctor.fixCleared"
+        : mode === "start"
+          ? "doctor.fixStarted"
+          : "doctor.fixReinstalled";
+    toast.success(i18n.t(key, { count: report.fixed }));
+    await useStore.getState().runDoctor();
+  },
   loadProfiles: async () => {
     const profiles = await run(set, "load", () => api.listProfiles());
     set({ profiles });
   },
-  loadProviders: async () => {
-    const providers = await run(set, "load", () => api.listProviders());
+  loadProviders: async (profile: string) => {
+    const providers = await run(set, "load", () => api.listProviders(profile));
     set({ providers });
   },
-  loadModels: async () => {
-    const models = await run(set, "load", () => api.listModels());
+  loadModels: async (profile: string) => {
+    const models = await run(set, "load", () => api.listModels(profile));
     set({ models });
   },
-  upsertProvider: async (provider: Provider) => {
-    await run(set, "save", () => api.upsertProvider(provider));
-    await useStore.getState().loadProviders();
+  upsertProvider: async (profile: string, provider: Provider) => {
+    await run(set, "save", () => api.upsertProvider(profile, provider));
+    await useStore.getState().loadProviders(profile);
   },
-  removeProvider: async (id: string) => {
-    await run(set, "remove", () => api.removeProvider(id));
-    await useStore.getState().loadProviders();
-    await useStore.getState().loadModels();
+  removeProvider: async (profile: string, id: string) => {
+    await run(set, "remove", () => api.removeProvider(profile, id));
+    await useStore.getState().loadProviders(profile);
+    await useStore.getState().loadModels(profile);
   },
-  upsertModel: async (provider: string, model: Model) => {
-    await run(set, "save", () => api.upsertModel(provider, model));
-    await useStore.getState().loadModels();
+  upsertModel: async (profile: string, provider: string, model: Model) => {
+    await run(set, "save", () => api.upsertModel(profile, provider, model));
+    await useStore.getState().loadModels(profile);
   },
-  removeModel: async (provider: string, id: string) => {
-    await run(set, "remove", () => api.removeModel(provider, id));
-    await useStore.getState().loadModels();
+  removeModel: async (profile: string, provider: string, id: string) => {
+    await run(set, "remove", () => api.removeModel(profile, provider, id));
+    await useStore.getState().loadModels(profile);
   },
   createProfile: async (name: string) => {
     await run(set, "save", () => api.createProfile(name));
     await useStore.getState().loadProfiles();
   },
+  // Create a scenario with its surface bundles bootstrapped (web-app or
+  // headless), so the new scenario is actually runnable.
+  createScenario: async (name: string, surface: Surface) => {
+    await run(set, "save", () => api.createScenario(name, surface));
+    await Promise.all([
+      useStore.getState().loadProfiles(),
+      useStore.getState().loadInstances(),
+    ]);
+  },
   removeProfile: async (name: string) => {
     await run(set, "remove", () => api.removeProfile(name));
+    await useStore.getState().loadProfiles();
+  },
+  renameProfile: async (old: string, newName: string) => {
+    await run(set, "save", () => api.renameProfile(old, newName));
     await useStore.getState().loadProfiles();
   },
   loadPlugins: async () => {
     const plugins = await run(set, "load", () => api.listPlugins());
     set({ plugins });
+  },
+  loadDisabledPlugins: async () => {
+    const disabledPlugins = await run(set, "load", () => api.listDisabledPlugins());
+    set({ disabledPlugins });
+  },
+  // Enabling installs a package (busy "install"); disabling removes one
+  // (busy "remove"). Both reload the plugin lists together, since a toggle
+  // moves a row between them.
+  setPluginEnabled: async (profile: string, id: string, enabled: boolean) => {
+    if (enabled) {
+      await run(set, "install", () => api.pluginEnable(profile, id));
+    } else {
+      await run(set, "remove", () => api.pluginDisable(profile, id));
+    }
+    await Promise.all([
+      useStore.getState().loadPlugins(),
+      useStore.getState().loadDisabledPlugins(),
+    ]);
+  },
+  forgetPlugin: async (profile: string, id: string) => {
+    await run(set, "remove", () => api.pluginForget(profile, id));
+    await useStore.getState().loadDisabledPlugins();
   },
   loadMarketSources: async () => {
     const marketSources = await run(set, "load", () => api.listMarketSources());
@@ -253,6 +349,8 @@ export const useStore = create<AppState>((set) => ({
   installPlugin: async (profile: string, spec: string) => {
     await run(set, "install", () => api.pluginInstall(profile, spec));
     await useStore.getState().loadPlugins();
+    // Installing a previously disabled plugin clears its registry record.
+    await useStore.getState().loadDisabledPlugins();
   },
   marketInstall: async (profile: string, spec: string) => {
     await run(set, "install", async () => {
@@ -263,6 +361,7 @@ export const useStore = create<AppState>((set) => ({
       return api.pluginInstall(profile, spec);
     });
     await useStore.getState().loadPlugins();
+    await useStore.getState().loadDisabledPlugins();
   },
   removePlugin: async (profile: string, id: string) => {
     await run(set, "remove", () => api.pluginRemove(profile, id));
@@ -279,8 +378,17 @@ export const useStore = create<AppState>((set) => ({
         set((state) => ({ opLog: [...state.opLog, event] }));
       });
       await useStore.getState().loadPlugins();
+      // An install may re-enable a previously disabled plugin.
+      await useStore.getState().loadDisabledPlugins();
+      const doneKeys = {
+        install: "plugins.op.installed",
+        remove: "plugins.op.removed",
+        update: "plugins.op.updated",
+        task: "settings.taskSuccess",
+      } as const;
+      toast.success(i18n.t(doneKeys[kind], { target }));
     } catch (e) {
-      toast.error(mapError(e));
+      toast.error(i18n.t(`common.errors.${mapError(e)}`));
       throw e;
     } finally {
       set({ opActive: false });
@@ -338,6 +446,10 @@ export const useStore = create<AppState>((set) => ({
     set({ updateInfo: null });
   },
   openRelease: async (url: string) => {
+    await run(set, "refresh", () => api.openUrl(url));
+  },
+  // Open an external URL (e.g. a plugin's repository) in the system browser.
+  openExternal: async (url: string) => {
     await run(set, "refresh", () => api.openUrl(url));
   },
   loadPrefs: async () => {

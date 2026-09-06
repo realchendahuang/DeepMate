@@ -1,6 +1,18 @@
-import { LayoutDashboard, Puzzle, Settings, type LucideIcon } from "lucide-react";
+import { Play, Cloud, Puzzle, type LucideIcon } from "lucide-react";
 
-export type View = "overview" | "plugins" | "settings";
+// The app is tenant-first: the outermost rail switches scenarios, the main
+// sidebar navigates *inside* the selected scenario (run / providers /
+// plugins), and the settings pages at the bottom are system-wide. Switching
+// a scenario keeps the current section — the sidebar follows the tenant.
+export type View =
+  | "scenarios"
+  | "run"
+  | "providers"
+  | "plugins"
+  | "diagnostics"
+  | "snapshots"
+  | "preferences"
+  | "about";
 
 export interface NavItemDef {
   view: View;
@@ -8,12 +20,12 @@ export interface NavItemDef {
   icon: LucideIcon;
 }
 
-// Primary workspace navigation; settings is pinned to the sidebar footer.
-export const NAV_MAIN: NavItemDef[] = [
-  { view: "overview", labelKey: "nav.overview", icon: LayoutDashboard },
+
+// The per-scenario sections, rendered under the current scenario's name.
+export const SCENARIO_SECTIONS: NavItemDef[] = [
+  { view: "run", labelKey: "nav.run", icon: Play },
+  { view: "providers", labelKey: "nav.providers", icon: Cloud },
   { view: "plugins", labelKey: "nav.plugins", icon: Puzzle },
 ];
-
-export const NAV_FOOTER: NavItemDef[] = [
-  { view: "settings", labelKey: "nav.settings", icon: Settings },
-];
+// System-wide pages live behind the rail's settings gear (bottom-left);
+// the main sidebar is exclusively the selected scenario's sections.

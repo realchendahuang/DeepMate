@@ -13,15 +13,26 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use deepmate_core::error::{CoreError, CoreResult};
-use deepmate_core::model::{Model, Plugin, Profile, Provider};
+use deepmate_core::model::{Model, Plugin, Profile, Provider, Surface};
 use serde_yml::{Mapping, Sequence, Value};
 
 const DSH_HOME_ENV: &str = "DSH_HOME";
 const DSH_HOME_DIR_NAME: &str = ".dsh";
 
+// The official in-box bundles a scenario's surface is mounted from. The
+// engine resolves these from the same installation as the running `dsh`, so
+// a surface is a declaration of one of these plus the base bundle, not a
+// separate concept of its own.
+pub const BASE_BUNDLE: &str = "@deepseek-ai/dsh-base";
+pub const WEB_APP_BUNDLE: &str = "@deepseek-ai/dsh-web-app";
+pub const HEADLESS_BUNDLE: &str = "@deepseek-ai/dsh-headless";
+
 // The `dsh.profile` section of a profile's package.json.
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 struct ProfileManifest {
+    // An optional user-facing description. A profile created by the launcher
+    // has none; DeepMate writes one when the user edits a scenario.
+    description: Option<String>,
     dependencies: Option<BTreeMap<String, String>>,
     dsh: Option<DshSection>,
 }
@@ -100,13 +111,16 @@ pub fn discover_profiles() -> CoreResult<Vec<Profile>> {
             continue;
         }
         // A corrupt manifest must not hide the profile; the description is
-        // best-effort while plugin listing below fails loudly.
+        // best-effort while plugin listing below fails loudly. A manifest
+        // `description` field wins; otherwise fall back to the bundle list.
         let description = read_manifest(&dir).ok().and_then(|manifest| {
-            manifest
-                .dsh
-                .and_then(|dsh| dsh.profile)
-                .and_then(|profile| profile.bundles)
-                .map(|bundles| format!("bundles: {}", bundles.join(", ")))
+            manifest.description.or_else(|| {
+                manifest
+                    .dsh
+                    .and_then(|dsh| dsh.profile)
+                    .and_then(|profile| profile.bundles)
+                    .map(|bundles| format!("bundles: {}", bundles.join(", ")))
+            })
         });
         profiles.push(Profile {
             id: name.clone(),
@@ -165,6 +179,9 @@ fn plugin_for(
         profile: profile_id.to_string(),
         latest: None,
         outdated: false,
+        // The trust tier is enriched from the curated market by the service
+        // layer; the raw file scan has no market knowledge.
+        trust: None,
     }
 }
 
@@ -180,20 +197,54 @@ pub fn list_plugins(profile_id: &str) -> CoreResult<Vec<Plugin>> {
     let shared = home.join("profiles").join("node_modules");
     let manifest = read_manifest(&dir)?;
     let mut plugins = Vec::new();
+    let dependencies = manifest.dependencies.unwrap_or_default();
     if let Some(bundles) = manifest
         .dsh
         .and_then(|dsh| dsh.profile)
         .and_then(|profile| profile.bundles)
     {
         for bundle in bundles {
-            plugins.push(plugin_for(&dir, &shared, profile_id, &bundle, None));
+            // A package can be both a bundle layer and an npm dependency;
+            // list it once, keeping the dependency's declared range as the
+            // version fallback.
+            let declared = dependencies.get(&bundle).cloned();
+            plugins.push(plugin_for(&dir, &shared, profile_id, &bundle, declared));
         }
     }
-    for (name, version) in manifest.dependencies.unwrap_or_default() {
-        plugins.push(plugin_for(&dir, &shared, profile_id, &name, Some(version)));
+    for (name, version) in &dependencies {
+        if plugins.iter().any(|plugin| &plugin.id == name) {
+            continue;
+        }
+        plugins.push(plugin_for(
+            &dir,
+            &shared,
+            profile_id,
+            name,
+            Some(version.clone()),
+        ));
     }
     plugins.sort_by(|a, b| a.id.cmp(&b.id));
     Ok(plugins)
+}
+
+// Derive a profile's run surface from its installed bundle set. The engine
+// has no surface field of its own — the web console comes from
+// `dsh-web-app`, one-shot tasks from `dsh-headless` — so the surface is
+// read off the installed, enabled bundles.
+pub fn profile_surface(profile_id: &str) -> CoreResult<Surface> {
+    let plugins = list_plugins(profile_id)?;
+    let any = |id: &str| {
+        plugins
+            .iter()
+            .any(|plugin| plugin.id == id && plugin.enabled)
+    };
+    if any(WEB_APP_BUNDLE) {
+        return Ok(Surface::Web);
+    }
+    if any(HEADLESS_BUNDLE) {
+        return Ok(Surface::Task);
+    }
+    Ok(Surface::Undetermined)
 }
 
 // List plugins across all profiles.
@@ -208,9 +259,301 @@ pub fn list_all_plugins() -> CoreResult<Vec<Plugin>> {
     Ok(plugins)
 }
 
+// The declared version range of a plugin in a profile's manifest
+// dependencies, when the manifest declares it. Used to capture a package
+// spec before disabling it, so enabling can restore the same range.
+pub fn declared_spec(profile_id: &str, id: &str) -> CoreResult<Option<String>> {
+    let Some(home) = dsh_home() else {
+        return Ok(None);
+    };
+    let dir = home.join("profiles").join(profile_id);
+    let manifest = read_manifest(&dir)?;
+    Ok(manifest
+        .dependencies
+        .and_then(|dependencies| dependencies.get(id).cloned()))
+}
+
+// True when a plugin is declared in a profile's `dsh.profile.bundles` list.
+// Bundle declarations are what the harness web UI actually loads at runtime,
+// independently of the declared dependencies.
+pub fn bundle_declared(profile_id: &str, id: &str) -> CoreResult<bool> {
+    let Some(home) = dsh_home() else {
+        return Ok(false);
+    };
+    let dir = home.join("profiles").join(profile_id);
+    let manifest = read_manifest(&dir)?;
+    Ok(manifest
+        .dsh
+        .and_then(|dsh| dsh.profile)
+        .and_then(|profile| profile.bundles)
+        .is_some_and(|bundles| bundles.iter().any(|bundle| bundle == id)))
+}
+
+// True when an installed package declares a web client bundle in its own
+// package.json (`dsh.client`). Server-side patch bundles (skills and tools
+// only, `dsh.bundle` without `dsh.client`) never get a
+// `/plugins/<id>/client.js` route, so the runtime load probe must not
+// expect one.
+pub fn declares_web_client(profile_id: &str, id: &str) -> CoreResult<bool> {
+    let Some(home) = dsh_home() else {
+        return Ok(false);
+    };
+    let path = home
+        .join("profiles")
+        .join(profile_id)
+        .join("node_modules")
+        .join(id)
+        .join("package.json");
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return Ok(false);
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return Ok(false);
+    };
+    let client = value.get("dsh").and_then(|dsh| dsh.get("client"));
+    Ok(client.is_some_and(|client| {
+        client
+            .get("platform")
+            .and_then(|platform| platform.as_str())
+            .is_none_or(|platform| platform == "web")
+    }))
+}
+
+// True when a package is physically installed in the profile's own
+// node_modules, as opposed to the launcher-maintained shared fallback.
+// Only profile-local packages get a `/plugins/<id>/client.js` loader entry
+// served by the harness web UI (verified against the real `dsh web`
+// server); shared-fallback bundles load through a different mechanism and
+// plain libraries have no client entry at all.
+pub fn installed_in_profile(profile_id: &str, id: &str) -> CoreResult<bool> {
+    let Some(home) = dsh_home() else {
+        return Ok(false);
+    };
+    let dir = home.join("profiles").join(profile_id);
+    Ok(dir.join("node_modules").join(id).is_dir())
+}
+
+// The backup file written before the profile manifest is edited, so a
+// destructive change can be rolled back. Mirrors the harness's own
+// `package.json.bak-*` habit and SettingsEditor's `.deepmate.bak`.
+const MANIFEST_BACKUP_SUFFIX: &str = ".deepmate.bak";
+
+// Strip a plugin from a profile's `dsh.profile.bundles` list, rewriting the
+// manifest in place while preserving every other field and key order.
+//
+// The harness's own `dsh plugin remove` drops the dependency but leaves the
+// bundle declaration behind; a leftover declaration makes the web UI fail
+// to load the plugin's client bundle on every boot. This is the compensating
+// cleanup, and it also serves as the removal path for bundle-only entries
+// that were never installed. Returns true when the entry existed and was
+// removed; false (no write) when the plugin was not declared.
+pub fn remove_bundle(profile_id: &str, id: &str) -> CoreResult<bool> {
+    let Some(home) = dsh_home() else {
+        return Ok(false);
+    };
+    let dir = home.join("profiles").join(profile_id);
+    let path = dir.join("package.json");
+    let text = std::fs::read_to_string(&path)?;
+    let mut doc: serde_json::Value = serde_json::from_str(&text).map_err(|err| {
+        CoreError::InvalidState(format!(
+            "invalid profile manifest {}: {err}",
+            path.display()
+        ))
+    })?;
+    let Some(profile) = doc.get_mut("dsh").and_then(|dsh| dsh.get_mut("profile")) else {
+        return Ok(false);
+    };
+    let Some(value) = profile.get_mut("bundles") else {
+        return Ok(false);
+    };
+    let Some(bundles) = value.as_array_mut() else {
+        return Err(CoreError::InvalidState(format!(
+            "`dsh.profile.bundles` is not a list in {}",
+            path.display()
+        )));
+    };
+    let before = bundles.len();
+    bundles.retain(|bundle| bundle.as_str() != Some(id));
+    if bundles.len() == before {
+        return Ok(false);
+    }
+    if path.is_file() {
+        let backup = PathBuf::from(format!("{}{}", path.display(), MANIFEST_BACKUP_SUFFIX));
+        let _ = std::fs::copy(&path, &backup);
+    }
+    let text = serde_json::to_string_pretty(&doc).map_err(|err| {
+        CoreError::InvalidState(format!("failed to serialize {}: {err}", path.display()))
+    })?;
+    std::fs::write(&path, text)?;
+    Ok(true)
+}
+
 // The single provider route the llm-deepseek plugin owns; the base bundle
 // composes it into every profile.
 const DEEPSEEK_PROVIDER: &str = "deepseek-official";
+
+// True when an installed package declares a bundle patch
+// (`"dsh": { "bundle": { "patch": ... } }`) in its own manifest — the exact
+// standard the engine's own bundle reconciliation uses when deciding whether
+// a dependency joins the profile's bundle layer stack. Client-only packages
+// (`dsh.client` without a patch) are not bundles by that standard, so they
+// are intentionally not declared here. Both install locations are
+// considered, mirroring `module_dir`.
+pub fn declares_dsh_capability(profile_id: &str, id: &str) -> CoreResult<bool> {
+    let Some(home) = dsh_home() else {
+        return Ok(false);
+    };
+    let dir = home.join("profiles").join(profile_id);
+    let shared = home.join("profiles").join("node_modules");
+    let Some(pkg) = module_dir(&dir, &shared, id) else {
+        return Ok(false);
+    };
+    let Ok(text) = std::fs::read_to_string(pkg.join("package.json")) else {
+        return Ok(false);
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return Ok(false);
+    };
+    Ok(value
+        .get("dsh")
+        .and_then(|dsh| dsh.get("bundle"))
+        .and_then(|bundle| bundle.get("patch"))
+        .and_then(|patch| patch.as_str())
+        .is_some_and(|patch| !patch.is_empty()))
+}
+
+// Add a plugin to a profile's `dsh.profile.bundles` list, rewriting the
+// manifest in place while preserving every other field and key order.
+//
+// Current engines reconcile `dsh.profile.bundles` themselves after every
+// successful `dsh plugin` run, so this is normally a no-op there; on older
+// engines (or for leftovers from manual pnpm runs) the declaration would
+// stay missing and the harness web UI would never load the plugin at
+// runtime. This is the compensating write, the mirror image of
+// `remove_bundle`. Only real bundles (declaring a bundle patch) are declared
+// here; plain libraries and client-only packages are left alone. Idempotent:
+// returns true when the entry was added, false when it was already declared
+// (no write).
+pub fn add_bundle(profile_id: &str, id: &str) -> CoreResult<bool> {
+    let Some(home) = dsh_home() else {
+        return Ok(false);
+    };
+    let dir = home.join("profiles").join(profile_id);
+    let path = dir.join("package.json");
+    let text = std::fs::read_to_string(&path)?;
+    let mut doc: serde_json::Value = serde_json::from_str(&text).map_err(|err| {
+        CoreError::InvalidState(format!(
+            "invalid profile manifest {}: {err}",
+            path.display()
+        ))
+    })?;
+    // `dsh.profile.bundles`, created on demand so a freshly scaffolded
+    // profile (which has `"dsh": { "profile": {} }`) gains the section.
+    let root = doc.as_object_mut().ok_or_else(|| {
+        CoreError::InvalidState(format!(
+            "manifest root is not a mapping in {}",
+            path.display()
+        ))
+    })?;
+    let dsh = root.entry("dsh").or_insert_with(|| serde_json::json!({}));
+    let dsh = dsh.as_object_mut().ok_or_else(|| {
+        CoreError::InvalidState(format!("`dsh` is not a mapping in {}", path.display()))
+    })?;
+    let profile = dsh
+        .entry("profile")
+        .or_insert_with(|| serde_json::json!({}));
+    let profile = profile.as_object_mut().ok_or_else(|| {
+        CoreError::InvalidState(format!(
+            "`dsh.profile` is not a mapping in {}",
+            path.display()
+        ))
+    })?;
+    let bundles = profile
+        .entry("bundles")
+        .or_insert_with(|| serde_json::json!([]));
+    let bundles = bundles.as_array_mut().ok_or_else(|| {
+        CoreError::InvalidState(format!(
+            "`dsh.profile.bundles` is not a list in {}",
+            path.display()
+        ))
+    })?;
+    if bundles.iter().any(|bundle| bundle.as_str() == Some(id)) {
+        return Ok(false);
+    }
+    bundles.push(serde_json::Value::from(id));
+    if path.is_file() {
+        let backup = PathBuf::from(format!("{}{}", path.display(), MANIFEST_BACKUP_SUFFIX));
+        let _ = std::fs::copy(&path, &backup);
+    }
+    let text = serde_json::to_string_pretty(&doc).map_err(|err| {
+        CoreError::InvalidState(format!("failed to serialize {}: {err}", path.display()))
+    })?;
+    std::fs::write(&path, text)?;
+    Ok(true)
+}
+
+// Rename a profile: move its directory and update the manifest `name` field.
+//
+// The harness has no rename contract, so this is a DeepMate-side move of the
+// whole directory; dependencies, bundles and node_modules move with it.
+// DeepMate-owned references to the old name (e.g. the disabled-plugin
+// registry) are the caller's responsibility.
+pub fn rename_profile(old: &str, new: &str) -> CoreResult<()> {
+    if old.is_empty() || new.is_empty() {
+        return Err(CoreError::InvalidState(
+            "profile name must not be empty".to_string(),
+        ));
+    }
+    for name in [old, new] {
+        if name == "node_modules" || name.contains('/') || name.contains('\\') {
+            return Err(CoreError::InvalidState(format!(
+                "invalid profile name: {name:?}"
+            )));
+        }
+    }
+    if old == new {
+        return Err(CoreError::InvalidState(
+            "the new profile name must differ from the old one".to_string(),
+        ));
+    }
+    let Some(home) = dsh_home() else {
+        return Err(CoreError::InvalidState(
+            "could not resolve the harness home directory".to_string(),
+        ));
+    };
+    let old_dir = home.join("profiles").join(old);
+    let new_dir = home.join("profiles").join(new);
+    if !old_dir.join("package.json").is_file() {
+        return Err(CoreError::InvalidState(format!("profile not found: {old}")));
+    }
+    if new_dir.join("package.json").is_file() {
+        return Err(CoreError::InvalidState(format!(
+            "profile already exists: {new}"
+        )));
+    }
+    // Rewrite the manifest `name` while the file still lives in the old
+    // directory, with the usual backup habit.
+    let manifest = old_dir.join("package.json");
+    let text = std::fs::read_to_string(&manifest)?;
+    let mut doc: serde_json::Value = serde_json::from_str(&text).map_err(|err| {
+        CoreError::InvalidState(format!(
+            "invalid profile manifest {}: {err}",
+            manifest.display()
+        ))
+    })?;
+    if let Some(name) = doc.get_mut("name") {
+        *name = serde_json::Value::from(format!("dsh-profile-{new}"));
+    }
+    let backup = PathBuf::from(format!("{}{}", manifest.display(), MANIFEST_BACKUP_SUFFIX));
+    let _ = std::fs::copy(&manifest, &backup);
+    let text = serde_json::to_string_pretty(&doc).map_err(|err| {
+        CoreError::InvalidState(format!("failed to serialize {}: {err}", manifest.display()))
+    })?;
+    std::fs::write(&manifest, text)?;
+    std::fs::rename(&old_dir, &new_dir).map_err(|err| {
+        CoreError::InvalidState(format!("failed to rename profile {old} to {new}: {err}"))
+    })
+}
 
 // The advisory catalog the llm-deepseek plugin ships when the settings
 // section does not override `models`.
@@ -272,12 +615,139 @@ struct PiAiProviderProfile {
     models: Option<Vec<CatalogModel>>,
 }
 
-fn settings_path() -> Option<PathBuf> {
-    dsh_home().map(|home| home.join("settings.yaml"))
+// The redirection block appended to a profile's cordis.patch.yml: the
+// `settings` row of the settings-file plugin points at a per-scenario
+// document the harness resolves at boot (`dshHomePath` is the expression the
+// base bundle already uses). Home-level cordis.patch.yml must never touch
+// the `settings` row — a later layer replaces the whole row config.
+const SCENE_SETTINGS_FILE: &str = "settings.yaml";
+const SCENE_SETTINGS_PATCH: &str = "- id: settings
+  name: '@deepseek-ai/dsh-settings-file'
+  config:
+    path: !!js dshHomePath('profiles/__SCENE__/settings.yaml')
+";
+
+// The per-scenario settings document, when the profile's cordis.patch.yml
+// redirects the `settings` row to one. The harness resolves
+// `!!js dshHomePath('profiles/<scene>/settings.yaml')` at boot; the custom
+// tag defeats serde_yml, so the expression is extracted textually. A plain
+// literal `path:` is parsed structurally as a fallback.
+fn scene_settings_path(profile_id: &str) -> CoreResult<Option<PathBuf>> {
+    let Some(home) = dsh_home() else {
+        return Ok(None);
+    };
+    let dir = home.join("profiles").join(profile_id);
+    let Ok(text) = std::fs::read_to_string(dir.join("cordis.patch.yml")) else {
+        return Ok(None);
+    };
+    const MARKER: &str = "dshHomePath('";
+    if let Some(start) = text.find(MARKER) {
+        let rest = &text[start + MARKER.len()..];
+        if let Some(end) = rest.find("')") {
+            let rel = &rest[..end];
+            if !rel.is_empty() {
+                return Ok(Some(home.join(rel)));
+            }
+        }
+    }
+    if let Ok(patch) = serde_yml::from_str::<Value>(&text) {
+        if let Some(rows) = patch.as_sequence() {
+            for row in rows {
+                if row.get("id").and_then(|v| v.as_str()) == Some("settings") {
+                    if let Some(path) = row
+                        .get("config")
+                        .and_then(|config| config.get("path"))
+                        .and_then(|path| path.as_str())
+                    {
+                        let resolved = if Path::new(path).is_absolute() {
+                            PathBuf::from(path)
+                        } else {
+                            home.join(path)
+                        };
+                        return Ok(Some(resolved));
+                    }
+                }
+            }
+        }
+    }
+    Ok(None)
 }
 
-fn read_settings() -> CoreResult<SettingsDocument> {
-    let Some(path) = settings_path() else {
+// Bootstrap a scenario's isolated settings document: append the settings-row
+// redirection to the profile's cordis.patch.yml (when not already present)
+// and make the per-scenario file exist. Any LLM configuration from the
+// legacy global document is carried over once, so an upgrade never loses
+// existing routes or models. The running scenario must be restarted for the
+// redirection to take effect (its settings-file provider pins the path at
+// boot).
+pub fn ensure_scene_settings(profile_id: &str) -> CoreResult<()> {
+    let Some(home) = dsh_home() else {
+        return Ok(());
+    };
+    let dir = home.join("profiles").join(profile_id);
+    let patch = dir.join("cordis.patch.yml");
+    let scene = dir.join(SCENE_SETTINGS_FILE);
+    if scene_settings_path(profile_id)?.is_none() {
+        let text: String = std::fs::read_to_string(&patch).unwrap_or_default();
+        if !text.contains("id: settings") {
+            let mut out = text;
+            if !out.is_empty() && !out.ends_with('\n') {
+                out.push('\n');
+            }
+            out.push_str(&SCENE_SETTINGS_PATCH.replace("__SCENE__", profile_id));
+            if patch.is_file() {
+                let backup =
+                    PathBuf::from(format!("{}{}", patch.display(), MANIFEST_BACKUP_SUFFIX));
+                let _ = std::fs::copy(&patch, &backup);
+            }
+            if let Some(parent) = patch.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&patch, out)?;
+        }
+    }
+    if !scene.is_file() {
+        // Carry the legacy global document's LLM sections over once.
+        let global = home.join("settings.yaml");
+        if let Ok(text) = std::fs::read_to_string(&global) {
+            if let Ok(doc) = serde_yml::from_str::<Value>(&text) {
+                if let Some(map) = doc.as_mapping() {
+                    let mut carry = Mapping::new();
+                    for key in ["llm-deepseek", "llm-pi-ai", "agent-default-model"] {
+                        if let Some(value) = map.get(key) {
+                            carry.insert(key.to_string(), value.clone());
+                        }
+                    }
+                    if !carry.is_empty() {
+                        let out = serde_yml::to_string(&Value::Mapping(carry)).map_err(|err| {
+                            CoreError::InvalidState(format!(
+                                "failed to serialize migrated settings: {err}"
+                            ))
+                        })?;
+                        if let Some(parent) = scene.parent() {
+                            std::fs::create_dir_all(parent)?;
+                        }
+                        std::fs::write(&scene, out)?;
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+// The settings document a profile reads and writes: the per-scenario
+// document when the profile redirects it, the legacy global `settings.yaml`
+// otherwise.
+fn settings_path(profile_id: &str) -> CoreResult<Option<PathBuf>> {
+    Ok(match scene_settings_path(profile_id)? {
+        Some(path) => Some(path),
+        None => dsh_home().map(|home| home.join("settings.yaml")),
+    })
+}
+
+fn read_settings(profile_id: &str) -> CoreResult<SettingsDocument> {
+    let Some(path) = settings_path(profile_id)? else {
         return Ok(SettingsDocument::default());
     };
     let text = match std::fs::read_to_string(&path) {
@@ -287,6 +757,9 @@ fn read_settings() -> CoreResult<SettingsDocument> {
         }
         Err(err) => return Err(err.into()),
     };
+    if text.trim().is_empty() {
+        return Ok(SettingsDocument::default());
+    }
     serde_yml::from_str(&text).map_err(|err| {
         CoreError::InvalidState(format!("invalid settings {}: {err}", path.display()))
     })
@@ -315,10 +788,11 @@ fn yaml_to_json(value: &Value) -> Option<String> {
     }
 }
 
-// List providers: the always-composed deepseek route plus every pi-ai
-// provider profile supplied by the settings document.
-pub fn list_providers() -> CoreResult<Vec<Provider>> {
-    let settings = read_settings()?;
+// List the providers of one scenario: the always-composed deepseek route
+// plus every pi-ai provider profile supplied by the scenario's settings
+// document.
+pub fn list_providers(profile_id: &str) -> CoreResult<Vec<Provider>> {
+    let settings = read_settings(profile_id)?;
     let mut providers = vec![Provider {
         id: DEEPSEEK_PROVIDER.to_string(),
         name: "DeepSeek".to_string(),
@@ -356,10 +830,11 @@ pub fn list_providers() -> CoreResult<Vec<Provider>> {
     Ok(providers)
 }
 
-// List models: the deepseek catalog (settings override or shipped defaults)
-// plus every model of every pi-ai provider profile.
-pub fn list_models() -> CoreResult<Vec<Model>> {
-    let settings = read_settings()?;
+// List the models of one scenario: the deepseek catalog (settings override
+// or shipped defaults) plus every model of every pi-ai provider profile in
+// the scenario's settings document.
+pub fn list_models(profile_id: &str) -> CoreResult<Vec<Model>> {
+    let settings = read_settings(profile_id)?;
     let mut models = Vec::new();
     match settings
         .llm_deepseek
@@ -417,10 +892,10 @@ const SETTINGS_BACKUP_SUFFIX: &str = ".deepmate.bak";
 pub struct SettingsEditor;
 
 impl SettingsEditor {
-    // Load the settings document as a mutable value tree. A missing file
-    // yields an empty document that will be created on first save.
-    fn load() -> CoreResult<Value> {
-        let Some(path) = settings_path() else {
+    // Load a scenario's settings document as a mutable value tree. A missing
+    // file yields an empty document that will be created on first save.
+    fn load(profile_id: &str) -> CoreResult<Value> {
+        let Some(path) = settings_path(profile_id)? else {
             return Ok(Value::Mapping(Mapping::new()));
         };
         let text = match std::fs::read_to_string(&path) {
@@ -430,16 +905,20 @@ impl SettingsEditor {
             }
             Err(err) => return Err(err.into()),
         };
+        if text.trim().is_empty() {
+            return Ok(Value::Mapping(Mapping::new()));
+        }
         serde_yml::from_str::<Value>(&text).map_err(|err| {
             CoreError::InvalidState(format!("invalid settings {}: {err}", path.display()))
         })
     }
 
-    // Write the document back, backing up the previous file first. Creating
-    // parent directories and the backup are both best-effort; a read-only
-    // home must not silently claim success, so the write itself is checked.
-    fn save(doc: &Value) -> CoreResult<()> {
-        let Some(path) = settings_path() else {
+    // Write a scenario's settings document back, backing up the previous
+    // file first. Creating parent directories and the backup are both
+    // best-effort; a read-only home must not silently claim success, so the
+    // write itself is checked.
+    fn save(profile_id: &str, doc: &Value) -> CoreResult<()> {
+        let Some(path) = settings_path(profile_id)? else {
             return Ok(());
         };
         if let Some(parent) = path.parent() {
@@ -456,11 +935,14 @@ impl SettingsEditor {
         Ok(())
     }
 
-    // Run a mutation against the settings document and persist the result.
-    fn mutate(mutate: impl FnOnce(&mut Value) -> CoreResult<()>) -> CoreResult<()> {
-        let mut doc = Self::load()?;
+    // Run a mutation against a scenario's settings document and persist it.
+    fn mutate(
+        profile_id: &str,
+        mutate: impl FnOnce(&mut Value) -> CoreResult<()>,
+    ) -> CoreResult<()> {
+        let mut doc = Self::load(profile_id)?;
         mutate(&mut doc)?;
-        Self::save(&doc)
+        Self::save(profile_id, &doc)
     }
 
     // The `llm-pi-ai.providers` mapping, created on demand.
@@ -499,9 +981,9 @@ impl SettingsEditor {
     // `llm-deepseek` section (base URL, key env and models), while every other
     // route lives under `llm-pi-ai.providers`. `kind` is not persisted — it
     // only distinguishes the deepseek route from pi-ai routes for display.
-    pub fn upsert_provider(provider: &Provider) -> CoreResult<()> {
+    pub fn upsert_provider(profile_id: &str, provider: &Provider) -> CoreResult<()> {
         let provider = provider.clone();
-        Self::mutate(move |doc| {
+        Self::mutate(profile_id, move |doc| {
             if provider.id == DEEPSEEK_PROVIDER {
                 let section = Self::deepseek_map(doc)?;
                 if let Some(base_url) = &provider.base_url {
@@ -541,14 +1023,14 @@ impl SettingsEditor {
     // Remove a provider route. The `deepseek-official` route cannot be removed
     // (it is composed into every profile by the base bundle); removing it is a
     // no-op that reports the attempt is unsupported.
-    pub fn remove_provider(id: &str) -> CoreResult<()> {
+    pub fn remove_provider(profile_id: &str, id: &str) -> CoreResult<()> {
         if id == DEEPSEEK_PROVIDER {
             return Err(CoreError::Unsupported(
                 "the deepseek-official route is composed into every profile and cannot be removed"
                     .to_string(),
             ));
         }
-        Self::mutate(|doc| {
+        Self::mutate(profile_id, |doc| {
             Self::providers_map(doc)?.remove(id);
             Ok(())
         })
@@ -557,9 +1039,9 @@ impl SettingsEditor {
     // Create or update a model within a provider route's catalog. The route is
     // looked up the same way providers are, so `deepseek-official` targets the
     // `llm-deepseek.models` list and other routes target `llm-pi-ai.providers`.
-    pub fn upsert_model(provider_id: &str, model: &Model) -> CoreResult<()> {
+    pub fn upsert_model(profile_id: &str, provider_id: &str, model: &Model) -> CoreResult<()> {
         let model = model.clone();
-        Self::mutate(move |doc| {
+        Self::mutate(profile_id, move |doc| {
             let catalog = if provider_id == DEEPSEEK_PROVIDER {
                 Self::deepseek_map(doc)?.get_mut("models")
             } else {
@@ -603,10 +1085,10 @@ impl SettingsEditor {
     }
 
     // Remove a model from a provider route's catalog by id.
-    pub fn remove_model(provider_id: &str, id: &str) -> CoreResult<()> {
+    pub fn remove_model(profile_id: &str, provider_id: &str, id: &str) -> CoreResult<()> {
         let provider_id = provider_id.to_string();
         let id = id.to_string();
-        Self::mutate(move |doc| {
+        Self::mutate(profile_id, move |doc| {
             let catalog = if provider_id == DEEPSEEK_PROVIDER {
                 Self::deepseek_map(doc)?.get_mut("models")
             } else {
@@ -865,6 +1347,32 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn list_plugins_deduplicates_bundle_and_dependency_entries() {
+        // The real web profile declares the same package both as a bundle
+        // layer and as an npm dependency; the plugin must be listed once,
+        // keeping the dependency's range as the version fallback.
+        let _guard = ENV_LOCK.lock().unwrap();
+        let previous = std::env::var_os(DSH_HOME_ENV);
+        let home = fixture_home();
+        write_profile(
+            &home,
+            "web",
+            &[("dsh-context", "^0.19.2"), ("@liustack/modlens", "^3.23.1")],
+            &["dsh-context", "@liustack/modlens", "@deepseek-ai/dsh-base"],
+        );
+        std::env::set_var(DSH_HOME_ENV, &home);
+        let plugins = list_plugins("web").unwrap();
+        let ids: Vec<&str> = plugins.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            ["@deepseek-ai/dsh-base", "@liustack/modlens", "dsh-context"]
+        );
+        let context = plugins.iter().find(|p| p.id == "dsh-context").unwrap();
+        assert_eq!(context.version.as_deref(), Some("^0.19.2"));
+        restore_env(DSH_HOME_ENV, previous);
+    }
+
+    #[test]
     fn plugins_resolve_from_launcher_shared_fallback() {
         let _guard = ENV_LOCK.lock().unwrap();
         let previous = std::env::var_os(DSH_HOME_ENV);
@@ -886,6 +1394,364 @@ pub(crate) mod tests {
         assert_eq!(plugins[0].id, "@deepseek-ai/dsh-base");
         assert!(plugins[0].enabled);
         assert_eq!(plugins[0].version.as_deref(), Some("0.3.1"));
+        restore_env(DSH_HOME_ENV, previous);
+    }
+
+    #[test]
+    fn remove_bundle_strips_entry_and_preserves_manifest() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let previous = std::env::var_os(DSH_HOME_ENV);
+        let home = fixture_home();
+        write_profile(
+            &home,
+            "web",
+            &[("turtle-ui", "^1.0.0")],
+            &["@deepseek-ai/dsh-base", "turtle-ui"],
+        );
+        std::env::set_var(DSH_HOME_ENV, &home);
+
+        assert!(bundle_declared("web", "turtle-ui").unwrap());
+        assert!(remove_bundle("web", "turtle-ui").unwrap());
+        // A second strip finds nothing and does not rewrite.
+        assert!(!remove_bundle("web", "turtle-ui").unwrap());
+        assert!(!bundle_declared("web", "turtle-ui").unwrap());
+        assert!(bundle_declared("web", "@deepseek-ai/dsh-base").unwrap());
+
+        // The declared dependency survives the rewrite untouched.
+        let plugins = list_plugins("web").unwrap();
+        assert_eq!(plugins.len(), 2);
+        assert!(plugins.iter().any(|p| p.id == "turtle-ui"));
+        assert!(!plugins.iter().any(|p| p.id == "turtle-ui" && p.enabled));
+
+        // And the backup was written before the edit.
+        assert!(home
+            .join("profiles/web/package.json.deepmate.bak")
+            .is_file());
+
+        restore_env(DSH_HOME_ENV, previous);
+    }
+
+    #[test]
+    fn remove_bundle_noops_without_bundle_declaration() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let previous = std::env::var_os(DSH_HOME_ENV);
+        let home = fixture_home();
+        write_profile(&home, "web", &[("plain-lib", "1.0.0")], &[]);
+        std::env::set_var(DSH_HOME_ENV, &home);
+
+        assert!(!bundle_declared("web", "plain-lib").unwrap());
+        assert!(!remove_bundle("web", "plain-lib").unwrap());
+        // A dep-only removal must not destroy the manifest.
+        let plugins = list_plugins("web").unwrap();
+        assert!(plugins.iter().any(|p| p.id == "plain-lib"));
+
+        restore_env(DSH_HOME_ENV, previous);
+    }
+
+    #[test]
+    fn remove_bundle_errors_on_missing_profile() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let previous = std::env::var_os(DSH_HOME_ENV);
+        let home = fixture_home();
+        std::env::set_var(DSH_HOME_ENV, &home);
+        // A missing profile has no manifest to rewrite; the caller must see
+        // the error rather than silently succeed.
+        assert!(remove_bundle("missing", "pkg").is_err());
+        restore_env(DSH_HOME_ENV, previous);
+    }
+
+    #[test]
+    fn add_bundle_appends_and_is_idempotent() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let previous = std::env::var_os(DSH_HOME_ENV);
+        let home = fixture_home();
+        // A profile whose bundle list does not yet contain the plugin.
+        write_profile(
+            &home,
+            "web",
+            &[("turtle-ui", "^1.0.0")],
+            &["@deepseek-ai/dsh-base"],
+        );
+        std::env::set_var(DSH_HOME_ENV, &home);
+
+        assert!(add_bundle("web", "turtle-ui").unwrap());
+        assert!(bundle_declared("web", "turtle-ui").unwrap());
+        // A second add finds it already declared and does not rewrite.
+        assert!(!add_bundle("web", "turtle-ui").unwrap());
+        assert!(bundle_declared("web", "@deepseek-ai/dsh-base").unwrap());
+        // The dependency and other bundles survive untouched.
+        let plugins = list_plugins("web").unwrap();
+        assert!(plugins.iter().any(|p| p.id == "turtle-ui"));
+        assert!(home
+            .join("profiles/web/package.json.deepmate.bak")
+            .is_file());
+
+        restore_env(DSH_HOME_ENV, previous);
+    }
+
+    #[test]
+    fn add_bundle_creates_the_bundle_section_on_demand() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let previous = std::env::var_os(DSH_HOME_ENV);
+        let home = fixture_home();
+        // A freshly scaffolded profile has `"dsh": { "profile": {} }` with no
+        // bundles list yet.
+        let dir = home.join("profiles/daily");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("package.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "name": "dsh-profile-daily",
+                "private": true,
+                "dependencies": { "turtle-ui": "^1.0.0" },
+                "dsh": { "profile": {} },
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        std::env::set_var(DSH_HOME_ENV, &home);
+
+        assert!(add_bundle("daily", "turtle-ui").unwrap());
+        assert!(bundle_declared("daily", "turtle-ui").unwrap());
+
+        restore_env(DSH_HOME_ENV, previous);
+    }
+
+    #[test]
+    fn declares_dsh_capability_reads_the_installed_manifest() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let previous = std::env::var_os(DSH_HOME_ENV);
+        let home = fixture_home();
+        write_profile(
+            &home,
+            "web",
+            &[("dsh-hook", "^1.0.0"), ("plain-lib", "2.0.0")],
+            &[],
+        );
+        // dsh-hook is a real bundle (dsh.bundle.patch), plain-lib is not a
+        // plugin at all, and a client-only package is not a bundle either.
+        let dsh_dir = home.join("profiles/web/node_modules/dsh-hook");
+        std::fs::create_dir_all(&dsh_dir).unwrap();
+        std::fs::write(
+            dsh_dir.join("package.json"),
+            r#"{ "name": "dsh-hook", "version": "1.0.0", "dsh": { "bundle": { "patch": "./cordis.patch.yml" } } }"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(home.join("profiles/web/node_modules/plain-lib")).unwrap();
+        std::fs::write(
+            home.join("profiles/web/node_modules/plain-lib/package.json"),
+            r#"{ "name": "plain-lib", "version": "2.0.0" }"#,
+        )
+        .unwrap();
+        let client_dir = home.join("profiles/web/node_modules/client-only");
+        std::fs::create_dir_all(&client_dir).unwrap();
+        std::fs::write(
+            client_dir.join("package.json"),
+            r#"{ "name": "client-only", "version": "1.0.0", "dsh": { "client": { "platform": "web" } } }"#,
+        )
+        .unwrap();
+        std::env::set_var(DSH_HOME_ENV, &home);
+
+        assert!(declares_dsh_capability("web", "dsh-hook").unwrap());
+        assert!(!declares_dsh_capability("web", "plain-lib").unwrap());
+        assert!(
+            !declares_dsh_capability("web", "client-only").unwrap(),
+            "client-only packages are not bundles by the engine's standard"
+        );
+        // Nothing installed: not a plugin by any measure.
+        assert!(!declares_dsh_capability("web", "absent").unwrap());
+
+        restore_env(DSH_HOME_ENV, previous);
+    }
+
+    #[test]
+    fn rename_profile_moves_directory_and_updates_the_manifest_name() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let previous = std::env::var_os(DSH_HOME_ENV);
+        let home = fixture_home();
+        write_profile(
+            &home,
+            "daily",
+            &[("turtle-ui", "^1.0.0")],
+            &["@deepseek-ai/dsh-base"],
+        );
+        std::env::set_var(DSH_HOME_ENV, &home);
+
+        rename_profile("daily", "dev").unwrap();
+        assert!(!home.join("profiles/daily/package.json").is_file());
+        assert!(home.join("profiles/dev/package.json").is_file());
+        // Dependencies and bundles moved with the directory.
+        let plugins = list_plugins("dev").unwrap();
+        assert_eq!(plugins.len(), 2);
+        let manifest: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(home.join("profiles/dev/package.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(manifest["name"], "dsh-profile-dev");
+        // The manifest backup was written before the rewrite.
+        assert!(home
+            .join("profiles/dev/package.json.deepmate.bak")
+            .is_file());
+
+        restore_env(DSH_HOME_ENV, previous);
+    }
+
+    #[test]
+    fn rename_profile_validates_names_and_collisions() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let previous = std::env::var_os(DSH_HOME_ENV);
+        let home = fixture_home();
+        write_profile(&home, "daily", &[], &[]);
+        write_profile(&home, "dev", &[], &[]);
+        std::env::set_var(DSH_HOME_ENV, &home);
+
+        assert!(rename_profile("", "x").is_err());
+        assert!(rename_profile("x", "").is_err());
+        assert!(rename_profile("node_modules", "x").is_err());
+        assert!(rename_profile("a/b", "x").is_err());
+        assert!(rename_profile("daily", "daily").is_err());
+        assert!(rename_profile("missing", "x").is_err());
+        assert!(rename_profile("daily", "dev").is_err());
+        // None of the failed attempts moved anything.
+        assert!(home.join("profiles/daily/package.json").is_file());
+        assert!(home.join("profiles/dev/package.json").is_file());
+
+        restore_env(DSH_HOME_ENV, previous);
+    }
+
+    #[test]
+    fn discover_profiles_prefers_the_manifest_description() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let previous = std::env::var_os(DSH_HOME_ENV);
+        let home = fixture_home();
+        let dir = home.join("profiles/daily");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("package.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "name": "dsh-profile-daily",
+                "private": true,
+                "description": "日常打字",
+                "dependencies": {},
+                "dsh": { "profile": { "bundles": ["@deepseek-ai/dsh-base"] } },
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        std::env::set_var(DSH_HOME_ENV, &home);
+
+        let profiles = discover_profiles().unwrap();
+        assert_eq!(profiles[0].name, "daily");
+        assert_eq!(profiles[0].description.as_deref(), Some("日常打字"));
+
+        restore_env(DSH_HOME_ENV, previous);
+    }
+
+    #[test]
+    fn ensure_scene_settings_redirects_and_migrates_once() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let previous = std::env::var_os(DSH_HOME_ENV);
+        let home = fixture_home();
+        // A legacy global document carries the existing LLM route.
+        std::fs::create_dir_all(home.join("profiles/web")).unwrap();
+        std::fs::write(
+            home.join("settings.yaml"),
+            "llm-pi-ai:\n  providers:\n    my-provider:\n      baseURL: https://global/v1\n",
+        )
+        .unwrap();
+        std::env::set_var(DSH_HOME_ENV, &home);
+
+        ensure_scene_settings("web").unwrap();
+        // The redirection points at the scenario's own document.
+        let scene = scene_settings_path("web").unwrap().unwrap();
+        assert_eq!(scene, home.join("profiles/web/settings.yaml"));
+        // The legacy LLM section was carried over exactly once.
+        assert!(scene.is_file());
+        let migrated = std::fs::read_to_string(&scene).unwrap();
+        assert!(migrated.contains("my-provider"), "{migrated}");
+        // The global document is untouched.
+        let global = std::fs::read_to_string(home.join("settings.yaml")).unwrap();
+        assert!(global.contains("llm-pi-ai"));
+
+        // A second bootstrap does not duplicate the redirection row.
+        ensure_scene_settings("web").unwrap();
+        let patch = std::fs::read_to_string(home.join("profiles/web/cordis.patch.yml")).unwrap();
+        assert_eq!(patch.matches("id: settings").count(), 1, "{patch}");
+
+        restore_env(DSH_HOME_ENV, previous);
+    }
+
+    #[test]
+    fn scene_settings_isolate_providers_and_models() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let previous = std::env::var_os(DSH_HOME_ENV);
+        let home = fixture_home();
+        std::fs::create_dir_all(home.join("profiles/web")).unwrap();
+        std::fs::create_dir_all(home.join("profiles/coding")).unwrap();
+        std::env::set_var(DSH_HOME_ENV, &home);
+
+        ensure_scene_settings("web").unwrap();
+        ensure_scene_settings("coding").unwrap();
+        // The same route name configured differently per scenario.
+        let provider = |base_url: &str| Provider {
+            id: "gateway".to_string(),
+            name: "Gateway".to_string(),
+            kind: "pi-ai".to_string(),
+            api: Some("openai-completions".to_string()),
+            base_url: Some(base_url.to_string()),
+            api_key_env: Some("GW_KEY".to_string()),
+            compat: None,
+        };
+        SettingsEditor::upsert_provider("web", &provider("https://web-gw/v1")).unwrap();
+        SettingsEditor::upsert_provider("coding", &provider("https://coding-gw/v1")).unwrap();
+
+        let web = list_providers("web").unwrap();
+        let coding = list_providers("coding").unwrap();
+        let web_gw = web.iter().find(|p| p.id == "gateway").unwrap();
+        let coding_gw = coding.iter().find(|p| p.id == "gateway").unwrap();
+        assert_eq!(web_gw.base_url.as_deref(), Some("https://web-gw/v1"));
+        assert_eq!(coding_gw.base_url.as_deref(), Some("https://coding-gw/v1"));
+
+        // Models follow their provider per scenario.
+        let model = |id: &str| Model {
+            id: id.to_string(),
+            name: id.to_string(),
+            provider: Some("gateway".to_string()),
+            context_window: None,
+            max_tokens: None,
+            input: None,
+            reasoning_efforts: None,
+            compat: None,
+        };
+        SettingsEditor::upsert_model("web", "gateway", &model("model-x")).unwrap();
+        SettingsEditor::upsert_model("coding", "gateway", &model("model-y")).unwrap();
+        let web_models = list_models("web").unwrap();
+        let coding_models = list_models("coding").unwrap();
+        assert!(web_models.iter().any(|m| m.id == "model-x"));
+        assert!(!web_models.iter().any(|m| m.id == "model-y"));
+        assert!(!coding_models.iter().any(|m| m.id == "model-x"));
+        assert!(coding_models.iter().any(|m| m.id == "model-y"));
+
+        restore_env(DSH_HOME_ENV, previous);
+    }
+
+    #[test]
+    fn scene_settings_fall_back_to_the_global_document() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let previous = std::env::var_os(DSH_HOME_ENV);
+        let home = fixture_home();
+        std::fs::create_dir_all(home.join("profiles/legacy")).unwrap();
+        std::fs::write(
+            home.join("settings.yaml"),
+            "llm-pi-ai:\n  providers:\n    old-route:\n      baseURL: https://global/v1\n",
+        )
+        .unwrap();
+        std::env::set_var(DSH_HOME_ENV, &home);
+
+        // A profile without a redirection reads the global document.
+        let providers = list_providers("legacy").unwrap();
+        assert!(providers.iter().any(|p| p.id == "old-route"));
+
         restore_env(DSH_HOME_ENV, previous);
     }
 
@@ -918,11 +1784,11 @@ llm-pi-ai:
         )
         .unwrap();
         std::env::set_var(DSH_HOME_ENV, &home);
-        let providers = list_providers().unwrap();
+        let providers = list_providers("web").unwrap();
         let ids: Vec<&str> = providers.iter().map(|p| p.id.as_str()).collect();
         assert_eq!(ids, ["anthropic", "deepseek-official", "openai"]);
         assert_eq!(providers[2].name, "OpenAI");
-        let models = list_models().unwrap();
+        let models = list_models("web").unwrap();
         let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(
             ids,
@@ -944,10 +1810,10 @@ llm-pi-ai:
         let home = fixture_home();
         std::fs::create_dir_all(&home).unwrap();
         std::env::set_var(DSH_HOME_ENV, &home);
-        let providers = list_providers().unwrap();
+        let providers = list_providers("web").unwrap();
         assert_eq!(providers.len(), 1);
         assert_eq!(providers[0].id, "deepseek-official");
-        let models = list_models().unwrap();
+        let models = list_models("web").unwrap();
         let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(ids, ["deepseek-v4-flash", "deepseek-v4-pro"]);
         restore_env(DSH_HOME_ENV, previous);
@@ -961,7 +1827,7 @@ llm-pi-ai:
         std::fs::create_dir_all(&home).unwrap();
         std::fs::write(home.join("settings.yaml"), "llm-deepseek: [unclosed").unwrap();
         std::env::set_var(DSH_HOME_ENV, &home);
-        assert!(list_providers().is_err());
+        assert!(list_providers("web").is_err());
         restore_env(DSH_HOME_ENV, previous);
     }
 
@@ -1010,17 +1876,21 @@ pet:
         std::env::set_var(DSH_HOME_ENV, &home);
 
         // Add a new pi-ai provider and a model under it.
-        SettingsEditor::upsert_provider(&Provider {
-            id: "ollama".to_string(),
-            name: "Ollama".to_string(),
-            kind: "pi-ai".to_string(),
-            api: Some("openai-completions".to_string()),
-            base_url: Some("http://localhost:11434/v1".to_string()),
-            api_key_env: Some("OLLAMA_KEY".to_string()),
-            compat: None,
-        })
+        SettingsEditor::upsert_provider(
+            "web",
+            &Provider {
+                id: "ollama".to_string(),
+                name: "Ollama".to_string(),
+                kind: "pi-ai".to_string(),
+                api: Some("openai-completions".to_string()),
+                base_url: Some("http://localhost:11434/v1".to_string()),
+                api_key_env: Some("OLLAMA_KEY".to_string()),
+                compat: None,
+            },
+        )
         .unwrap();
         SettingsEditor::upsert_model(
+            "web",
             "ollama",
             &Model {
                 id: "llama-3".to_string(),
@@ -1035,7 +1905,7 @@ pet:
         )
         .unwrap();
 
-        let providers = list_providers().unwrap();
+        let providers = list_providers("web").unwrap();
         let ollama = providers.iter().find(|p| p.id == "ollama").unwrap();
         assert_eq!(ollama.name, "Ollama");
         assert_eq!(ollama.api.as_deref(), Some("openai-completions"));
@@ -1045,7 +1915,7 @@ pet:
         );
         assert_eq!(ollama.api_key_env.as_deref(), Some("OLLAMA_KEY"));
 
-        let models = list_models().unwrap();
+        let models = list_models("web").unwrap();
         let llama = models.iter().find(|m| m.id == "llama-3").unwrap();
         assert_eq!(llama.name, "Llama 3");
         assert_eq!(llama.provider.as_deref(), Some("ollama"));
@@ -1066,17 +1936,20 @@ pet:
         std::env::set_var(DSH_HOME_ENV, &home);
 
         // The deepseek-official route writes into the llm-deepseek section.
-        SettingsEditor::upsert_provider(&Provider {
-            id: DEEPSEEK_PROVIDER.to_string(),
-            name: "DeepSeek".to_string(),
-            kind: "deepseek".to_string(),
-            api: None,
-            base_url: Some("https://api.deepseek.com/custom".to_string()),
-            api_key_env: Some("NEW_KEY".to_string()),
-            compat: None,
-        })
+        SettingsEditor::upsert_provider(
+            "web",
+            &Provider {
+                id: DEEPSEEK_PROVIDER.to_string(),
+                name: "DeepSeek".to_string(),
+                kind: "deepseek".to_string(),
+                api: None,
+                base_url: Some("https://api.deepseek.com/custom".to_string()),
+                api_key_env: Some("NEW_KEY".to_string()),
+                compat: None,
+            },
+        )
         .unwrap();
-        let providers = list_providers().unwrap();
+        let providers = list_providers("web").unwrap();
         let ds = providers
             .iter()
             .find(|p| p.id == DEEPSEEK_PROVIDER)
@@ -1088,7 +1961,7 @@ pet:
         assert_eq!(ds.api_key_env.as_deref(), Some("NEW_KEY"));
 
         // And removing it is unsupported.
-        assert!(SettingsEditor::remove_provider(DEEPSEEK_PROVIDER).is_err());
+        assert!(SettingsEditor::remove_provider("web", DEEPSEEK_PROVIDER).is_err());
 
         restore_env(DSH_HOME_ENV, previous);
     }
@@ -1104,6 +1977,7 @@ pet:
         // Editing one model must leave the pet section and the cdx compat
         // block intact.
         SettingsEditor::upsert_model(
+            "web",
             "cdx",
             &Model {
                 id: "gpt-5.6-sol".to_string(),
@@ -1136,21 +2010,25 @@ pet:
         write_settings(&home);
         std::env::set_var(DSH_HOME_ENV, &home);
 
-        SettingsEditor::remove_provider("cdx").unwrap();
-        assert!(list_providers().unwrap().iter().all(|p| p.id != "cdx"));
+        SettingsEditor::remove_provider("web", "cdx").unwrap();
+        assert!(list_providers("web").unwrap().iter().all(|p| p.id != "cdx"));
 
         // Add a model under a fresh provider, then remove it.
-        SettingsEditor::upsert_provider(&Provider {
-            id: "ollama".to_string(),
-            name: "Ollama".to_string(),
-            kind: "pi-ai".to_string(),
-            api: None,
-            base_url: None,
-            api_key_env: None,
-            compat: None,
-        })
+        SettingsEditor::upsert_provider(
+            "web",
+            &Provider {
+                id: "ollama".to_string(),
+                name: "Ollama".to_string(),
+                kind: "pi-ai".to_string(),
+                api: None,
+                base_url: None,
+                api_key_env: None,
+                compat: None,
+            },
+        )
         .unwrap();
         SettingsEditor::upsert_model(
+            "web",
             "ollama",
             &Model {
                 id: "llama-3".to_string(),
@@ -1164,8 +2042,11 @@ pet:
             },
         )
         .unwrap();
-        SettingsEditor::remove_model("ollama", "llama-3").unwrap();
-        assert!(list_models().unwrap().iter().all(|m| m.id != "llama-3"));
+        SettingsEditor::remove_model("web", "ollama", "llama-3").unwrap();
+        assert!(list_models("web")
+            .unwrap()
+            .iter()
+            .all(|m| m.id != "llama-3"));
 
         restore_env(DSH_HOME_ENV, previous);
     }
@@ -1178,17 +2059,20 @@ pet:
         std::fs::create_dir_all(&home).unwrap();
         std::env::set_var(DSH_HOME_ENV, &home);
 
-        SettingsEditor::upsert_provider(&Provider {
-            id: "fresh".to_string(),
-            name: "Fresh".to_string(),
-            kind: "pi-ai".to_string(),
-            api: None,
-            base_url: None,
-            api_key_env: None,
-            compat: None,
-        })
+        SettingsEditor::upsert_provider(
+            "web",
+            &Provider {
+                id: "fresh".to_string(),
+                name: "Fresh".to_string(),
+                kind: "pi-ai".to_string(),
+                api: None,
+                base_url: None,
+                api_key_env: None,
+                compat: None,
+            },
+        )
         .unwrap();
-        let providers = list_providers().unwrap();
+        let providers = list_providers("web").unwrap();
         assert!(providers.iter().any(|p| p.id == "fresh"));
 
         restore_env(DSH_HOME_ENV, previous);

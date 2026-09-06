@@ -5,7 +5,8 @@ use anyhow::{anyhow, Context};
 use clap::{Parser, Subcommand};
 use deepmate_app::{build_harness, init_tracing, load_config_or_default, record_action};
 use deepmate_core::model::{
-    is_outdated, CompatStatus, MarketEntry, MarketSourceInfo, Model, Plugin, Profile, Provider,
+    is_outdated, CompatStatus, MarketEntry, MarketSourceInfo, Model, Plugin, PluginOpEvent,
+    Profile, Provider, RuntimeStatusKind, Surface,
 };
 use deepmate_core::DataLayout;
 use deepmate_platform::{PlatformService, SystemPlatform};
@@ -30,10 +31,18 @@ struct Cli {
 enum Command {
     /// Detect the active harness.
     Detect,
-    /// Show the active harness runtime status.
-    Status,
-    /// Open the harness UI in the system browser.
-    Open,
+    /// Show the active harness runtime status (or one scenario's).
+    Status {
+        /// Scenario to report on (default: `web`).
+        #[arg(long)]
+        scenario: Option<String>,
+    },
+    /// Open the harness UI in the system browser (or one scenario's).
+    Open {
+        /// Scenario to open (default: `web`).
+        #[arg(long)]
+        scenario: Option<String>,
+    },
     /// Run environment diagnostics.
     Doctor,
     /// Control the harness runtime.
@@ -82,9 +91,41 @@ enum Command {
 
 #[derive(Debug, Subcommand)]
 enum RuntimeAction {
-    Start,
-    Stop,
-    Restart,
+    /// Start a web scenario (default: `web`).
+    Start {
+        /// Scenario to start (default: `web`).
+        #[arg(long)]
+        scenario: Option<String>,
+        /// Port override for web scenarios.
+        #[arg(long)]
+        port: Option<u16>,
+    },
+    /// Stop a scenario (default: `web`), or every running one with --all.
+    Stop {
+        /// Scenario to stop (default: `web`).
+        #[arg(long)]
+        scenario: Option<String>,
+        /// Stop every running scenario.
+        #[arg(long)]
+        all: bool,
+    },
+    /// Restart a web scenario (default: `web`).
+    Restart {
+        /// Scenario to restart (default: `web`).
+        #[arg(long)]
+        scenario: Option<String>,
+    },
+    /// List every scenario's runtime state.
+    List,
+    /// Run one task against a task scenario.
+    Task {
+        /// Scenario to run the task against.
+        #[arg(long)]
+        scenario: Option<String>,
+        /// The task prompt (everything after the flags).
+        #[arg(trailing_var_arg = true, required = true)]
+        prompt: Vec<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -94,6 +135,9 @@ enum ProfileAction {
     Create {
         /// Profile name.
         name: String,
+        /// Run surface: `web` (browser console) or `task` (one-shot tasks).
+        #[arg(long)]
+        surface: Option<String>,
     },
     /// Remove a profile.
     Remove {
@@ -104,9 +148,16 @@ enum ProfileAction {
 
 #[derive(Debug, Subcommand)]
 enum ProviderAction {
-    List,
+    List {
+        /// Scenario to report on (default: `web`).
+        #[arg(long)]
+        scenario: Option<String>,
+    },
     /// Create or update a provider.
     Set {
+        /// Scenario the provider belongs to (default: `web`).
+        #[arg(long)]
+        scenario: Option<String>,
         /// Provider id (route name). Use `deepseek-official` to edit the
         /// built-in DeepSeek route.
         id: String,
@@ -127,6 +178,9 @@ enum ProviderAction {
     },
     /// Remove a provider.
     Remove {
+        /// Scenario the provider belongs to (default: `web`).
+        #[arg(long)]
+        scenario: Option<String>,
         /// Provider id (route name).
         id: String,
     },
@@ -134,9 +188,16 @@ enum ProviderAction {
 
 #[derive(Debug, Subcommand)]
 enum ModelAction {
-    List,
+    List {
+        /// Scenario to report on (default: `web`).
+        #[arg(long)]
+        scenario: Option<String>,
+    },
     /// Create or update a model within a provider's catalog.
     Set {
+        /// Scenario the model belongs to (default: `web`).
+        #[arg(long)]
+        scenario: Option<String>,
         /// Provider id (route name) the model belongs to.
         #[arg(long)]
         provider: String,
@@ -163,6 +224,9 @@ enum ModelAction {
     },
     /// Remove a model from a provider's catalog.
     Remove {
+        /// Scenario the model belongs to (default: `web`).
+        #[arg(long)]
+        scenario: Option<String>,
         /// Provider id (route name).
         #[arg(long)]
         provider: String,
@@ -201,6 +265,23 @@ enum PluginAction {
     /// Remove a plugin from a profile.
     Remove {
         /// Installed package name.
+        id: String,
+        /// Target profile.
+        #[arg(long, default_value = "web")]
+        profile: String,
+    },
+    /// Disable a plugin: uninstall it while remembering its package spec, so
+    /// a later `enable` can restore the same version range.
+    Disable {
+        /// Installed package name.
+        id: String,
+        /// Target profile.
+        #[arg(long, default_value = "web")]
+        profile: String,
+    },
+    /// Enable a disabled plugin, reinstalling its recorded package spec.
+    Enable {
+        /// Package name to re-enable.
         id: String,
         /// Target profile.
         #[arg(long, default_value = "web")]
@@ -353,11 +434,13 @@ async fn run(cli: &Cli, harness: &DeepSeekHarness, layout: &DataLayout) -> anyho
             }
             "cli.detect".to_string()
         }
-        Command::Status => {
-            let status = harness.status().await?;
+        Command::Status { scenario } => {
+            let profile = scenario.as_deref().unwrap_or("web");
+            let status = harness.status_scenario(profile).await?;
             if cli.json {
                 println!("{}", serde_json::to_string_pretty(&status)?);
             } else {
+                println!("scenario: {profile}");
                 println!("status: {:?}", status.kind);
                 if let Some(pid) = status.pid {
                     println!("pid: {pid}");
@@ -368,12 +451,13 @@ async fn run(cli: &Cli, harness: &DeepSeekHarness, layout: &DataLayout) -> anyho
             }
             "cli.status".to_string()
         }
-        Command::Open => {
-            harness.open_ui().await?;
+        Command::Open { scenario } => {
+            let profile = scenario.as_deref().unwrap_or("web");
+            harness.open_ui_scenario(profile).await?;
             if cli.json {
                 println!("{}", serde_json::json!({ "opened": true }));
             } else {
-                println!("opened harness UI");
+                println!("opened scenario {profile} UI");
             }
             "cli.open".to_string()
         }
@@ -396,21 +480,94 @@ async fn run(cli: &Cli, harness: &DeepSeekHarness, layout: &DataLayout) -> anyho
             "cli.doctor".to_string()
         }
         Command::Runtime { action } => {
-            match action {
-                RuntimeAction::Start => harness.start().await?,
-                RuntimeAction::Stop => harness.stop().await?,
-                RuntimeAction::Restart => harness.restart().await?,
-            }
-            if cli.json {
+            let name = match action {
+                RuntimeAction::Start { scenario, port } => {
+                    let profile = scenario.clone().unwrap_or_else(|| "web".to_string());
+                    harness.start_scenario(&profile, *port).await?;
+                    "start"
+                }
+                RuntimeAction::Stop { scenario, all } => {
+                    if *all {
+                        for instance in harness.instances().await? {
+                            if instance.status == RuntimeStatusKind::Running {
+                                harness.stop_scenario(&instance.profile).await?;
+                            }
+                        }
+                    } else {
+                        let profile = scenario.clone().unwrap_or_else(|| "web".to_string());
+                        harness.stop_scenario(&profile).await?;
+                    }
+                    "stop"
+                }
+                RuntimeAction::Restart { scenario } => {
+                    let profile = scenario.clone().unwrap_or_else(|| "web".to_string());
+                    harness.restart_scenario(&profile).await?;
+                    "restart"
+                }
+                RuntimeAction::List => {
+                    let instances = harness.instances().await?;
+                    if cli.json {
+                        println!("{}", serde_json::to_string_pretty(&instances)?);
+                    } else {
+                        for instance in &instances {
+                            let surface = match instance.surface {
+                                Surface::Web => "web",
+                                Surface::Task => "task",
+                                Surface::Undetermined => "?",
+                            };
+                            let state = match instance.status {
+                                RuntimeStatusKind::Running => "running",
+                                _ => "stopped",
+                            };
+                            println!(
+                                "{:<16} {:<6} {:<8} {}",
+                                instance.profile,
+                                surface,
+                                state,
+                                instance.url.as_deref().unwrap_or("-")
+                            );
+                        }
+                    }
+                    "list"
+                }
+                RuntimeAction::Task { scenario, prompt } => {
+                    let profile = scenario.clone().ok_or_else(|| {
+                        deepmate_core::error::CoreError::InvalidState(
+                            "a task scenario must be named with --scenario".to_string(),
+                        )
+                    })?;
+                    let prompt = prompt.join(" ");
+                    let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+                    let stream = harness.run_task(&profile, &prompt, tx);
+                    tokio::pin!(stream);
+                    loop {
+                        tokio::select! {
+                            event = rx.recv() => {
+                                if let Some(event) = event {
+                                    match event {
+                                        PluginOpEvent::Line { text } => println!("{text}"),
+                                        PluginOpEvent::Finished {
+                                            ok: false,
+                                            detail: Some(detail),
+                                        } => eprintln!("{detail}"),
+                                        _ => {}
+                                    }
+                                }
+                            }
+                            result = &mut stream => {
+                                result?;
+                                break;
+                            }
+                        }
+                    }
+                    "task"
+                }
+            };
+            if cli.json && name != "list" && name != "task" {
                 println!("{}", serde_json::json!({ "ok": true }));
-            } else {
+            } else if !cli.json && name != "list" && name != "task" {
                 println!("runtime command completed");
             }
-            let name = match action {
-                RuntimeAction::Start => "start",
-                RuntimeAction::Stop => "stop",
-                RuntimeAction::Restart => "restart",
-            };
             format!("cli.runtime.{name}")
         }
         Command::Profile { action } => {
@@ -419,12 +576,19 @@ async fn run(cli: &Cli, harness: &DeepSeekHarness, layout: &DataLayout) -> anyho
                     print_list("profiles", harness.profiles().await?, cli.json)?;
                     "list"
                 }
-                ProfileAction::Create { name } => {
-                    harness.create_profile(name).await?;
+                ProfileAction::Create { name, surface } => {
+                    let surface = match surface.as_deref() {
+                        None | Some("web") => Surface::Web,
+                        Some("task") => Surface::Task,
+                        Some(other) => {
+                            return Err(anyhow!("unknown surface {other:?} (use `web` or `task`)"))
+                        }
+                    };
+                    harness.create_scenario(name, surface).await?;
                     if cli.json {
                         println!("{}", serde_json::json!({ "ok": true }));
                     } else {
-                        println!("created profile {name}");
+                        println!("created scenario {name}");
                     }
                     "create"
                 }
@@ -442,11 +606,17 @@ async fn run(cli: &Cli, harness: &DeepSeekHarness, layout: &DataLayout) -> anyho
         }
         Command::Provider { action } => {
             let action_name = match action {
-                ProviderAction::List => {
-                    print_list("providers", harness.providers().await?, cli.json)?;
+                ProviderAction::List { scenario } => {
+                    let profile = scenario.clone().unwrap_or_else(|| "web".to_string());
+                    print_list(
+                        "providers",
+                        harness.providers_scenario(&profile).await?,
+                        cli.json,
+                    )?;
                     "list"
                 }
                 ProviderAction::Set {
+                    scenario,
                     id,
                     name,
                     api,
@@ -454,6 +624,7 @@ async fn run(cli: &Cli, harness: &DeepSeekHarness, layout: &DataLayout) -> anyho
                     api_key_env,
                     compat,
                 } => {
+                    let profile = scenario.clone().unwrap_or_else(|| "web".to_string());
                     let provider = Provider {
                         id: id.clone(),
                         name: name.clone().unwrap_or_else(|| id.clone()),
@@ -467,20 +638,21 @@ async fn run(cli: &Cli, harness: &DeepSeekHarness, layout: &DataLayout) -> anyho
                         api_key_env: api_key_env.clone(),
                         compat: compat.clone(),
                     };
-                    harness.upsert_provider(provider).await?;
+                    harness.upsert_provider_scenario(&profile, provider).await?;
                     if cli.json {
                         println!("{}", serde_json::json!({ "ok": true }));
                     } else {
-                        println!("saved provider {id}");
+                        println!("saved provider {id} in scenario {profile}");
                     }
                     "set"
                 }
-                ProviderAction::Remove { id } => {
-                    harness.remove_provider(id).await?;
+                ProviderAction::Remove { scenario, id } => {
+                    let profile = scenario.clone().unwrap_or_else(|| "web".to_string());
+                    harness.remove_provider_scenario(&profile, id).await?;
                     if cli.json {
                         println!("{}", serde_json::json!({ "ok": true }));
                     } else {
-                        println!("removed provider {id}");
+                        println!("removed provider {id} from scenario {profile}");
                     }
                     "remove"
                 }
@@ -489,11 +661,13 @@ async fn run(cli: &Cli, harness: &DeepSeekHarness, layout: &DataLayout) -> anyho
         }
         Command::Model { action } => {
             let action_name = match action {
-                ModelAction::List => {
-                    print_list("models", harness.models().await?, cli.json)?;
+                ModelAction::List { scenario } => {
+                    let profile = scenario.clone().unwrap_or_else(|| "web".to_string());
+                    print_list("models", harness.models_scenario(&profile).await?, cli.json)?;
                     "list"
                 }
                 ModelAction::Set {
+                    scenario,
                     provider,
                     id,
                     name,
@@ -521,20 +695,34 @@ async fn run(cli: &Cli, harness: &DeepSeekHarness, layout: &DataLayout) -> anyho
                         reasoning_efforts: reasoning_efforts.clone(),
                         compat: compat.clone(),
                     };
-                    harness.upsert_model(provider, model).await?;
+                    let profile = scenario.clone().unwrap_or_else(|| "web".to_string());
+                    harness
+                        .upsert_model_scenario(&profile, provider, model)
+                        .await?;
                     if cli.json {
                         println!("{}", serde_json::json!({ "ok": true }));
                     } else {
-                        println!("saved model {id} under provider {provider}");
+                        println!(
+                            "saved model {id} under provider {provider} in scenario {profile}"
+                        );
                     }
                     "set"
                 }
-                ModelAction::Remove { provider, id } => {
-                    harness.remove_model(provider, id).await?;
+                ModelAction::Remove {
+                    scenario,
+                    provider,
+                    id,
+                } => {
+                    let profile = scenario.clone().unwrap_or_else(|| "web".to_string());
+                    harness
+                        .remove_model_scenario(&profile, provider, id)
+                        .await?;
                     if cli.json {
                         println!("{}", serde_json::json!({ "ok": true }));
                     } else {
-                        println!("removed model {id} from provider {provider}");
+                        println!(
+                            "removed model {id} from provider {provider} in scenario {profile}"
+                        );
                     }
                     "remove"
                 }
@@ -585,6 +773,24 @@ async fn run(cli: &Cli, harness: &DeepSeekHarness, layout: &DataLayout) -> anyho
                     println!("removed {id} from profile {profile}");
                 }
                 "cli.plugin.remove".to_string()
+            }
+            PluginAction::Disable { id, profile } => {
+                harness.disable_plugin(profile, id).await?;
+                if cli.json {
+                    println!("{}", serde_json::json!({ "ok": true }));
+                } else {
+                    println!("disabled {id} in profile {profile}");
+                }
+                "cli.plugin.disable".to_string()
+            }
+            PluginAction::Enable { id, profile } => {
+                harness.enable_plugin(profile, id).await?;
+                if cli.json {
+                    println!("{}", serde_json::json!({ "ok": true }));
+                } else {
+                    println!("enabled {id} in profile {profile}");
+                }
+                "cli.plugin.enable".to_string()
             }
             PluginAction::Update { id, profile } => {
                 harness.update_plugin(profile, id.as_deref()).await?;

@@ -1,6 +1,20 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
+// A scenario's run surface: what the profile loads when started. The engine
+// decides this by the bundles a profile mounts — `dsh-web-app` serves the
+// browser console, `dsh-headless` runs one-shot tasks — so the surface is
+// derived from the installed bundle set, not stored anywhere.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum Surface {
+    Web,
+    Task,
+    // A profile whose surface bundles have not been installed yet (e.g. a
+    // freshly scaffolded scenario before its base bundles resolve).
+    Undetermined,
+}
+
 // Basic information about a detected harness.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct HarnessInfo {
@@ -78,6 +92,12 @@ pub struct DoctorCheck {
     pub summary: String,
     pub details: Option<String>,
     pub suggested_action: Option<String>,
+    // Structured dynamic values so UIs can localize the text without parsing
+    // the English `summary`/`details` strings above.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cli: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
 }
 
 // Status for a Doctor check.
@@ -163,6 +183,11 @@ pub struct Plugin {
     // True when a marketplace check found a newer version than the one
     // currently installed.
     pub outdated: bool,
+    // The trust tier of the plugin when the curated market lists it
+    // (official or vetted); `None` when the curated list has no record for
+    // this plugin. Surfaced so installed plugins keep their provenance.
+    #[serde(default)]
+    pub trust: Option<MarketTrust>,
 }
 
 // A marketplace search result (normalized representation).
@@ -173,6 +198,12 @@ pub struct MarketEntry {
     pub description: Option<String>,
     pub version: Option<String>,
     pub source: MarketSource,
+    // The trust tier an entry earns. `source` says where an entry came from;
+    // `trust` is the user-facing verdict derived from it (and, for curated
+    // entries, from the maintainers' review). Defaults for old cached
+    // entries, which predate the field.
+    #[serde(default)]
+    pub trust: MarketTrust,
     // Trust/provenance signals surfaced before installation. All optional:
     // a source may not expose any of them.
     pub repository: Option<String>,
@@ -203,6 +234,41 @@ pub enum MarketSource {
     Curated,
     // Any other community-published source.
     Community,
+}
+
+// The trust tier of a market entry, presented to the user before install.
+//
+// This is the three-tier scale the market UI filters on: official plugins
+// come from the harness vendor, curated entries are third-party plugins the
+// DeepMate maintainers reviewed and listed, and everything else on the
+// public registry is community. An entry with no trust signal (e.g. loaded
+// from a pre-trust cache) is treated as community.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum MarketTrust {
+    // Published by the harness vendor itself.
+    Official,
+    // Third-party, reviewed and listed by the DeepMate maintainers.
+    Vetted,
+    // Any other community-published package; the default when a source
+    // carries no trust signal.
+    #[default]
+    Community,
+}
+
+// A plugin the user disabled through DeepMate.
+//
+// Disabling uninstalls the package (the harness only loads declared
+// dependencies, so an uninstalled plugin is genuinely off) but remembers the
+// package spec so enabling can reinstall the same version range. Records
+// live in the DeepMate state directory, not the harness home.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct DisabledPlugin {
+    pub profile: String,
+    pub id: String,
+    // The package spec (name, optionally with a version range) reinstalled
+    // when the plugin is enabled again.
+    pub spec: String,
 }
 
 // Outcome of a plugin compatibility check.
@@ -283,13 +349,33 @@ pub struct MarketSourceInfo {
     pub source: MarketSource,
 }
 
-// The kind of plugin operation a stream reports on.
+// The kind of plugin operation a stream reports on. `Task` is a one-shot
+// scenario task run (the headless surface), not a plugin mutation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum PluginOpKind {
     Install,
     Remove,
     Update,
+    Task,
+}
+
+// One running (or runnable) scenario instance as the UI sees it.
+//
+// Every web-surface scenario appears here — running ones with their pid,
+// port and URL, idle ones without — so the UI has a single per-scenario
+// runtime source of truth. Task-surface scenarios never stay resident (the
+// headless surface boots, answers one task and exits), so they are always
+// reported idle.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct RuntimeInstance {
+    pub profile: String,
+    pub surface: Surface,
+    pub status: RuntimeStatusKind,
+    pub pid: Option<u32>,
+    pub port: Option<u16>,
+    pub url: Option<String>,
+    pub message: Option<String>,
 }
 
 // One event in a streamed plugin operation (install / remove / update).

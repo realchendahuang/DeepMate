@@ -4,3 +4,4 @@ target/
 .DS_Store
 *.log
 .zcode/
+node_modules/

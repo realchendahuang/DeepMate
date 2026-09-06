@@ -152,8 +152,10 @@ deepmate profile list
 deepmate model list
 
 deepmate plugin list
-deepmate plugin search <query>
 deepmate plugin install <package>
+deepmate plugin disable <id>
+deepmate plugin enable <id>
+deepmate market search <query>
 ```
 
 The exact command surface may evolve, but the architectural rule stays the same: desktop and CLI call the same core services.
@@ -349,20 +351,16 @@ The harness runtime does not need to be tied to the lifetime of the main control
 
 ## Marketplace architecture
 
-Marketplace support is source-driven.
+Marketplace support is source-driven. Every source normalizes results into
+the shared `MarketEntry` model; the desktop market tab and the CLI `market
+search` command render the same records.
 
 ```text
 MarketSource
 │
 ├── curated list (DeepMate-maintained plugins/curated.json)
-├── npm-compatible registry
-├── GitHub-backed source
-├── private registry
-├── JSON registry
-└── local source
+└── npm-compatible registry (community search)
 ```
-
-Each source normalizes data into a shared `PluginRecord` model.
 
 The curated source is a static JSON document maintained in the DeepMate
 repository (`plugins/curated.json`). DeepMate fetches it from the raw GitHub
@@ -374,43 +372,34 @@ ranges, compatibility checks and updates are shared with community entries.
 A list with a `schema` newer than the build understands is refused rather
 than partially interpreted.
 
-Example fields:
+The model carries a three-tier trust verdict (`MarketTrust`):
 
-```text
-id
-name
-package
-version
-repository
-source
-description
-category
-capabilities
-compatibility
-dependencies
-risk_flags
-verified_source
-updated_at
-```
+- **official** — published by the harness vendor (`trust: "official"` in the
+  curated list)
+- **vetted** — third-party, reviewed and listed by the DeepMate maintainers
+  (the curated default when `trust` is absent)
+- **community** — raw npm search results, no review signal
+
+The market UI filters on these tiers, badges every entry with its tier, and
+shows the repository link (opened in the system browser) plus the registry's
+popularity/quality scores when published. Installed plugins carry the same
+trust badge when the curated list has a record for them (matched from the
+cached curated list, so provenance survives past the install). Before
+installing, a `plugin_check` compat preflight refuses a definite
+"incompatible" verdict.
 
 The marketplace layer is separate from the harness service: discovery is generic, while installation is owned by the deepseek-harness service because installation semantics are harness-specific.
 
-## Plugin trust metadata
+## Plugin disable semantics
 
-DeepMate should make plugin provenance and risk signals visible before installation.
-
-Potential signals include:
-
-- source repository
-- package-to-repository consistency
-- manifest validity
-- install/build scripts
-- host-side execution
-- compatibility range
-- dependency conflicts
-- maintenance freshness
-
-These signals are metadata and diagnostics. Installation authority remains with the user.
+The harness loads only declared, installed dependencies, so disabling a
+plugin is a real uninstall that takes it off at runtime. DeepMate records the
+package spec in `state/disabled-plugins.json` (a `DisabledPlugin` record per
+profile + id), so the installed list keeps showing the plugin with a
+"disabled" row and a one-click re-enable that reinstalls the recorded spec.
+Installing the same package again from the market also clears the record —
+the two flows stay consistent. Removing the record without reinstalling
+(`plugin_forget` / the disabled row's remove action) drops it from the list.
 
 ## File-based DeepMate data
 
@@ -437,7 +426,8 @@ Conceptual data layout:
 │   └── research.json
 │
 ├── state/
-│   └── harness.pid
+│   ├── harness.pid
+│   └── disabled-plugins.json
 │
 └── logs/
     └── deepmate.log
@@ -693,8 +683,36 @@ sizes, weights or radii (see docs/DESIGN_SYSTEM.md).
 - configuration editing through supported Harness interfaces
 
 Profiles, providers and models are exposed in both the CLI and the desktop
-app (v0.4.0); configuration editing (create / edit / remove for providers,
-models and profiles) is implemented in the desktop Settings page (v0.6.0).
+app (v0.4.0); configuration editing (create / rename / remove for providers,
+models and profiles) is implemented in the desktop Settings page (v0.6.0);
+profiles are presented as "scenarios" in the UI (v0.7.0), each scenario
+opening into a detail view that manages its plugin set visually.
+
+### Scenarios as the top-level unit (v0.8.0)
+
+Scenarios are the app's first entry point: the sidebar lists them above the
+global tools, and a scenario's home page owns its runtime (start/stop/
+restart/open, or the task runner), its providers & models and its plugins.
+Provider/model configuration is isolated per scenario via the engine's
+`settings` row: each scenario's `cordis.patch.yml` redirects the settings
+document to `profiles/<scenario>/settings.yaml`
+(`!!js dshHomePath('profiles/<scenario>/settings.yaml')`), so the scenario's
+own engine process (web Models page included) reads and writes that file and
+nothing leaks across scenarios. `ensure_scene_settings` bootstraps the
+redirection when a scenario is created and migrates the legacy global
+`settings.yaml` LLM sections into the web scenario's document once — a
+redirection takes effect on scenario restart. Known boundaries: machine-level
+`$DSH_HOME/cordis.patch.yml` must not override the `settings` row (a later
+layer replaces the whole row config); credentials referenced by `apiKeyEnv`
+stay in the global credential store; snapshots still capture the default
+`web` scenario's providers/models (schema v2), with per-scenario snapshot
+sections planned. Profile
+renames move the profile directory, rewrite the manifest `name` and carry
+DeepMate-owned state (the disabled-plugin registry) over; the launcher-owned
+`web` profile is protected from rename and remove in the service layer.
+Installs of packages declaring harness capabilities also declare the
+profile's `dsh.profile.bundles` entry (the harness web UI loads bundles, not
+dependencies), mirroring the existing remove-bundle compensation.
 
 ### Stage 4 — Plugins and marketplace (implemented in v0.3.0)
 

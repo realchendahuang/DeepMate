@@ -4,6 +4,8 @@ import { SidebarNav } from "./app-sidebar";
 import { Sheet, SheetContent, SheetTitle } from "../ui/sheet";
 
 interface MobileNavProps {
+  onOpenScenario: (profile: string) => void;
+
   open: boolean;
   view: View;
   onNavigate: (view: View) => void;
@@ -12,7 +14,7 @@ interface MobileNavProps {
 
 // The mobile navigation drawer, built on the shadcn Sheet (Radix Dialog):
 // focus trap, Escape to close, scrim click and body scroll locking included.
-export function MobileNav({ open, view, onNavigate, onClose }: MobileNavProps) {
+export function MobileNav({ open, view, onNavigate, onOpenScenario, onClose }: MobileNavProps) {
   const { t } = useTranslation();
 
   return (
@@ -22,11 +24,21 @@ export function MobileNav({ open, view, onNavigate, onClose }: MobileNavProps) {
         <div className="flex h-[52px] shrink-0 items-center justify-between gap-2 border-b border-border px-3">
           <div className="flex items-center gap-2.5">
             <img src="/logo.png" alt="DeepMate" className="h-6 w-6 rounded-sm inline dark:hidden" />
-            <img src="/logo-dark.png" alt="" aria-hidden className="hidden dark:inline h-6 w-6 rounded-sm border border-border" />
+            <img
+              src="/logo-dark.png"
+              alt=""
+              aria-hidden
+              className="hidden dark:inline h-6 w-6 rounded-sm border border-border"
+            />
             <span className="text-brand text-text">DeepMate</span>
           </div>
         </div>
-        <SidebarNav view={view} onNavigate={onNavigate} />
+        <SidebarNav
+          view={view}
+          onNavigate={onNavigate}
+          onOpenScenario={onOpenScenario}
+          pillId="mobile-nav"
+        />
       </SheetContent>
     </Sheet>
   );

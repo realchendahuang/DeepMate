@@ -8,7 +8,7 @@
 
 import { commands } from "./bindings";
 import { Channel } from "@tauri-apps/api/core";
-import type { Model, PluginOpEvent, PluginOpKind, Provider } from "./bindings";
+import type { Model, PluginOpEvent, PluginOpKind, Provider, Surface } from "./bindings";
 
 // Unwrap the generated result envelope; a rejected command surfaces as a
 // thrown string, matching the previous hand-written invoke wrappers.
@@ -24,20 +24,27 @@ async function unwrap<T>(
 
 export const api = {
   refreshAll: () => unwrap(commands.refreshAll()),
-  runtimeStart: () => unwrap(commands.runtimeStart()),
-  runtimeStop: () => unwrap(commands.runtimeStop()),
-  runtimeRestart: () => unwrap(commands.runtimeRestart()),
-  openHarness: () => unwrap(commands.openHarness()),
+  runtimeStart: (profile: string) => unwrap(commands.runtimeStart(profile)),
+  runtimeStop: (profile: string) => unwrap(commands.runtimeStop(profile)),
+  runtimeRestart: (profile: string) => unwrap(commands.runtimeRestart(profile)),
+  runtimeList: () => unwrap(commands.runtimeList()),
+  openHarness: (profile: string) => unwrap(commands.openHarness(profile)),
   runDoctor: () => unwrap(commands.runDoctor()),
+  doctorFix: (checkId: string, mode: string) => unwrap(commands.doctorFix(checkId, mode)),
   listProfiles: () => unwrap(commands.listProfiles()),
-  listProviders: () => unwrap(commands.listProviders()),
-  listModels: () => unwrap(commands.listModels()),
-  upsertProvider: (provider: Provider) => unwrap(commands.upsertProvider(provider)),
-  removeProvider: (id: string) => unwrap(commands.removeProvider(id)),
-  upsertModel: (provider: string, model: Model) => unwrap(commands.upsertModel(provider, model)),
-  removeModel: (provider: string, id: string) => unwrap(commands.removeModel(provider, id)),
+  listProviders: (profile: string) => unwrap(commands.listProviders(profile)),
+  listModels: (profile: string) => unwrap(commands.listModels(profile)),
+  upsertProvider: (profile: string, provider: Provider) =>
+    unwrap(commands.upsertProvider(profile, provider)),
+  removeProvider: (profile: string, id: string) => unwrap(commands.removeProvider(profile, id)),
+  upsertModel: (profile: string, provider: string, model: Model) =>
+    unwrap(commands.upsertModel(profile, provider, model)),
+  removeModel: (profile: string, provider: string, id: string) =>
+    unwrap(commands.removeModel(profile, provider, id)),
   createProfile: (name: string) => unwrap(commands.createProfile(name)),
+  createScenario: (name: string, surface: Surface) => unwrap(commands.createScenario(name, surface)),
   removeProfile: (name: string) => unwrap(commands.removeProfile(name)),
+  renameProfile: (old: string, newName: string) => unwrap(commands.renameProfile(old, newName)),
   listPlugins: () => unwrap(commands.listPlugins()),
   listMarketSources: () => unwrap(commands.listMarketSources()),
   marketSearch: (query: string) => unwrap(commands.marketSearch(query)),
@@ -45,6 +52,10 @@ export const api = {
   pluginCheck: (spec: string) => unwrap(commands.pluginCheck(spec)),
   pluginRemove: (profile: string, id: string) => unwrap(commands.pluginRemove(profile, id)),
   pluginUpdate: (profile: string, id: string) => unwrap(commands.pluginUpdate(profile, id)),
+  pluginDisable: (profile: string, id: string) => unwrap(commands.pluginDisable(profile, id)),
+  pluginEnable: (profile: string, id: string) => unwrap(commands.pluginEnable(profile, id)),
+  listDisabledPlugins: () => unwrap(commands.listDisabledPlugins()),
+  pluginForget: (profile: string, id: string) => unwrap(commands.pluginForget(profile, id)),
   // Stream a plugin operation: `onEvent` receives Started / Line / Finished
   // events as they happen; the promise resolves when the operation ends.
   pluginOpStream: (
@@ -56,6 +67,17 @@ export const api = {
     const channel = new Channel<PluginOpEvent>();
     channel.onmessage = onEvent;
     return unwrap(commands.pluginOpStream(channel, profile, kind, target));
+  },
+  // Stream one task run: `onEvent` receives the task's Started / Line /
+  // Finished events; the promise resolves when the run ends.
+  taskRun: (
+    profile: string,
+    prompt: string,
+    onEvent: (event: PluginOpEvent) => void,
+  ) => {
+    const channel = new Channel<PluginOpEvent>();
+    channel.onmessage = onEvent;
+    return unwrap(commands.taskRun(channel, profile, prompt));
   },
   snapshotExport: (name: string) => unwrap(commands.snapshotExport(name)),
   snapshotImport: (name: string) => unwrap(commands.snapshotImport(name)),
@@ -79,10 +101,15 @@ export const api = {
 export type {
   CheckStatus,
   CompatReport,
+  DoctorCheck,
   DoctorReport,
   RuntimeStatusKind,
+  Surface,
+  RuntimeInstance,
+  DisabledPlugin,
   MarketEntry,
   MarketSourceInfo,
+  MarketTrust,
   Model,
   Overview,
   Plugin,

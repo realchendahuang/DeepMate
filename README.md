@@ -51,8 +51,8 @@ That flexibility is powerful, but it also creates a growing management surface:
 - Which runtime is installed and running?
 - Which provider and model are active?
 - Which profiles exist?
-- Which plugins are installed, enabled or outdated?
-- Which plugin sources can be trusted?
+- Which plugins are installed, enabled, disabled or outdated?
+- Which plugins are official, vetted by the maintainers, or community?
 - Is the local environment healthy?
 - How do I move the same setup to another machine?
 
@@ -68,8 +68,8 @@ DeepMate is a **control plane** for **DeepSeek Harness**: a pure data-layer cont
 - **Providers** — configure DeepSeek, OpenAI, Anthropic and compatible/custom endpoints
 - **Models** — browse and manage model capabilities and defaults
 - **Profiles** — manage harness profiles, bundles and configuration layers
-- **Plugins** — install, update, remove and inspect plugins
-- **Marketplace** — discover plugins from curated and community sources
+- **Plugins** — install, disable, enable, update, remove and inspect plugins
+- **Marketplace** — discover plugins from curated and community sources, filtered by trust tier (official / vetted / community)
 - **Doctor** — diagnose runtime, dependency, port, configuration and compatibility problems
 - **Open Harness** — launch the official working interface in the system browser
 
@@ -231,6 +231,11 @@ deepmate plugin check <spec>    Check a market package's compatibility with
                                 the detected harness
 deepmate plugin remove <id> [--profile <name>]
                                 Remove a plugin from a profile
+deepmate plugin disable <id> [--profile <name>]
+                                Uninstall a plugin while remembering its spec,
+                                so `enable` can restore the same version range
+deepmate plugin enable <id> [--profile <name>]
+                                Reinstall a previously disabled plugin
 deepmate plugin update [id] [--profile <name>]
                                 Update one plugin, or all plugins
 deepmate market list           List known market sources
@@ -323,7 +328,10 @@ Stage 4 plugin/marketplace support and Stage 5 snapshots:
 - Rust workspace with `deepmate-core` (pure data layer), `deepmate-platform`
   and the `deepseek-harness` service crate
 - `deepmate` CLI with `detect`, `status`, `open`, `doctor`, `runtime`,
-  `profile`, `provider`, `model`, `plugin`, `market` and `snapshot` commands
+  `profile`, `provider`, `model`, `plugin`, `market` and `snapshot`
+  commands — `runtime start/stop/restart --scenario` manage any scenario,
+  `runtime list` shows every scenario's state, `runtime task <scenario>
+  "prompt"` runs one-shot tasks, and `provider`/`model` take `--scenario`
 - File-based data layer: OS-convention data directory, TOML config, JSONL
   action history and file logging
 - DeepSeek Harness service with real `dsh` integration: CLI detection, web
@@ -331,12 +339,20 @@ Stage 4 plugin/marketplace support and Stage 5 snapshots:
   `runtime stop`, profile discovery, plugin inventory, and provider/model
   catalogs through the documented `$DSH_HOME` file contracts
   (`profiles/*/package.json` and `settings.yaml`)
-- Configuration editing through the service layer: providers, models and
-  profiles can be created, edited and removed (upsert-style) from the
-  desktop Settings page, with the harness-owned files staying authoritative
+- Scenario-first architecture: scenarios are the top-level unit — switching
+  scenarios switches the whole setup. Each scenario owns its surface (web
+  console or one-shot tasks), its providers & models (a per-scenario
+  settings document, isolated through the profile's `cordis.patch.yml`
+  redirection of the engine `settings` row), its plugins, and its runtime
+  (multiple web scenarios can run in parallel on distinct ports; task
+  scenarios run one-shot prompts). The scenario home is the first entry
+  point of the app; providers/models no longer live in a global page.
 - Plugin lifecycle (install / remove / update) forwarded to the harness's own
   `dsh plugin` workflow, so profile and bundle reconciliation stay owned by
-  the harness
+  the harness; DeepMate compensates where the harness leaves the manifest
+  stale — an install of a real plugin also declares its bundle (so the web
+  UI actually loads it), and a remove/disable strips the leftover bundle
+  declaration
 - Marketplace search backed by the npm registry, with a curated source driven
   by the DeepMate-maintained plugin list (`plugins/curated.json`, fetched
   from this repository and cached) vs community npm results, provenance

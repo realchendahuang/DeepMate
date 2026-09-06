@@ -5,24 +5,33 @@ import { invoke as __TAURI_INVOKE, Channel } from "@tauri-apps/api/core";
 /** Commands */
 export const commands = {
 	refreshAll: () => typedError<Overview, string>(__TAURI_INVOKE("refresh_all")),
-	runtimeStart: () => typedError<null, string>(__TAURI_INVOKE("runtime_start")),
-	runtimeStop: () => typedError<null, string>(__TAURI_INVOKE("runtime_stop")),
-	runtimeRestart: () => typedError<null, string>(__TAURI_INVOKE("runtime_restart")),
-	openHarness: () => typedError<null, string>(__TAURI_INVOKE("open_harness")),
-	runDoctor: () => typedError<DoctorReport, string>(__TAURI_INVOKE("run_doctor")),
+	runtimeStart: (profile: string) => typedError<null, string>(__TAURI_INVOKE("runtime_start", { profile })),
+	runtimeStop: (profile: string) => typedError<null, string>(__TAURI_INVOKE("runtime_stop", { profile })),
+	runtimeRestart: (profile: string) => typedError<null, string>(__TAURI_INVOKE("runtime_restart", { profile })),
+	runtimeList: () => typedError<RuntimeInstance[], string>(__TAURI_INVOKE("runtime_list")),
+	taskRun: (channel: Channel<PluginOpEvent>, profile: string, prompt: string) => typedError<null, string>(__TAURI_INVOKE("task_run", { channel, profile, prompt })),
+	openHarness: (profile: string) => typedError<null, string>(__TAURI_INVOKE("open_harness", { profile })),
+	runDoctor: () => typedError<DoctorReport_Serialize, string>(__TAURI_INVOKE("run_doctor")),
+	doctorFix: (checkId: string, mode: string) => typedError<DoctorFixReport, string>(__TAURI_INVOKE("doctor_fix", { checkId, mode })),
 	listProfiles: () => typedError<Profile[], string>(__TAURI_INVOKE("list_profiles")),
-	listProviders: () => typedError<Provider[], string>(__TAURI_INVOKE("list_providers")),
-	listModels: () => typedError<Model[], string>(__TAURI_INVOKE("list_models")),
-	upsertProvider: (provider: Provider) => typedError<null, string>(__TAURI_INVOKE("upsert_provider", { provider })),
-	removeProvider: (id: string) => typedError<null, string>(__TAURI_INVOKE("remove_provider", { id })),
-	upsertModel: (provider: string, model: Model) => typedError<null, string>(__TAURI_INVOKE("upsert_model", { provider, model })),
-	removeModel: (provider: string, id: string) => typedError<null, string>(__TAURI_INVOKE("remove_model", { provider, id })),
+	listProviders: (profile: string) => typedError<Provider[], string>(__TAURI_INVOKE("list_providers", { profile })),
+	listModels: (profile: string) => typedError<Model[], string>(__TAURI_INVOKE("list_models", { profile })),
+	upsertProvider: (profile: string, provider: Provider) => typedError<null, string>(__TAURI_INVOKE("upsert_provider", { profile, provider })),
+	removeProvider: (profile: string, id: string) => typedError<null, string>(__TAURI_INVOKE("remove_provider", { profile, id })),
+	upsertModel: (profile: string, provider: string, model: Model) => typedError<null, string>(__TAURI_INVOKE("upsert_model", { profile, provider, model })),
+	removeModel: (profile: string, provider: string, id: string) => typedError<null, string>(__TAURI_INVOKE("remove_model", { profile, provider, id })),
 	createProfile: (name: string) => typedError<null, string>(__TAURI_INVOKE("create_profile", { name })),
+	createScenario: (name: string, surface: Surface) => typedError<null, string>(__TAURI_INVOKE("create_scenario", { name, surface })),
 	removeProfile: (name: string) => typedError<null, string>(__TAURI_INVOKE("remove_profile", { name })),
+	renameProfile: (old: string, newName: string) => typedError<null, string>(__TAURI_INVOKE("rename_profile", { old, newName })),
 	listPlugins: () => typedError<Plugin[], string>(__TAURI_INVOKE("list_plugins")),
 	pluginInstall: (profile: string, spec: string) => typedError<null, string>(__TAURI_INVOKE("plugin_install", { profile, spec })),
 	pluginRemove: (profile: string, id: string) => typedError<null, string>(__TAURI_INVOKE("plugin_remove", { profile, id })),
 	pluginUpdate: (profile: string, id: string) => typedError<null, string>(__TAURI_INVOKE("plugin_update", { profile, id })),
+	pluginDisable: (profile: string, id: string) => typedError<null, string>(__TAURI_INVOKE("plugin_disable", { profile, id })),
+	pluginEnable: (profile: string, id: string) => typedError<null, string>(__TAURI_INVOKE("plugin_enable", { profile, id })),
+	listDisabledPlugins: () => typedError<DisabledPlugin[], string>(__TAURI_INVOKE("list_disabled_plugins")),
+	pluginForget: (profile: string, id: string) => typedError<null, string>(__TAURI_INVOKE("plugin_forget", { profile, id })),
 	pluginOpStream: (channel: Channel<PluginOpEvent>, profile: string, kind: PluginOpKind, target: string) => typedError<null, string>(__TAURI_INVOKE("plugin_op_stream", { channel, profile, kind, target })),
 	listMarketSources: () => typedError<MarketSourceInfo[], string>(__TAURI_INVOKE("list_market_sources")),
 	marketSearch: (query: string) => typedError<MarketEntry[], string>(__TAURI_INVOKE("market_search", { query })).then((v) => ((v.status === "ok" ? { ...v, data: v.data.map(i=>({...i,updated:i.updated==null?i.updated:new Date(i.updated)})) } : v) as typeof v)),
@@ -72,16 +81,46 @@ export type Detection = {
 	detail: string | null,
 };
 
-export type DoctorCheck = {
+export type DisabledPlugin = {
+	profile: string,
+	id: string,
+	spec: string,
+};
+
+export type DoctorCheck = DoctorCheck_Serialize | DoctorCheck_Deserialize;
+
+export type DoctorCheck_Deserialize = {
 	id: string,
 	status: CheckStatus,
 	summary: string,
 	details: string | null,
 	suggested_action: string | null,
+	cli?: string | null,
+	url?: string | null,
 };
 
-export type DoctorReport = {
-	checks: DoctorCheck[],
+export type DoctorCheck_Serialize = {
+	id: string,
+	status: CheckStatus,
+	summary: string,
+	details: string | null,
+	suggested_action: string | null,
+	cli?: string | null,
+	url?: string | null,
+};
+
+export type DoctorFixReport = {
+	fixed: number,
+};
+
+export type DoctorReport = DoctorReport_Serialize | DoctorReport_Deserialize;
+
+export type DoctorReport_Deserialize = {
+	checks: DoctorCheck_Deserialize[],
+};
+
+export type DoctorReport_Serialize = {
+	checks: DoctorCheck_Serialize[],
 };
 
 export type HarnessInfo = {
@@ -103,6 +142,7 @@ export type MarketEntry = {
 	description: string | null,
 	version: string | null,
 	source: MarketSource,
+	trust?: MarketTrust,
 	repository: string | null,
 	publisher: string | null,
 	updated: Date | null,
@@ -119,6 +159,8 @@ export type MarketSourceInfo = {
 	description: string,
 	source: MarketSource,
 };
+
+export type MarketTrust = "official" | "vetted" | "community";
 
 export type Model = {
 	id: string,
@@ -145,11 +187,12 @@ export type Plugin = {
 	profile: string,
 	latest: string | null,
 	outdated: boolean,
+	trust?: MarketTrust | null,
 };
 
 export type PluginOpEvent = { phase: "started"; op: PluginOpKind; target: string } | { phase: "line"; text: string } | { phase: "finished"; ok: boolean; detail: string | null };
 
-export type PluginOpKind = "install" | "remove" | "update";
+export type PluginOpKind = "install" | "remove" | "update" | "task";
 
 export type Profile = {
 	id: string,
@@ -167,6 +210,16 @@ export type Provider = {
 	compat: string | null,
 };
 
+export type RuntimeInstance = {
+	profile: string,
+	surface: Surface,
+	status: RuntimeStatusKind,
+	pid: number | null,
+	port: number | null,
+	url: string | null,
+	message: string | null,
+};
+
 export type RuntimeStatus = {
 	kind: RuntimeStatusKind,
 	pid: number | null,
@@ -174,6 +227,8 @@ export type RuntimeStatus = {
 };
 
 export type RuntimeStatusKind = "unknown" | "installed" | "running" | "stopped" | "error";
+
+export type Surface = "web" | "task" | "undetermined";
 
 export type UiPrefs = {
 	language: string,

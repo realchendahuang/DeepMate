@@ -77,8 +77,8 @@ only the display label.
 
 - Radius: `rounded-lg` 12 (cards) · `rounded-md` 8 (controls) · `rounded-sm`
   6 (segments, chips)
-- Width: `w-sidebar` 200px (navigation rail) · `w-subnav` 180px (settings
-  sub-nav) · `max-w-content` 1000px (page column cap)
+- Width: `w-sidebar` 200px (navigation rail) · `max-w-content` 1000px (page
+  column cap)
 - Shadows: `shadow-card`
 - Control heights: 20 (badges) · 26 (`size="sm"` buttons) · 30 (buttons,
   nav items) · 32 (inputs, dialogs)
@@ -87,8 +87,22 @@ only the display label.
 
 ### Motion
 
-`transition-colors` is the default state transition (≈140ms); `transition-
-transform` moves the Switch thumb. No bounces, no decorative animations.
+Two speeds, no bounce, no decoration. CSS state feedback uses the default
+`transition-colors` (~140ms). JS-driven motion — the Motion library
+(`motion/react`) — uses the tokens in `src/lib/motion.ts`: `MOTION_DURATION.fast`
+(140ms) for list reflow and page exits, `MOTION_DURATION.base` (180ms) for page
+and section entrances, plus the shared `MOTION_EASE` bezier curves and
+`STAGGER` (35ms). Durations and easings are design tokens: never inline a raw
+number in a component.
+
+Page switches animate through `AnimatePresence` in `AppShell` (directional
+slide + fade, `mode="wait"`, scroll resets between views); the active nav item
+shares a `layoutId` so the highlight pill slides between items; plugin lists
+use `layout` + `AnimatePresence` so rows fade and reflow when the filter
+changes; Overview sections stagger in with `fadeUp`.
+`MotionConfig reducedMotion="user"` (root of `App.tsx`) honors
+`prefers-reduced-motion`: transform and layout animations are skipped, opacity
+kept — matching the CSS fallback in `styles.css`.
 
 ---
 
@@ -132,33 +146,49 @@ content column — no per-page top bars and no page-to-page jumps.
 
 - **Desktop (md 768px+):** a fixed `w-sidebar` 200px rail on the left; the
   content column to its right is the only scroll region. The rail stacks a
-  brand row (52px, logo + wordmark), the primary nav (Overview, Plugins),
-  and a footer area separated by a hairline that pins Settings with the
-  harness identity underneath.
+  brand row (52px, logo + wordmark) above a single scrollable nav column
+  with two labeled groups: **工作区 Workspace** (Overview, Plugins) and
+  **设置 Settings** (Profiles / Models / Snapshots / Preferences / About).
 - **Mobile (<md):** the rail is hidden and a compact top bar (52px) shows a
-  menu button, brand, and the harness identity. The menu button opens a left
-  drawer (same 200px width, same navigation items) over a scrim; it closes
-  on selection, Escape, or a scrim click.
-- Navigation is local component state (`View = overview | plugins |
-  settings`) — no router. `AppShell` renders the sidebar + the content column
-  + the mobile nav; `NavItem` is the 32px nav row (active = `accent-soft`
-  gray wash + full text color, idle = dim text + hover wash).
+  menu button and the brand. The menu button opens a left drawer (same
+  200px width, same navigation items) over a scrim; it closes on selection,
+  Escape, or a scrim click.
+- Navigation is local component state (`View = overview | plugins | profiles
+  | models | snapshots | preferences | about`) — no router.
+  `AppShell` renders the sidebar + the content column + the mobile nav;
+  `NavItem` is the 32px nav row (active = `accent-soft` gray wash + full text
+  color, idle = dim text + hover wash).
 
 ## Pages
 
-The shell keeps navigation deliberately shallow: **three top-level pages** —
-**Overview** (status + runtime controls + diagnostics + update banner),
-**Plugins** (Installed / Market sub-views), and **Settings** (Profiles /
-Providers / Models / Snapshots / Preferences). Plugins was promoted out of
-Settings because its install / update / remove / market workflow made the
-settings page too heavy.
+The shell keeps navigation deliberately shallow: **all pages sit at the top
+level** — **Overview** (status + runtime controls + diagnostics + update
+banner), **Plugins** (Installed / Market sub-views), and **five configuration
+pages** (Profiles / Models / Snapshots / Preferences / About)
+grouped under the 设置 heading in the sidebar. Settings was flattened out of
+a two-level nav because the sidebar had room for every section directly;
+Plugins was promoted out of Settings for the same reason — its install /
+update / remove / market workflow made the settings page too heavy.
 
-**Settings sub-nav.** Settings hosts five sections behind a Notion-style
-two-column layout: a quiet vertical sub-nav (180px, same visual language as
-the sidebar nav) on the left, the section content on the right, separated by
-whitespace — no enclosing card. Below `md` the sub-nav folds into a
-horizontal chip strip above the content. The section state is local
-(`SectionKey`), no router.
+The **Models** page merges the previous Providers and Models pages into one
+full-height split panel: the left column is a provider sidebar grouped into
+默认 (the built-in DeepSeek route) and 自定义供应商, ending in an
+add-provider row; the right column edits the selected provider **in place**
+— Base URL, wire-protocol select (`openai-responses` /
+`openai-completions`, plus the harness default) and the API key env var
+masked behind a reveal toggle (the key itself is never stored, only the env
+var name) — and lists its models as rows: model id in mono, context-window
+badge (`1M` / `262.1K`), vision badge when `input` includes `image`, and
+per-row edit/delete. The provider panel height tracks the viewport
+(`md:h-[calc(100dvh-160px)]`) and each column scrolls independently. Model
+edits happen in a compact dialog (model id, context window, max output,
+input modality chips with "text" locked on) — no raw JSON fields; advanced
+harness flags stay YAML-only. Deleting a provider removes its models
+together. Below md the two columns stack.
+
+Each configuration page is a single section behind a `PageHeader` (title +
+create actions where a single action fits; the split Models page keeps its
+actions inside the layout): one heading, no tabs, no sub-nav.
 
 **Page width.** Every page column is fluid, capped at `max-w-content`
 (1000px), and **centered** past the cap (`mx-auto`) — resizing the window

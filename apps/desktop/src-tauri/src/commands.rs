@@ -20,13 +20,13 @@ use std::sync::Arc;
 
 use deepmate_app::record_action;
 use deepmate_core::data::DataLayout;
-use deepmate_core::model::{
-    CompatReport, Detection, DoctorReport, MarketEntry, MarketSourceInfo, Model, Plugin,
-    PluginOpEvent, PluginOpKind, Profile, Provider, RuntimeStatus,
+use deepmate_core::model::{Surface,
+    CompatReport, Detection, DisabledPlugin, DoctorReport, MarketEntry, MarketSourceInfo, Model,
+    Plugin, PluginOpEvent, PluginOpKind, Profile, Provider, RuntimeInstance, RuntimeStatus,
 };
-use deepseek_harness::DeepSeekHarness;
 use deepmate_core::CoreResult;
 use deepmate_platform::{PlatformService, SystemPlatform};
+use deepseek_harness::DeepSeekHarness;
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri::{AppHandle, Manager};
@@ -151,20 +151,27 @@ fn count<T>(items: CoreResult<Vec<T>>) -> Result<u32, String> {
 
 #[tauri::command]
 #[specta::specta]
-pub async fn runtime_start(app: AppHandle) -> Result<(), String> {
-    runtime_op(&app, RuntimeOp::Start, "desktop.runtime.start").await
+pub async fn runtime_start(app: AppHandle, profile: String) -> Result<(), String> {
+    runtime_op(&app, RuntimeOp::Start, profile, "desktop.runtime.start").await
 }
 
 #[tauri::command]
 #[specta::specta]
-pub async fn runtime_stop(app: AppHandle) -> Result<(), String> {
-    runtime_op(&app, RuntimeOp::Stop, "desktop.runtime.stop").await
+pub async fn runtime_stop(app: AppHandle, profile: String) -> Result<(), String> {
+    runtime_op(&app, RuntimeOp::Stop, profile, "desktop.runtime.stop").await
 }
 
 #[tauri::command]
 #[specta::specta]
-pub async fn runtime_restart(app: AppHandle) -> Result<(), String> {
-    runtime_op(&app, RuntimeOp::Restart, "desktop.runtime.restart").await
+pub async fn runtime_restart(app: AppHandle, profile: String) -> Result<(), String> {
+    runtime_op(&app, RuntimeOp::Restart, profile, "desktop.runtime.restart").await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn runtime_list(app: AppHandle) -> Result<Vec<RuntimeInstance>, String> {
+    let state = app.state::<AppState>();
+    state.harness.instances().await.map_err(|e| format!("{e}"))
 }
 
 enum RuntimeOp {
@@ -173,13 +180,18 @@ enum RuntimeOp {
     Restart,
 }
 
-async fn runtime_op(app: &AppHandle, op: RuntimeOp, action: &'static str) -> Result<(), String> {
+async fn runtime_op(
+    app: &AppHandle,
+    op: RuntimeOp,
+    profile: String,
+    action: &'static str,
+) -> Result<(), String> {
     let state = app.state::<AppState>();
     let harness = state.harness.as_ref();
     let result = match op {
-        RuntimeOp::Start => harness.start().await,
-        RuntimeOp::Stop => harness.stop().await,
-        RuntimeOp::Restart => harness.restart().await,
+        RuntimeOp::Start => harness.start_scenario(&profile, None).await,
+        RuntimeOp::Stop => harness.stop_scenario(&profile).await,
+        RuntimeOp::Restart => harness.restart_scenario(&profile).await,
     };
     match result {
         Ok(()) => {
@@ -192,9 +204,42 @@ async fn runtime_op(app: &AppHandle, op: RuntimeOp, action: &'static str) -> Res
 
 #[tauri::command]
 #[specta::specta]
-pub async fn open_harness(app: AppHandle) -> Result<(), String> {
+pub async fn open_harness(app: AppHandle, profile: String) -> Result<(), String> {
     let state = app.state::<AppState>();
-    run_action(&state, "desktop.open", state.harness.open_ui()).await
+    run_action(&state, "desktop.open", state.harness.open_ui_scenario(&profile)).await
+}
+
+// Stream one task run against a task-surface scenario: events (Started /
+// Line / Finished) are forwarded to the webview channel as they happen.
+#[tauri::command]
+#[specta::specta]
+pub async fn task_run(
+    app: AppHandle,
+    channel: tauri::ipc::Channel<PluginOpEvent>,
+    profile: String,
+    prompt: String,
+) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<PluginOpEvent>(64);
+    let harness = Arc::clone(&state.harness);
+
+    let forwarder = tauri::async_runtime::spawn(async move {
+        while let Some(event) = rx.recv().await {
+            if channel.send(event).is_err() {
+                break;
+            }
+        }
+    });
+
+    let result = harness.run_task(&profile, &prompt, tx).await;
+    std::mem::drop(forwarder);
+    match result {
+        Ok(()) => {
+            record_action(&state.layout, "desktop.task.run".to_string());
+            Ok(())
+        }
+        Err(e) => Err(format!("{e}")),
+    }
 }
 
 #[tauri::command]
@@ -205,6 +250,33 @@ pub async fn run_doctor(app: AppHandle) -> Result<DoctorReport, String> {
         Ok(report) => {
             record_action(&state.layout, "desktop.doctor".to_string());
             Ok(report)
+        }
+        Err(e) => Err(format!("{e}")),
+    }
+}
+
+// The result of a one-click doctor fix: how many items were repaired by the
+// chosen action. The frontend shows the count and re-runs the report.
+#[derive(Debug, Clone, Copy, Serialize, Type)]
+pub struct DoctorFixReport {
+    pub fixed: u32,
+}
+
+// One-click repair for a failing doctor check. `mode` selects the repair:
+// "clear" strips stale bundle declarations, "reinstall" reinstalls or
+// updates the affected plugins, "start" boots the harness web UI.
+#[tauri::command]
+#[specta::specta]
+pub async fn doctor_fix(
+    app: AppHandle,
+    check_id: String,
+    mode: String,
+) -> Result<DoctorFixReport, String> {
+    let state = app.state::<AppState>();
+    match state.harness.fix_check(&check_id, &mode).await {
+        Ok(fixed) => {
+            record_action(&state.layout, "desktop.doctor.fix".to_string());
+            Ok(DoctorFixReport { fixed })
         }
         Err(e) => Err(format!("{e}")),
     }
@@ -221,64 +293,82 @@ pub async fn list_profiles(app: AppHandle) -> Result<Vec<Profile>, String> {
 
 #[tauri::command]
 #[specta::specta]
-pub async fn list_providers(app: AppHandle) -> Result<Vec<Provider>, String> {
+pub async fn list_providers(app: AppHandle, profile: String) -> Result<Vec<Provider>, String> {
     let state = app.state::<AppState>();
-    state.harness.providers().await.map_err(|e| format!("{e}"))
+    state
+        .harness
+        .providers_scenario(&profile)
+        .await
+        .map_err(|e| format!("{e}"))
 }
 
 #[tauri::command]
 #[specta::specta]
-pub async fn list_models(app: AppHandle) -> Result<Vec<Model>, String> {
+pub async fn list_models(app: AppHandle, profile: String) -> Result<Vec<Model>, String> {
     let state = app.state::<AppState>();
-    state.harness.models().await.map_err(|e| format!("{e}"))
+    state
+        .harness
+        .models_scenario(&profile)
+        .await
+        .map_err(|e| format!("{e}"))
 }
 
-// ---- Configuration editing ----
+// ---- Configuration editing (per-scenario) ----
 
 #[tauri::command]
 #[specta::specta]
-pub async fn upsert_provider(app: AppHandle, provider: Provider) -> Result<(), String> {
+pub async fn upsert_provider(app: AppHandle, profile: String, provider: Provider) -> Result<(), String> {
     let state = app.state::<AppState>();
     run_action(
         &state,
         "desktop.provider.set",
-        state.harness.upsert_provider(provider),
+        state.harness.upsert_provider_scenario(&profile, provider),
     )
     .await
 }
 
 #[tauri::command]
 #[specta::specta]
-pub async fn remove_provider(app: AppHandle, id: String) -> Result<(), String> {
+pub async fn remove_provider(app: AppHandle, profile: String, id: String) -> Result<(), String> {
     let state = app.state::<AppState>();
     run_action(
         &state,
         "desktop.provider.remove",
-        state.harness.remove_provider(&id),
+        state.harness.remove_provider_scenario(&profile, &id),
     )
     .await
 }
 
 #[tauri::command]
 #[specta::specta]
-pub async fn upsert_model(app: AppHandle, provider: String, model: Model) -> Result<(), String> {
+pub async fn upsert_model(
+    app: AppHandle,
+    profile: String,
+    provider: String,
+    model: Model,
+) -> Result<(), String> {
     let state = app.state::<AppState>();
     run_action(
         &state,
         "desktop.model.set",
-        state.harness.upsert_model(&provider, model),
+        state.harness.upsert_model_scenario(&profile, &provider, model),
     )
     .await
 }
 
 #[tauri::command]
 #[specta::specta]
-pub async fn remove_model(app: AppHandle, provider: String, id: String) -> Result<(), String> {
+pub async fn remove_model(
+    app: AppHandle,
+    profile: String,
+    provider: String,
+    id: String,
+) -> Result<(), String> {
     let state = app.state::<AppState>();
     run_action(
         &state,
         "desktop.model.remove",
-        state.harness.remove_model(&provider, &id),
+        state.harness.remove_model_scenario(&profile, &provider, &id),
     )
     .await
 }
@@ -297,12 +387,40 @@ pub async fn create_profile(app: AppHandle, name: String) -> Result<(), String> 
 
 #[tauri::command]
 #[specta::specta]
+pub async fn create_scenario(app: AppHandle, name: String, surface: Surface) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    run_action(
+        &state,
+        "desktop.profile.create",
+        state.harness.create_scenario(&name, surface),
+    )
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn remove_profile(app: AppHandle, name: String) -> Result<(), String> {
     let state = app.state::<AppState>();
     run_action(
         &state,
         "desktop.profile.remove",
         state.harness.remove_profile(&name),
+    )
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn rename_profile(
+    app: AppHandle,
+    old: String,
+    new_name: String,
+) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    run_action(
+        &state,
+        "desktop.profile.rename",
+        state.harness.rename_profile(&old, &new_name),
     )
     .await
 }
@@ -352,6 +470,53 @@ pub async fn plugin_update(app: AppHandle, profile: String, id: String) -> Resul
     .await
 }
 
+// Disable a plugin: uninstall it while remembering its package spec, so
+// enabling restores the same range later.
+#[tauri::command]
+#[specta::specta]
+pub async fn plugin_disable(app: AppHandle, profile: String, id: String) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    run_action(
+        &state,
+        "desktop.plugin.disable",
+        state.harness.disable_plugin(&profile, &id),
+    )
+    .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn plugin_enable(app: AppHandle, profile: String, id: String) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    run_action(
+        &state,
+        "desktop.plugin.enable",
+        state.harness.enable_plugin(&profile, &id),
+    )
+    .await
+}
+
+// The disabled-plugin registry: packages the user turned off, kept so the UI
+// can offer a one-click re-enable.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_disabled_plugins(app: AppHandle) -> Result<Vec<DisabledPlugin>, String> {
+    let state = app.state::<AppState>();
+    state.harness.disabled_plugins().map_err(|e| format!("{e}"))
+}
+
+// Drop a disabled-plugin record without reinstalling (the "remove" affordance
+// on a disabled row; the package is already uninstalled).
+#[tauri::command]
+#[specta::specta]
+pub async fn plugin_forget(app: AppHandle, profile: String, id: String) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    run_action(&state, "desktop.plugin.forget", async {
+        state.harness.forget_plugin(&profile, &id)
+    })
+    .await
+}
+
 // Run a plugin operation while streaming progress events to the frontend
 // over a Tauri channel. The command returns once the operation finishes; the
 // events (Started / Line / Finished) arrive on `channel` as they happen, so
@@ -374,6 +539,8 @@ pub async fn plugin_op_stream(
         PluginOpKind::Install => "desktop.plugin.install",
         PluginOpKind::Remove => "desktop.plugin.remove",
         PluginOpKind::Update => "desktop.plugin.update",
+        // Tasks stream through their own command; the action is not recorded.
+        PluginOpKind::Task => "desktop.task.run",
     };
 
     // Forward events from the harness's stream to the webview channel.
@@ -406,7 +573,11 @@ pub async fn plugin_op_stream(
 #[specta::specta]
 pub async fn list_market_sources(app: AppHandle) -> Result<Vec<MarketSourceInfo>, String> {
     let state = app.state::<AppState>();
-    state.harness.market_sources().await.map_err(|e| format!("{e}"))
+    state
+        .harness
+        .market_sources()
+        .await
+        .map_err(|e| format!("{e}"))
 }
 
 #[tauri::command]

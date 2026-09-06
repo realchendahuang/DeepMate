@@ -43,7 +43,9 @@ function CrashPanel({ error, stack }: { error: Error; stack: string | null }) {
       </Button>
       {stack && (
         <details className="max-w-xl text-left">
-          <summary className="cursor-pointer text-small text-text-faint">Details</summary>
+          <summary className="cursor-pointer text-small text-text-faint">
+            {t("common.errors.details")}
+          </summary>
           <pre className="mt-2 max-h-40 overflow-auto rounded-md border border-border bg-inset p-3 font-mono text-caption text-text-dim">
             {stack}
           </pre>

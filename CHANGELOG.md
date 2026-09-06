@@ -46,7 +46,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   harness attribute at all.
 - The on-disk data layout no longer creates an `adapters/` subdirectory.
 
+### Changed
+
+- **Scenarios are the top-level unit.** The sidebar gained a scenario group
+  above the workspace tools; switching scenarios switches the whole setup.
+  Each scenario's home page owns its runtime controls, its providers &
+  models and its plugins; the old global "profiles" and "models" settings
+  pages are gone (providers/models live per scenario now).
+- Provider/model configuration is isolated per scenario: the engine's
+  `settings` row is redirected per profile (`cordis.patch.yml` →
+  `profiles/<scenario>/settings.yaml`), so the scenario's engine process —
+  web Models page included — reads and writes its own document. Existing
+  global LLM configuration is migrated into the `web` scenario once; the
+  redirection takes effect on scenario restart.
+- `runtime` CLI/desktop commands drive any scenario: `runtime start|stop|
+  restart --scenario`, `runtime list`, `runtime task <scenario> "prompt"`;
+  `provider`/`model` subcommands take `--scenario` (default `web`).
+- The plugins `bundles.load` doctor check now probes only the running
+  scenario and its fix mode restarts the scenario (a running console keeps
+  the bundle set it started with).
+
 ### Added
+
+- Scenario module: the desktop "profiles" concept is now called "scenarios"
+  (设置 → 场景). The Settings page gained a proper new-scenario dialog,
+  per-row rename and plugin counts, and a scenario detail view that edits a
+  scenario's plugin set visually — an installed list with enable/disable,
+  update and remove, plus an in-place market search to add plugins behind
+  the compatibility preflight.
+- Profile rename (`rename_profile` in the service layer and the desktop
+  command surface): moves the profile directory, updates the manifest
+  `name` field and carries disabled-plugin records over. The launcher-owned
+  `web` profile is protected from rename and remove at the service layer
+  (previously only the UI refused).
+- Bundle-install reconciliation: `dsh plugin add` installs the dependency
+  but leaves `dsh.profile.bundles` untouched, so a freshly installed plugin
+  was never loaded by the harness web UI. An install of a package that
+  declares harness capabilities now also declares the bundle
+  (`add_bundle`, idempotent); plain library dependencies are left alone.
+- Profile manifests may carry a `description` field, surfaced by discovery
+  with the synthesized bundle list as fallback.
 
 - Curated plugin list:
   - The marketplace's **Curated** source is now driven by a

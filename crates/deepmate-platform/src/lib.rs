@@ -45,6 +45,12 @@ pub trait PlatformService: Send + Sync {
 
     // Terminate a process by pid.
     fn kill_process(&self, pid: u32) -> PlatformResult<()>;
+
+    // The pid of the process listening on `port`, when resolvable. Used to
+    // manage a harness started outside DeepMate: the port it serves is the
+    // only reliable handle on it. Best effort — None when the OS tooling is
+    // absent or nothing listens.
+    fn find_listener_pid(&self, port: u16) -> Option<u32>;
 }
 
 // Production implementation for the current OS.
@@ -151,6 +157,42 @@ impl PlatformService for SystemPlatform {
             Err(source) => Err(PlatformError::Kill { pid, source }),
         }
     }
+
+    fn find_listener_pid(&self, port: u16) -> Option<u32> {
+        #[cfg(not(target_os = "windows"))]
+        {
+            // lsof prints one pid per matching socket (IPv4 and IPv6 each
+            // yield a line); dedupe and keep the last.
+            let output = Command::new("lsof")
+                .args(["-nP", &format!("-iTCP:{port}"), "-sTCP:LISTEN", "-t"])
+                .output()
+                .ok()?;
+            if !output.status.success() {
+                return None;
+            }
+            let mut pids: Vec<u32> = String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .map(str::trim)
+                .filter_map(|line| line.parse().ok())
+                .collect();
+            pids.dedup();
+            pids.into_iter().next_back()
+        }
+        #[cfg(target_os = "windows")]
+        {
+            // netstat lines read: "TCP 127.0.0.1:3080 0.0.0.0:0 LISTENING 11635".
+            let output = Command::new("netstat")
+                .args(["-ano", "-p", "tcp"])
+                .output()
+                .ok()?;
+            let needle = format!(":{port}");
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .filter(|line| line.contains(&needle) && line.contains("LISTENING"))
+                .filter_map(|line| line.split_whitespace().last()?.parse().ok())
+                .next_back()
+        }
+    }
 }
 
 #[cfg(test)]
@@ -173,5 +215,21 @@ mod tests {
             Some(value) => std::env::set_var("DEEPMATE_DATA_DIR", value),
             None => std::env::remove_var("DEEPMATE_DATA_DIR"),
         }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn resolves_the_pid_owning_a_listening_port() {
+        // lsof is the resolver; skip where it is absent.
+        if Command::new("lsof").arg("-v").output().is_err() {
+            eprintln!("lsof unavailable; skipping");
+            return;
+        }
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        assert_eq!(
+            SystemPlatform.find_listener_pid(port),
+            Some(std::process::id())
+        );
     }
 }

@@ -15,6 +15,7 @@ use std::time::Duration;
 use deepmate_core::error::{CoreError, CoreResult};
 use deepmate_core::model::{
     compat_status, CompatReport, CompatStatus, MarketEntry, MarketSource, MarketSourceInfo,
+    MarketTrust,
 };
 
 const NPM_SEARCH_URL: &str = "https://registry.npmjs.org/-/v1/search";
@@ -209,6 +210,9 @@ async fn search_npm(client: &reqwest::Client, query: &str) -> CoreResult<Vec<Mar
                 description: obj.package.description,
                 version: Some(obj.package.version),
                 source,
+                // npm search results carry no review signal; they are
+                // community until proven otherwise.
+                trust: MarketTrust::Community,
                 repository: obj.package.links.and_then(|links| links.repository),
                 publisher: obj
                     .package
@@ -248,8 +252,9 @@ fn normalized(score: Option<f64>) -> Option<f64> {
 
 // The package name a plugin spec refers to: `pkg@^1.0` and `pkg` both name
 // `pkg`, and `@scope/pkg@1.0` names `@scope/pkg` (the leading scope `@` is
-// never treated as a version separator).
-fn spec_package_name(spec: &str) -> &str {
+// never treated as a version separator). Used by the plugin disable/enable
+// flow to clear registry records after an install.
+pub(crate) fn spec_package_name(spec: &str) -> &str {
     let spec = spec.trim();
     if let Some(rest) = spec.strip_prefix('@') {
         return match rest.split_once('@') {
@@ -359,6 +364,10 @@ fn curated_from_json(text: &str) -> CoreResult<Vec<MarketEntry>> {
             description: Some(plugin.description),
             version: Some(plugin.version),
             source: MarketSource::Curated,
+            // The curated list is vetted by definition; the `trust` field
+            // only elevates an entry to official. A missing field degrades
+            // to vetted, never to a less-trusted tier.
+            trust: plugin.trust.unwrap_or(MarketTrust::Vetted),
             repository: plugin.repository,
             publisher: plugin.publisher,
             updated: parse_updated(&plugin.added),
@@ -409,6 +418,10 @@ struct CuratedPlugin {
     publisher: Option<String>,
     added: String,
     category: Option<String>,
+    // `official` elevates an entry to the official tier; absent resolves to
+    // vetted, since the curated list is reviewed by definition.
+    #[serde(default)]
+    trust: Option<MarketTrust>,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -539,11 +552,28 @@ mod tests {
                     "publisher": "someone",
                     "added": "2026-08-28",
                     "trust": "vetted"
+                },
+                {
+                    "name": "@deepseek-ai/dsh-base",
+                    "version": "^0.3",
+                    "description": "official",
+                    "repository": "https://github.com/deepseek-ai/deepseek-harness",
+                    "publisher": "deepseek-ai",
+                    "added": "2026-08-28",
+                    "trust": "official",
+                    "category": "official"
+                },
+                {
+                    "name": "dsh-nothing",
+                    "version": "^0.1",
+                    "description": "no trust field",
+                    "publisher": "someone",
+                    "added": "2026-08-28"
                 }
             ]
         }"#;
         let entries = curated_from_json(list).unwrap();
-        assert_eq!(entries.len(), 1);
+        assert_eq!(entries.len(), 3);
         let entry = &entries[0];
         assert_eq!(entry.id, "dsh-mnemon");
         assert_eq!(entry.source, MarketSource::Curated);
@@ -560,6 +590,11 @@ mod tests {
         );
         assert_eq!(entry.popularity, None);
         assert_eq!(entry.quality, None);
+        // The trust field drives the market tiers.
+        assert_eq!(entries[0].trust, MarketTrust::Vetted);
+        assert_eq!(entries[1].trust, MarketTrust::Official);
+        // A curated entry without an explicit trust field stays vetted.
+        assert_eq!(entries[2].trust, MarketTrust::Vetted);
     }
 
     #[test]
@@ -593,6 +628,7 @@ mod tests {
             description: Some("memory".to_string()),
             version: Some("0.2.14".to_string()),
             source: MarketSource::Curated,
+            trust: MarketTrust::Vetted,
             repository: Some("https://github.com/example/dsh-mnemon".to_string()),
             publisher: Some("someone".to_string()),
             updated: Some(
@@ -636,6 +672,7 @@ mod tests {
             description: Some("memory".to_string()),
             version: Some("0.2.14".to_string()),
             source: MarketSource::Community,
+            trust: MarketTrust::Community,
             repository: Some("https://github.com/example/dsh-mnemon".to_string()),
             publisher: Some("someone".to_string()),
             updated: Some(

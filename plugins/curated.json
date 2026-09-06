@@ -1,10 +1,10 @@
 {
   "schema": 1,
-  "updated": "2026-08-28",
+  "updated": "2026-09-05",
   "plugins": [
     {
       "name": "@deepseek-ai/dsh-base",
-      "version": "^0.3",
+      "version": "^0.0.1-rc.1",
       "description": "Official base plugin bundle for DeepSeek Harness profiles",
       "repository": "https://github.com/deepseek-ai/deepseek-harness",
       "publisher": "deepseek-ai",
@@ -14,7 +14,7 @@
     },
     {
       "name": "@deepseek-ai/dsh-web-app",
-      "version": "^0.3",
+      "version": "^0.0.1-rc.1",
       "description": "Official web application plugin for DeepSeek Harness",
       "repository": "https://github.com/deepseek-ai/deepseek-harness",
       "publisher": "deepseek-ai",
@@ -44,7 +44,7 @@
     },
     {
       "name": "@aiwayds/dsh-tui-pi",
-      "version": "^1.0.0",
+      "version": "^2.7.0",
       "description": "pi-style terminal UI for DeepSeek Harness (dsh) — pi-tui look & feel, dsh slash commands, GitHub light/dark themes, powerline footer",
       "repository": "https://github.com/fan56/dsh-tui-pi.git",
       "publisher": "aiwayds",
@@ -284,7 +284,7 @@
     },
     {
       "name": "dsh-auth-gate",
-      "version": "^0.9.1",
+      "version": "^0.12.0",
       "description": "Application-layer authentication plugin for the dsh web surface",
       "repository": "https://github.com/TecFancy/dsh-auth-gate.git",
       "publisher": "smpower",
@@ -294,7 +294,7 @@
     },
     {
       "name": "dsh-background-agents",
-      "version": "^0.6.0",
+      "version": "^0.9.2",
       "description": "Interactive long-session background agents plus persistent multi-agent team rooms for DeepSeek Harness: durable continuable child agents wit",
       "repository": "https://github.com/PerryLink/dsh-background-agents.git",
       "publisher": "perrylink",
@@ -314,7 +314,7 @@
     },
     {
       "name": "dsh-better-sidebar",
-      "version": "^0.16.1",
+      "version": "^0.18.0",
       "description": "DSH web plugin: a VSCode-like right sidebar (explorer / editor / terminal / git / browser), isolated per conversation session. Exposes a ser",
       "repository": "https://github.com/omdsh-dev/DSH-better-sidebar",
       "publisher": "huanlin",
@@ -344,7 +344,7 @@
     },
     {
       "name": "dsh-chat-import",
-      "version": "^0.8.0",
+      "version": "^0.9.0",
       "description": "Import Claude Code / Codex / ChatGPT / Cursor / Gemini / Reasonix / Pi Coding Agent / opencode / ZCode / Grok Build / OpenClaw / Hermes / Ki",
       "repository": "https://github.com/Nwflower/dsh-chat-import.git",
       "publisher": "nwflower",
@@ -364,7 +364,7 @@
     },
     {
       "name": "dsh-claude-move",
-      "version": "^0.3.0",
+      "version": "^0.4.1",
       "description": "Four-source migration wizard: copy Claude Code, Codex, OpenCode and Hermes sessions, memories, skills, instructions and slash commands into ",
       "repository": "https://github.com/PerryLink/dsh-claude-move.git",
       "publisher": "perrylink",
@@ -384,7 +384,7 @@
     },
     {
       "name": "dsh-email",
-      "version": "^0.8.0",
+      "version": "^0.10.3",
       "description": "IMAP/SMTP email tools for DeepSeek Harness: list, read, search and send mail, with QQ/163/126/Sina/Aliyun/Gmail/Outlook/iCloud presets.",
       "repository": "https://github.com/STARDUSTLC666/dsh-email.git",
       "publisher": "stardustlc",
@@ -404,7 +404,7 @@
     },
     {
       "name": "dsh-ffmpeg",
-      "version": "^0.3.0",
+      "version": "^0.4.0",
       "description": "DSH 视频处理工具插件：ffmpeg_probe/cut/concat/encode/subtitle/extract/gif 七工具，进程走官方 subprocess 服务，超时树级终止、环境变量路径回退与多视频流探测，零运行时依赖（ffmpeg 本体除外）。",
       "repository": "https://github.com/STARDUSTLC666/dsh-ffmpeg.git",
       "publisher": "stardustlc",
@@ -434,7 +434,7 @@
     },
     {
       "name": "dsh-hdc-bridge",
-      "version": "^0.8.2",
+      "version": "^0.9.0",
       "description": "DSH-native HarmonyOS dev-assistant plugin: hdc device bridge with a live device panel, official-first versioned API docs (SDK .d.ts + offlin",
       "repository": "https://github.com/1na-ko/dsh-hdc-bridge.git",
       "publisher": "inako",
@@ -474,7 +474,7 @@
     },
     {
       "name": "dsh-mnemon",
-      "version": "^0.3.5",
+      "version": "^0.5.2",
       "description": "Composable three-tier memory control plane for DeepSeek Harness: persistent runtime context, searchable project documents, pluggable long-te",
       "repository": "https://github.com/omdsh-dev/dsh-mnemon.git",
       "publisher": "grivn",
@@ -564,7 +564,7 @@
     },
     {
       "name": "dsh-soul-md",
-      "version": "^0.5.9",
+      "version": "^0.6.0",
       "description": "DeepSeek Harness 的 soul.md 风格人设 + 长期记忆插件：设置页输入人设卡名称和内容即可，文件由插件自动管理；可按工作区指定人设、聊天框可给会话单独切人设；AI 可自行演化人设与记忆（soul_read/soul_update/memory_*）。",
       "repository": "https://github.com/Scorp1o117/dsh-soul-md.git",
       "publisher": "scorp1o117",
@@ -584,7 +584,7 @@
     },
     {
       "name": "dsh-talk",
-      "version": "^0.2.1",
+      "version": "^0.3.4",
       "description": "Voice-first session loop for DeepSeek Harness: a composer microphone button with browser/local speech-to-text (Web Speech, FunASR, whisper.c",
       "repository": "https://github.com/PerryLink/dsh-talk.git",
       "publisher": "perrylink",
@@ -594,7 +594,7 @@
     },
     {
       "name": "dsh-tdai-memory",
-      "version": "^0.2.14",
+      "version": "^0.3.0",
       "description": "DeepSeek Harness 的 TencentDB Agent Memory 移植：L0 对话捕获 → L1 结构化记忆提取 → L2 场景/L3 画像，自动召回注入 + 记忆/对话搜索工具；复用现有 ~/.memory-tencentdb/memory-tdai 数据；附",
       "repository": "https://github.com/Scorp1o117/dsh-tdai-memory.git",
       "publisher": "scorp1o117",
@@ -604,7 +604,7 @@
     },
     {
       "name": "dsh-tool-vision",
-      "version": "^0.6.4",
+      "version": "^0.7.0",
       "description": "DeepSeek Harness 外置视觉模型插件：inspect_image 把本地图片或 http(s) 图片 URL 发给任意 OpenAI 兼容端点，视觉模型看图的文字回答直接带回对话；附 Web UI 设置栏。",
       "repository": "https://github.com/Scorp1o117/dsh-tool-vision.git",
       "publisher": "scorp1o117",
@@ -664,7 +664,7 @@
     },
     {
       "name": "dsh-wechat",
-      "version": "^0.7.2",
+      "version": "^0.8.0",
       "description": "Bridge WeChat (iLink bot) to DeepSeek Harness (DSH)",
       "repository": "https://github.com/pan17/dsh-wechat.git",
       "publisher": "panpan2026",

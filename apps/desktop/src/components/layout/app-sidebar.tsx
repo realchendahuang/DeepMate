@@ -1,59 +1,114 @@
-import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Cpu } from "lucide-react";
+import { Globe, TerminalSquare } from "lucide-react";
 import type { View } from "./nav";
-import { NAV_MAIN, NAV_FOOTER } from "./nav";
+import { SCENARIO_SECTIONS } from "./nav";
 import { NavItem } from "./nav-item";
+import { useStore } from "../../store";
+import { cn } from "../../lib/utils";
 
 interface AppSidebarProps {
   view: View;
   onNavigate: (view: View) => void;
-  harnessName?: string;
+  onOpenScenario: (profile: string) => void;
 }
 
 interface SidebarNavProps {
   view: View;
   onNavigate: (view: View) => void;
-  footer?: ReactNode;
+  onOpenScenario: (profile: string) => void;
+  /** Shared layoutId so the active highlight slides between nav items. */
+  pillId: string;
 }
 
-// The navigation list shared by the desktop sidebar and the mobile drawer:
-// primary items above, the settings entry (and any footer extras) pinned below.
-export function SidebarNav({ view, onNavigate, footer }: SidebarNavProps) {
+// The main navigation list shared by the desktop sidebar and the mobile
+// drawer. It has two modes:
+//
+//  * scenario mode (the default): the selected scenario's sections (run,
+//    providers & models, plugins), headed by the scenario's name.
+//  * all-scenarios mode (the rail's grid button): every scenario as a
+//    navigation list, headed "所有场景", with the management page as the
+//    content. Clicking a scenario there opens it and returns to scenario
+//    mode.
+//
+// System settings live behind the rail's bottom gear and never occupy this
+// list.
+export function SidebarNav({ view, onNavigate, onOpenScenario, pillId }: SidebarNavProps) {
   const { t } = useTranslation();
+  const selectedScenario = useStore((s) => s.selectedScenario);
+  const scenarios = useStore((s) => s.profiles);
+  const instances = useStore((s) => s.instances);
+
+  if (view === "scenarios") {
+    return (
+      <nav aria-label={t("nav.menu")} className="flex-1 space-y-4 overflow-y-auto px-3 py-4">
+        <div className="space-y-1">
+          <div className="px-2 pb-1 text-caption font-semibold text-text-faint">
+            {t("settings.scenarios")}
+          </div>
+          {scenarios.map((profile) => {
+            const instance = instances.find((item) => item.profile === profile.id);
+            const running = instance?.status === "running";
+            const active = selectedScenario === profile.id;
+            return (
+              <button
+                key={profile.id}
+                type="button"
+                onClick={() => onOpenScenario(profile.id)}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body transition-colors",
+                  active ? "bg-hover font-semibold text-text" : "text-text-dim hover:bg-hover/60",
+                )}
+              >
+                <span
+                  className={cn(
+                    "h-2 w-2 shrink-0 rounded-full",
+                    running ? "bg-pass" : "bg-neutral",
+                  )}
+                />
+                <span className="min-w-0 flex-1 truncate text-left">{profile.name}</span>
+                {instance?.surface === "task" ? (
+                  <TerminalSquare className="h-3.5 w-3.5 shrink-0 text-text-faint" />
+                ) : instance?.surface === "web" ? (
+                  <Globe className="h-3.5 w-3.5 shrink-0 text-text-faint" />
+                ) : null}
+              </button>
+            );
+          })}
+          {scenarios.length === 0 && (
+            <div className="px-2 text-caption text-text-faint">{t("overview.noScenarios")}</div>
+          )}
+        </div>
+      </nav>
+    );
+  }
+
+  const scenarioName =
+    scenarios.find((profile) => profile.id === selectedScenario)?.name ?? selectedScenario;
 
   return (
-    <>
-      <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4" aria-label={t("nav.menu")}>
-        {NAV_MAIN.map((item) => (
+    <nav aria-label={t("nav.menu")} className="flex-1 space-y-4 overflow-y-auto px-3 py-4">
+      <div className="space-y-1">
+        <div className="flex items-center justify-between px-2 pb-1">
+          <span className="min-w-0 truncate text-caption font-semibold text-text-faint">
+            {scenarioName || t("settings.title")}
+          </span>
+        </div>
+        {SCENARIO_SECTIONS.map((item) => (
           <NavItem
             key={item.view}
             icon={item.icon}
             labelKey={item.labelKey}
             active={view === item.view}
             onClick={() => onNavigate(item.view)}
+            pillId={pillId}
           />
         ))}
-      </nav>
-      <div className="border-t border-border p-3">
-        <div className="space-y-1">
-          {NAV_FOOTER.map((item) => (
-            <NavItem
-              key={item.view}
-              icon={item.icon}
-              labelKey={item.labelKey}
-              active={view === item.view}
-              onClick={() => onNavigate(item.view)}
-            />
-          ))}
-        </div>
-        {footer}
       </div>
-    </>
+    </nav>
   );
 }
 
-export function AppSidebar({ view, onNavigate, harnessName }: AppSidebarProps) {
+export function AppSidebar({ view, onNavigate, onOpenScenario }: AppSidebarProps) {
   return (
     <aside className="hidden w-sidebar shrink-0 flex-col border-r border-border bg-sidebar md:flex">
       <div className="flex h-[52px] shrink-0 items-center gap-2.5 border-b border-border px-4">
@@ -69,14 +124,8 @@ export function AppSidebar({ view, onNavigate, harnessName }: AppSidebarProps) {
       <SidebarNav
         view={view}
         onNavigate={onNavigate}
-        footer={
-          harnessName ? (
-            <div className="mt-3 flex items-center gap-1.5 px-2 text-caption text-text-faint">
-              <Cpu className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate">{harnessName}</span>
-            </div>
-          ) : undefined
-        }
+        onOpenScenario={onOpenScenario}
+        pillId="sidebar-nav"
       />
     </aside>
   );
