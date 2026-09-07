@@ -1,41 +1,39 @@
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { MotionConfig } from "motion/react";
-import { useStore } from "./store";
-import { AppShell } from "./components/layout/app-shell";
-import { Toaster } from "./components/ui/sonner";
+import { useRuntimeStore } from "./app/store/runtime";
+import { useScenarioStore } from "./app/store/scenarios";
+import { usePreferencesStore } from "./app/store/preferences";
+import { AppShell } from "./app/shell/app-shell";
+import { Toaster } from "./shared/ui/sonner";
 
 export default function App() {
   const { i18n } = useTranslation();
-  const refreshAll = useStore((s) => s.refreshAll);
-  const loadPrefs = useStore((s) => s.loadPrefs);
-  const checkUpdate = useStore((s) => s.checkUpdate);
-  const loadProfiles = useStore((s) => s.loadProfiles);
-  const loadInstances = useStore((s) => s.loadInstances);
-  const theme = useStore((s) => s.theme);
+  const theme = usePreferencesStore((s) => s.theme);
 
-  // Load the overview, the scenario inventory and persisted preferences
-  // (language/theme) on startup, then check for a new release when automatic
-  // update checks are enabled. The scenario list feeds the sidebar group.
+  // Load the engine overview, the scenario inventory and the persisted
+  // preferences on startup, then check for a new release when automatic
+  // update checks are enabled. The scenario list feeds the rail and sidebar.
   useEffect(() => {
-    refreshAll();
-    loadProfiles();
-    loadInstances();
-    loadPrefs().then(() => {
-      if (useStore.getState().checkUpdates) {
-        checkUpdate();
+    void useRuntimeStore.getState().refreshOverview();
+    void useScenarioStore.getState().loadProfiles();
+    void useRuntimeStore.getState().loadInstances();
+    void usePreferencesStore.getState().loadPrefs().then(() => {
+      if (usePreferencesStore.getState().checkUpdates) {
+        void usePreferencesStore.getState().checkUpdate();
       }
     });
-  }, [refreshAll, loadProfiles, loadInstances, loadPrefs, checkUpdate]);
+  }, []);
 
   // Keep the runtime status fresh: refresh when the window regains focus and
   // poll while the app is visible. The polling interval is skipped when the
-  // document is hidden (backgrounded or minimized).
+  // document is hidden (backgrounded or minimized). Diagnostics deliberately
+  // run on the diagnostics page only, not on every poll.
   useEffect(() => {
     const refresh = () => {
       if (document.visibilityState === "visible") {
-        refreshAll();
-        loadInstances();
+        void useRuntimeStore.getState().refreshOverview();
+        void useRuntimeStore.getState().loadInstances();
       }
     };
     window.addEventListener("focus", refresh);
@@ -44,7 +42,7 @@ export default function App() {
       window.removeEventListener("focus", refresh);
       window.clearInterval(timer);
     };
-  }, [refreshAll]);
+  }, []);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: light)");

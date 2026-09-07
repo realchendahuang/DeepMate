@@ -372,10 +372,10 @@ Stage 4 plugin/marketplace support and Stage 5 snapshots:
   configuration between machines as one JSON document, from the CLI or the
   desktop Settings page with native save/open dialogs
 - `deepmate-desktop` Tauri shell (React + TypeScript + Tailwind + shadcn/ui)
-  with a left navigation rail and a shallow three-page layout — Overview
-  (status, runtime controls, diagnostics and the update banner), Plugins
-  (installed + market) and Settings (configuration + preferences) — with
-  responsive breakpoints and en/zh i18n
+  with a Discord-style tenant-first layout — a scenario rail (logo / scenes /
+  global settings), a per-scenario sidebar (overview, run, providers, plugins)
+  and system settings behind the rail gear — with responsive breakpoints and
+  en/zh i18n
 - Tauri command surface mirroring the CLI: inventory, configuration editing,
   plugin lifecycle, runtime control, snapshots, doctor, and config
   (language/theme/preferences) persistence, with action-history recording

@@ -35,7 +35,8 @@ Surfaces stack from the window up to elevated controls:
 | Token | Dark (`:root`) | Light (`.light`) | Used for |
 |---|---|---|---|
 | `bg` | `222 20% 5%` | `220 30% 97%` | window background |
-| `sidebar` | `222 25% 7%` | `220 25% 94%` | the left navigation rail |
+| `rail` | `222 28% 4%` | `220 16% 88%` | the outermost scenario switcher |
+| `sidebar` | `222 25% 7%` | `220 25% 94%` | the tenant / settings sidebar |
 | `panel` | `222 20% 10%` | `0 0% 100%` | cards (the default surface) |
 | `panel-2` | `222 20% 12%` | `220 25% 95%` | recessed regions: segmented track, secondary buttons |
 | `inset` | `222 25% 6%` | `220 30% 94%` | text inputs (cut *into* the surface) |
@@ -77,8 +78,8 @@ only the display label.
 
 - Radius: `rounded-lg` 12 (cards) · `rounded-md` 8 (controls) · `rounded-sm`
   6 (segments, chips)
-- Width: `w-sidebar` 200px (navigation rail) · `max-w-content` 1000px (page
-  column cap)
+- Width: `w-rail` 72px (scenario switcher) · `w-sidebar` 240px (tenant /
+  settings sidebar) · `max-w-content` 1000px (page column cap)
 - Shadows: `shadow-card`
 - Control heights: 20 (badges) · 26 (`size="sm"` buttons) · 30 (buttons,
   nav items) · 32 (inputs, dialogs)
@@ -141,37 +142,60 @@ everywhere.
 
 ## Shell & navigation
 
-The desktop shell is a left navigation rail next to a single scrollable
-content column — no per-page top bars and no page-to-page jumps.
+The desktop shell is **tenant-first**, three columns on desktop — a scenario
+rail, a tenant (or settings) sidebar, and a single scrollable content
+column. No per-page top bars and no page-to-page jumps.
 
-- **Desktop (md 768px+):** a fixed `w-sidebar` 200px rail on the left; the
-  content column to its right is the only scroll region. The rail stacks a
-  brand row (52px, logo + wordmark) above a single scrollable nav column
-  with two labeled groups: **工作区 Workspace** (Overview, Plugins) and
-  **设置 Settings** (Profiles / Models / Snapshots / Preferences / About).
-- **Mobile (<md):** the rail is hidden and a compact top bar (52px) shows a
-  menu button and the brand. The menu button opens a left drawer (same
-  200px width, same navigation items) over a scrim; it closes on selection,
-  Escape, or a scrim click.
-- Navigation is local component state (`View = overview | plugins | profiles
-  | models | snapshots | preferences | about`) — no router.
-  `AppShell` renders the sidebar + the content column + the mobile nav;
-  `NavItem` is the 32px nav row (active = `accent-soft` gray wash + full text
-  color, idle = dim text + hover wash).
+```
+[ Rail 72px ] [ Sidebar 240px ] [ Content ]
+  ⌗ home        scene name        overview (runtime)
+  scenes        概览              providers / plugins
+  +             提供商与模型       or system settings
+  ⚙ settings    插件
+```
+
+- **Scenario rail (`w-rail` 72px, `bg-rail`):** Discord-style workspace
+  switcher. A grid button at the top opens all-scenarios (the product logo
+  is a rounded-square asset and does **not** live in the circular rail).
+  One 48px avatar per scenario (letter, morphs from circle to rounded-square
+  when active, running-status dot, left pill). `+` creates a scenario. The
+  **gear at the bottom is global settings**. The scene list scrolls with the
+  scrollbar hidden so an empty rail never shows a stray thumb above the gear.
+- **Tenant sidebar (`w-sidebar` 240px, `bg-sidebar`):** headed by the
+  **current scenario's name**. Three pages only — Overview, Providers &
+  models, Plugins. Runtime controls live on Overview; there is no separate
+  Run page. Switching the rail keeps the current section so the sidebar
+  follows the tenant.
+- **Settings sidebar:** clicking the rail gear replaces the tenant sidebar
+  with the system list (Diagnostics, Snapshots, Preferences, About). Scene
+  configuration never appears here.
+- **Mobile (<md):** a horizontal rail across the top of the content, plus a
+  compact top bar (menu + wordmark). The menu opens a left drawer with the
+  same sidebar items; it closes on selection, Escape, or a scrim click.
+- Navigation is local component state (`View = scenarios | overview | run |
+  providers | plugins | diagnostics | snapshots | preferences | about`) — no
+  router. `NavItem` is the 32px nav row (active = `accent-soft` gray wash +
+  accent text, idle = dim text + hover wash).
+
+### What is scene-owned vs global
+
+| Scene (tenant sidebar) | Global (rail gear) |
+|---|---|
+| Overview (identity + start/stop or task runner) | Diagnostics / doctor |
+| Providers & models | Snapshots |
+| Plugins (installed + market) | Preferences (language, theme, tray, updates) |
+| Rename / delete this scenario | About |
+| | All-scenarios inventory (grid / home) |
 
 ## Pages
 
-The shell keeps navigation deliberately shallow: **all pages sit at the top
-level** — **Overview** (status + runtime controls + diagnostics + update
-banner), **Plugins** (Installed / Market sub-views), and **five configuration
-pages** (Profiles / Models / Snapshots / Preferences / About)
-grouped under the 设置 heading in the sidebar. Settings was flattened out of
-a two-level nav because the sidebar had room for every section directly;
-Plugins was promoted out of Settings for the same reason — its install /
-update / remove / market workflow made the settings page too heavy.
+A scenario is a tenant. Opening one lands on **Overview** — identity and the
+runtime for that scenario only (web start/stop/open, or the task runner).
+It does not preview plugins, layers or other sidebar pages. **Providers &
+models** and **Plugins** are the tenant's configuration pages. System pages
+sit behind the rail gear and use the settings sidebar instead of in-page tabs.
 
-The **Models** page merges the previous Providers and Models pages into one
-full-height split panel: the left column is a provider sidebar grouped into
+The **Providers & models** page is a full-height split panel: the left column is a provider sidebar grouped into
 默认 (the built-in DeepSeek route) and 自定义供应商, ending in an
 add-provider row; the right column edits the selected provider **in place**
 — Base URL, wire-protocol select (`openai-responses` /
@@ -240,8 +264,8 @@ logic:
 
 | Tier | Breakpoint | Behavior |
 |---|---|---|
-| ≥ `md` (768px) | sidebar appears | the left rail (200px) replaces the mobile top bar and drawer; Overview stats stay 2-column |
-| ≥ `lg` (1024px) | full data lists | the DataList detail column appears; Overview stats reflow to 4 columns |
+| ≥ `md` (768px) | rail + sidebar appear | the 72px scenario rail and 240px tenant sidebar replace the mobile top bar and drawer |
+| ≥ `lg` (1024px) | full data lists | the DataList detail column appears; scene overview stats reflow to 4 columns |
 
 Config tables never scroll horizontally — below `lg` the third (detail)
 column folds under the primary column and the first column stretches to fill.

@@ -10,6 +10,7 @@
 :root {
   /* Dark theme (default). */
   --bg: 222 20% 5%;
+  --rail: 222 28% 4%;
   --sidebar: 222 25% 7%;
   --panel: 222 20% 10%;
   --panel-2: 222 20% 12%;
@@ -67,6 +68,7 @@
 .light {
   /* Light theme. */
   --bg: 220 30% 97%;
+  --rail: 220 16% 88%;
   --sidebar: 220 25% 94%;
   --panel: 0 0% 100%;
   --panel-2: 220 25% 95%;
@@ -92,6 +94,7 @@
 @theme inline {
   /* Surfaces, from the window up to elevated controls. */
   --color-bg: hsl(var(--bg));
+  --color-rail: hsl(var(--rail));
   --color-sidebar: hsl(var(--sidebar));
   --color-panel: hsl(var(--panel));
   --color-panel-2: hsl(var(--panel-2));
@@ -144,7 +147,8 @@
   --radius-md: 8px;
   --radius-lg: 12px;
   --radius-xl: 12px;
-  --width-sidebar: 200px;
+  --width-rail: 72px;
+  --width-sidebar: 240px;
   --max-width-content: 1000px;
 
   /* Typography. */
@@ -180,6 +184,15 @@
 @layer base {
   * {
     @apply border-border;
+  }
+
+  /* Overlay scrollbars on the scenario rail read as a stray bar above the
+     settings gear. Keep scrolling, hide the thumb. */
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
   }
 
   body {

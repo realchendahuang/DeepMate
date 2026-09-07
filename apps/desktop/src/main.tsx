@@ -1,7 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
-import { ErrorBoundary } from "./components/error-boundary";
+import { ErrorBoundary } from "./app/error-boundary";
 import "./styles.css";
 import "./i18n";
 
