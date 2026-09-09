@@ -17,13 +17,20 @@ use tracing_subscriber::{EnvFilter, Layer};
 
 // Assemble the DeepSeek Harness service for the given data layout.
 //
-// `DEEPMATE_HARNESS_UI_URL` overrides the harness UI URL.
+// `DEEPMATE_HARNESS_UI_URL` overrides the harness UI URL. The market cache
+// freshness follows `Config.market.refresh_interval_seconds`, so a change to
+// the refresh interval takes effect on the next launch.
 pub fn build_harness(layout: &DataLayout) -> DeepSeekHarness {
     let platform = Arc::new(SystemPlatform);
     let mut harness = DeepSeekHarness::new(platform);
     if let Ok(url) = std::env::var("DEEPMATE_HARNESS_UI_URL") {
         harness = harness.with_ui_url(url);
     }
+    harness = harness.with_market_ttl(
+        load_config_or_default(layout)
+            .market
+            .refresh_interval_seconds,
+    );
     harness.with_data_dir(layout.root().to_path_buf())
 }
 

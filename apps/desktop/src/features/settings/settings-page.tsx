@@ -7,12 +7,16 @@ import { PageBody, PageHeader } from "@/shared/ui/page";
 import { DiagnosticsPage } from "@/features/diagnostics/diagnostics-page";
 import { PreferencesSection } from "./preferences-section";
 import { SnapshotsSection } from "./snapshots-section";
+import { MarketSection } from "./market-section";
+import { AdvancedSection } from "./advanced-section";
 import { AboutSection } from "./about-section";
 
 const SECTION_TITLE: Record<SettingSection, string> = {
   diagnostics: "settings.diagnostics",
   snapshots: "settings.snapshots",
   preferences: "settings.preferences",
+  market: "settings.market",
+  advanced: "settings.advanced",
   about: "settings.about",
 };
 
@@ -28,6 +32,8 @@ export function SettingsPage({ section }: { section: SettingSection }) {
       <PageHeader title={t(SECTION_TITLE[section])} />
       {section === "preferences" && <PreferencesSection />}
       {section === "snapshots" && <SnapshotsSection />}
+      {section === "market" && <MarketSection />}
+      {section === "advanced" && <AdvancedSection />}
       {section === "about" && <AboutSection />}
     </PageBody>
   );

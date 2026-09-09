@@ -11,9 +11,10 @@ interface NavItemProps {
   onClick: () => void;
   /** Shared across siblings so the active highlight slides between items. */
   pillId: string;
+  badge?: React.ReactNode;
 }
 
-export function NavItem({ icon: Icon, labelKey, active, onClick, pillId }: NavItemProps) {
+export function NavItem({ icon: Icon, labelKey, active, onClick, pillId, badge }: NavItemProps) {
   const { t } = useTranslation();
 
   return (
@@ -35,6 +36,7 @@ export function NavItem({ icon: Icon, labelKey, active, onClick, pillId }: NavIt
       )}
       <Icon className="relative h-4 w-4 shrink-0" />
       <span className="relative truncate">{t(labelKey)}</span>
+      {badge && <span className="relative ml-auto shrink-0">{badge}</span>}
     </button>
   );
 }

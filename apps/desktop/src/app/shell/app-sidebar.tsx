@@ -4,7 +4,9 @@
 
 import { useTranslation } from "react-i18next";
 import {
+  ArrowLeft,
   Cloud,
+  FileCode2,
   Globe,
   Info,
   LayoutDashboard,
@@ -12,6 +14,7 @@ import {
   Puzzle,
   ShieldCheck,
   SlidersHorizontal,
+  Store,
   TerminalSquare,
   type LucideIcon,
 } from "lucide-react";
@@ -19,7 +22,11 @@ import { useRouterStore, type ScenarioSection, type SettingSection } from "../ro
 import { NavItem } from "./nav-item";
 import { useScenarioStore } from "../store/scenarios";
 import { useRuntimeStore } from "../store/runtime";
+import { usePluginStore } from "../store/plugins";
+import { useProviderStore } from "../store/providers";
+import { Button } from "@/shared/ui/button";
 import { cn } from "@/shared/lib/utils";
+import { scenarioInitial } from "@/shared/lib/scenario";
 
 interface SectionDef<V extends string> {
   view: V;
@@ -37,6 +44,8 @@ const SETTING_SECTIONS: SectionDef<SettingSection>[] = [
   { view: "diagnostics", labelKey: "settings.diagnostics", icon: ShieldCheck },
   { view: "snapshots", labelKey: "settings.snapshots", icon: Layers },
   { view: "preferences", labelKey: "settings.preferences", icon: SlidersHorizontal },
+  { view: "market", labelKey: "settings.market", icon: Store },
+  { view: "advanced", labelKey: "settings.advanced", icon: FileCode2 },
   { view: "about", labelKey: "settings.about", icon: Info },
 ];
 
@@ -58,6 +67,12 @@ export function SidebarNav({ pillId }: { pillId: string }) {
   const scenarios = useScenarioStore((s) => s.profiles);
   const selectedScenario = useScenarioStore((s) => s.selectedScenario);
   const instances = useRuntimeStore((s) => s.instances);
+  const plugins = usePluginStore((s) => s.plugins);
+  const models = useProviderStore((s) => s.models[selectedScenario]);
+
+  const scenarioPlugins = plugins.filter((p) => p.profile === selectedScenario);
+  const hasOutdated = scenarioPlugins.some((p) => p.outdated);
+  const modelCount = models?.length ?? 0;
 
   if (route.kind === "scenarios") {
     return (
@@ -117,16 +132,39 @@ export function SidebarNav({ pillId }: { pillId: string }) {
 
   return (
     <NavList>
-      {SCENARIO_SECTIONS.map((item) => (
-        <NavItem
-          key={item.view}
-          icon={item.icon}
-          labelKey={item.labelKey}
-          active={route.section === item.view}
-          onClick={() => navigate({ kind: "scenario", section: item.view })}
-          pillId={pillId}
-        />
-      ))}
+      {SCENARIO_SECTIONS.map((item) => {
+        let badge: React.ReactNode = null;
+        if (item.view === "plugins" && scenarioPlugins.length > 0) {
+          badge = (
+            <span className="flex items-center gap-1">
+              {hasOutdated && (
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-warn" />
+              )}
+              <span className="rounded-full bg-panel-2 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-text-dim">
+                {scenarioPlugins.length}
+              </span>
+            </span>
+          );
+        } else if (item.view === "providers" && modelCount > 0) {
+          badge = (
+            <span className="rounded-full bg-panel-2 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-text-dim">
+              {modelCount}
+            </span>
+          );
+        }
+
+        return (
+          <NavItem
+            key={item.view}
+            icon={item.icon}
+            labelKey={item.labelKey}
+            active={route.section === item.view}
+            onClick={() => navigate({ kind: "scenario", section: item.view })}
+            pillId={pillId}
+            badge={badge}
+          />
+        );
+      })}
     </NavList>
   );
 }
@@ -134,9 +172,35 @@ export function SidebarNav({ pillId }: { pillId: string }) {
 function SidebarHeader() {
   const { t } = useTranslation();
   const route = useRouterStore((s) => s.route);
+  const openScenario = useRouterStore((s) => s.openScenario);
   const selectedScenario = useScenarioStore((s) => s.selectedScenario);
   const scenarios = useScenarioStore((s) => s.profiles);
   const instances = useRuntimeStore((s) => s.instances);
+
+  if (route.kind === "settings") {
+    const activeProfile = scenarios.find((p) => p.id === selectedScenario);
+    return (
+      <div className="flex h-[52px] shrink-0 items-center justify-between border-b border-border px-3">
+        <span className="truncate text-heading font-semibold text-text">
+          {t("settings.title")}
+        </span>
+        {selectedScenario && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => openScenario(selectedScenario)}
+            className="h-7 gap-1 px-2 text-small text-text-dim hover:text-text"
+            title={t("nav.backToScenario")}
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+            <span className="max-w-[80px] truncate text-small">
+              {activeProfile?.name ?? selectedScenario}
+            </span>
+          </Button>
+        )}
+      </div>
+    );
+  }
 
   let title = t("settings.title");
   let scenario = false;
@@ -150,16 +214,36 @@ function SidebarHeader() {
     instances.find((item) => item.profile === selectedScenario)?.status === "running";
 
   return (
-    <div className="flex h-[52px] shrink-0 items-center gap-2 border-b border-border px-4">
-      {scenario && (
-        <span
-          className={cn("h-2 w-2 shrink-0 rounded-full", running ? "bg-pass" : "bg-neutral")}
-          aria-hidden
-        />
+    <div className="flex h-[52px] shrink-0 items-center gap-2.5 border-b border-border px-4">
+      {scenario ? (
+        <>
+          <div
+            className={cn(
+              "flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[11px] font-bold",
+              running ? "bg-accent text-on-accent shadow-sm" : "bg-panel-2 text-text-dim",
+            )}
+          >
+            {scenarioInitial(title)}
+          </div>
+          <span className="min-w-0 flex-1 truncate text-heading font-semibold text-text">
+            {title}
+          </span>
+          <span
+            className={cn(
+              "relative flex h-2 w-2 shrink-0 items-center justify-center rounded-full",
+              running ? "bg-pass" : "bg-neutral",
+            )}
+          >
+            {running && (
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-pass opacity-75" />
+            )}
+          </span>
+        </>
+      ) : (
+        <span className="min-w-0 truncate text-heading font-semibold text-text">
+          {title || t("settings.title")}
+        </span>
       )}
-      <span className="min-w-0 truncate text-heading font-semibold text-text">
-        {title || t("settings.title")}
-      </span>
     </div>
   );
 }

@@ -61,11 +61,13 @@ export function filterMarket(
   entries: MarketEntry[],
   category: string | null,
   trust: MarketTrust | null,
+  source?: MarketEntry["source"] | null,
 ): MarketEntry[] {
   return entries.filter(
     (entry) =>
       (!category || entry.category === category) &&
-      (!trust || (entry.trust ?? "community") === trust),
+      (!trust || (entry.trust ?? "community") === trust) &&
+      (!source || entry.source === source),
   );
 }
 

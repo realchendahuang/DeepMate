@@ -173,9 +173,9 @@ column. No per-page top bars and no page-to-page jumps.
   compact top bar (menu + wordmark). The menu opens a left drawer with the
   same sidebar items; it closes on selection, Escape, or a scrim click.
 - Navigation is local component state (`View = scenarios | overview | run |
-  providers | plugins | diagnostics | snapshots | preferences | about`) — no
-  router. `NavItem` is the 32px nav row (active = `accent-soft` gray wash +
-  accent text, idle = dim text + hover wash).
+  providers | plugins | diagnostics | snapshots | preferences | market |
+  advanced | about`) — no router. `NavItem` is the 32px nav row (active =
+  `accent-soft` gray wash + accent text, idle = dim text + hover wash).
 
 ### What is scene-owned vs global
 
@@ -184,7 +184,9 @@ column. No per-page top bars and no page-to-page jumps.
 | Overview (identity + start/stop or task runner) | Diagnostics / doctor |
 | Providers & models | Snapshots |
 | Plugins (installed + market) | Preferences (language, theme, tray, updates) |
-| Rename / delete this scenario | About |
+| Rename / delete / description | Market (default source, refresh interval) |
+| | Advanced (raw settings.yaml / cordis.patch.yml editor, backed up per write) |
+| | About |
 | | All-scenarios inventory (grid / home) |
 
 ## Pages

@@ -24,6 +24,7 @@ export const commands = {
 	createScenario: (name: string, surface: Surface) => typedError<null, string>(__TAURI_INVOKE("create_scenario", { name, surface })),
 	removeProfile: (name: string) => typedError<null, string>(__TAURI_INVOKE("remove_profile", { name })),
 	renameProfile: (old: string, newName: string) => typedError<null, string>(__TAURI_INVOKE("rename_profile", { old, newName })),
+	setScenarioDescription: (name: string, description: string | null) => typedError<null, string>(__TAURI_INVOKE("set_scenario_description", { name, description })),
 	listPlugins: () => typedError<Plugin[], string>(__TAURI_INVOKE("list_plugins")),
 	pluginInstall: (profile: string, spec: string) => typedError<null, string>(__TAURI_INVOKE("plugin_install", { profile, spec })),
 	pluginRemove: (profile: string, id: string) => typedError<null, string>(__TAURI_INVOKE("plugin_remove", { profile, id })),
@@ -49,6 +50,10 @@ export const commands = {
 	setNotifyUpdates: (enabled: boolean) => typedError<null, string>(__TAURI_INVOKE("set_notify_updates", { enabled })),
 	autostartGet: () => typedError<boolean, string>(__TAURI_INVOKE("autostart_get")),
 	autostartSet: (enabled: boolean) => typedError<null, string>(__TAURI_INVOKE("autostart_set", { enabled })),
+	setMarketDefaultSource: (source: string) => typedError<null, string>(__TAURI_INVOKE("set_market_default_source", { source })),
+	setMarketRefreshInterval: (seconds: number) => typedError<null, string>(__TAURI_INVOKE("set_market_refresh_interval", { seconds })),
+	advancedFileRead: (scope: string, name: string | null) => typedError<string | null, string>(__TAURI_INVOKE("advanced_file_read", { scope, name })),
+	advancedFileSave: (scope: string, name: string | null, content: string) => typedError<null, string>(__TAURI_INVOKE("advanced_file_save", { scope, name, content })),
 	checkUpdate: () => typedError<{
 	current_version: string,
 	latest_version: string,
@@ -236,6 +241,8 @@ export type UiPrefs = {
 	check_updates: boolean,
 	notify_updates: boolean,
 	close_to_tray: boolean,
+	market_default_source: string,
+	market_refresh_interval_seconds: number,
 };
 
 export type UpdateInfo = {

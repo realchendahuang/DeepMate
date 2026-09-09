@@ -5,7 +5,7 @@
 
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Box, Cloud, Cpu, Eye, EyeOff, Plus, SquarePen, Trash2, Pencil } from "lucide-react";
+import { Box, Check, Cloud, Copy, Cpu, Eye, EyeOff, Plus, Search, SquarePen, Trash2, Pencil } from "lucide-react";
 import { useProviderStore } from "@/app/store/providers";
 import type { Model, Provider } from "@/shared/api/api";
 import { cn } from "@/shared/lib/utils";
@@ -22,6 +22,8 @@ import {
   SelectValue,
 } from "@/shared/ui/select";
 import { Field } from "./field";
+import { AdvancedSection, JsonField } from "./json-field";
+import { jsonOrNull, jsonValid } from "./json-utils";
 
 // Wire protocols a provider can speak. The first option (empty) keeps the
 // harness default; the others cover the endpoints the harness ships support.
@@ -61,10 +63,12 @@ function SidebarGroupLabel({ children }: { children: React.ReactNode }) {
 function ProviderRow({
   provider,
   active,
+  modelCount,
   onSelect,
 }: {
   provider: Provider;
   active: boolean;
+  modelCount?: number;
   onSelect: () => void;
 }) {
   return (
@@ -88,6 +92,16 @@ function ProviderRow({
       <span className={cn("min-w-0 flex-1 truncate", active ? "text-accent" : "text-text")}>
         {provider.name}
       </span>
+      {modelCount !== undefined && modelCount > 0 && (
+        <span
+          className={cn(
+            "rounded-full px-1.5 py-0.5 font-mono text-[10px] font-semibold tabular-nums",
+            active ? "bg-accent/15 text-accent" : "bg-panel text-text-faint",
+          )}
+        >
+          {modelCount}
+        </span>
+      )}
     </div>
   );
 }
@@ -130,8 +144,11 @@ export function ModelsPanel({
   const [api, setApi] = useState(selected?.api ?? "");
   const [baseUrl, setBaseUrl] = useState(selected?.base_url ?? "");
   const [apiKeyEnv, setApiKeyEnv] = useState(selected?.api_key_env ?? "");
+  const [compat, setCompat] = useState(selected?.compat ?? "");
   const [keyVisible, setKeyVisible] = useState(false);
   const [editingName, setEditingName] = useState(false);
+  const [modelSearch, setModelSearch] = useState("");
+  const [copiedModelId, setCopiedModelId] = useState<string | null>(null);
 
   // Legacy configs may carry a protocol not in the select; treat them as
   // "auto" so the select always shows a valid option.
@@ -145,7 +162,25 @@ export function ModelsPanel({
     (name !== selected.name ||
       api !== (selected.api ?? "") ||
       baseUrl !== (selected.base_url ?? "") ||
-      apiKeyEnv !== (selected.api_key_env ?? ""));
+      apiKeyEnv !== (selected.api_key_env ?? "") ||
+      compat !== (selected.compat ?? ""));
+
+  const discardChanges = () => {
+    if (!selected) return;
+    setName(selected.name);
+    setApi(selected.api ?? "");
+    setBaseUrl(selected.base_url ?? "");
+    setApiKeyEnv(selected.api_key_env ?? "");
+    setCompat(selected.compat ?? "");
+  };
+
+  const filteredModels = useMemo(() => {
+    if (!modelSearch.trim()) return providerModels;
+    const q = modelSearch.toLowerCase();
+    return providerModels.filter(
+      (m) => m.id.toLowerCase().includes(q) || (m.name && m.name.toLowerCase().includes(q)),
+    );
+  }, [providerModels, modelSearch]);
 
   const saveProvider = async () => {
     if (!selected || !name.trim()) return;
@@ -156,7 +191,7 @@ export function ModelsPanel({
       api: api.trim() || null,
       base_url: baseUrl.trim() || null,
       api_key_env: apiKeyEnv.trim() || null,
-      compat: selected.compat,
+      compat: jsonOrNull(compat),
     });
   };
 
@@ -174,6 +209,7 @@ export function ModelsPanel({
                   key={provider.id}
                   provider={provider}
                   active={provider.id === selectedId}
+                  modelCount={models.filter((m) => m.provider === provider.id).length}
                   onSelect={() => onSelect(provider.id)}
                 />
               ))}
@@ -188,6 +224,7 @@ export function ModelsPanel({
                     key={provider.id}
                     provider={provider}
                     active={provider.id === selectedId}
+                    modelCount={models.filter((m) => m.provider === provider.id).length}
                     onSelect={() => onSelect(provider.id)}
                   />
                 ))}
@@ -254,16 +291,23 @@ export function ModelsPanel({
                 </Button>
               )}
               {dirty && (
-                <Button
-                  type="button"
-                  variant="primary"
-                  size="sm"
-                  className="ml-auto"
-                  onClick={saveProvider}
-                  disabled={!name.trim()}
-                >
-                  {t("settings.save")}
-                </Button>
+                <div className="ml-auto flex items-center gap-2">
+                  <span className="hidden text-caption text-text-dim sm:inline">
+                    {t("settings.unsavedChanges")}
+                  </span>
+                  <Button type="button" variant="ghost" size="sm" onClick={discardChanges}>
+                    {t("settings.discard")}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="sm"
+                    onClick={saveProvider}
+                    disabled={!name.trim() || !jsonValid(compat)}
+                  >
+                    {t("settings.save")}
+                  </Button>
+                </div>
               )}
             </div>
 
@@ -326,15 +370,42 @@ export function ModelsPanel({
                 </div>
                 <p className="text-caption text-text-faint">{t("settings.apiKeyHint")}</p>
               </div>
+              <AdvancedSection>
+                <JsonField
+                  label={t("settings.compat")}
+                  hint={t("settings.compatHint")}
+                  value={compat}
+                  onChange={setCompat}
+                  placeholder={t("settings.jsonPlaceholder", { key: "supportsStore" })}
+                />
+              </AdvancedSection>
             </div>
 
             {/* Models of this provider. */}
-            <div className="mt-6 flex items-center justify-between gap-3">
-              <h3 className="text-heading font-semibold text-text">{t("settings.models")}</h3>
-              <Button type="button" variant="secondary" size="sm" onClick={onNewModel}>
-                <Plus className="h-4 w-4" />
-                {t("settings.addModel")}
-              </Button>
+            <div className="mt-6 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <h3 className="text-heading font-semibold text-text">{t("settings.models")}</h3>
+                <span className="rounded-full bg-panel-2 px-2 py-0.5 font-mono text-caption font-semibold text-text-dim">
+                  {providerModels.length}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                {providerModels.length > 2 && (
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text-faint" />
+                    <Input
+                      value={modelSearch}
+                      onChange={(e) => setModelSearch(e.target.value)}
+                      placeholder={t("settings.searchModels")}
+                      className="h-7 w-36 pl-8 text-small md:w-48"
+                    />
+                  </div>
+                )}
+                <Button type="button" variant="secondary" size="sm" onClick={onNewModel}>
+                  <Plus className="h-4 w-4" />
+                  {t("settings.addModel")}
+                </Button>
+              </div>
             </div>
             {providerModels.length === 0 ? (
               <div className="mt-3">
@@ -342,16 +413,29 @@ export function ModelsPanel({
                   {t("settings.noModels")}
                 </EmptyState>
               </div>
+            ) : filteredModels.length === 0 ? (
+              <div className="mt-3">
+                <EmptyState icon={<Search className="h-8 w-8 text-text-faint" />}>
+                  {t("plugins.searchEmpty")}
+                </EmptyState>
+              </div>
             ) : (
               <div className="mt-3 overflow-hidden rounded-md border border-border">
                 <div className="divide-y divide-border">
-                  {providerModels.map((model) => (
+                  {filteredModels.map((model) => (
                     <div
                       key={model.id}
                       className="flex items-center gap-2 px-3 py-2 transition-colors hover:bg-hover"
                     >
-                      <div className="min-w-0 flex-1 truncate font-mono text-body text-text">
-                        {model.id}
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-body text-text">
+                          {model.name && model.name !== model.id ? model.name : model.id}
+                        </div>
+                        {model.name && model.name !== model.id && (
+                          <div className="truncate font-mono text-caption text-text-faint">
+                            {model.id}
+                          </div>
+                        )}
                       </div>
                       <div className="flex shrink-0 items-center gap-1">
                         {model.input?.includes("image") && (
@@ -364,6 +448,29 @@ export function ModelsPanel({
                         )}
                       </div>
                       <div className="flex shrink-0 items-center gap-0.5">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => {
+                            void navigator.clipboard.writeText(model.id);
+                            setCopiedModelId(model.id);
+                            setTimeout(() => setCopiedModelId(null), 1500);
+                          }}
+                          aria-label={t("settings.copyModelId")}
+                          title={
+                            copiedModelId === model.id
+                              ? t("settings.modelIdCopied")
+                              : t("settings.copyModelId")
+                          }
+                        >
+                          {copiedModelId === model.id ? (
+                            <Check className="h-3.5 w-3.5 text-pass" />
+                          ) : (
+                            <Copy className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
                         <Button
                           type="button"
                           variant="ghost"

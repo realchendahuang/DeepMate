@@ -2,12 +2,21 @@ import * as React from "react";
 
 import { cn } from "@/shared/lib/utils";
 
+interface CardProps extends React.ComponentProps<"div"> {
+  interactive?: boolean;
+}
+
 // A muted panel container used by every page, styled after the Slint Card.
-function Card({ className, ...props }: React.ComponentProps<"div">) {
+function Card({ className, interactive, ...props }: CardProps) {
   return (
     <div
       data-slot="card"
-      className={cn("rounded-lg border border-border bg-panel shadow-card", className)}
+      className={cn(
+        "rounded-lg border border-border bg-panel shadow-card",
+        interactive &&
+          "cursor-pointer transition-all duration-150 hover:border-border-strong hover:bg-panel-2/60 active:scale-[0.99]",
+        className,
+      )}
       {...props}
     />
   );

@@ -1111,6 +1111,103 @@ impl SettingsEditor {
     }
 }
 
+// The files the desktop "advanced" raw editor can read and write.
+//
+// Only known harness-owned documents are reachable: the global settings
+// document, and a scenario's isolated settings or cordis patch. Each scope
+// resolves to a fixed path under the harness home, so no user-supplied path
+// can escape the allowed set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdvancedFileScope {
+    // The legacy global `$DSH_HOME/settings.yaml`.
+    GlobalSettings,
+    // A scenario's isolated `profiles/<name>/settings.yaml`.
+    SceneSettings,
+    // A scenario's `profiles/<name>/cordis.patch.yml` (row overrides incl.
+    // the settings-row redirection).
+    SceneCordis,
+}
+
+// Reject profile names that could escape the profiles directory.
+fn validate_profile_name(name: &str) -> CoreResult<()> {
+    if name.is_empty() {
+        return Err(CoreError::InvalidState(
+            "profile name must not be empty".to_string(),
+        ));
+    }
+    if name == "node_modules" || name.contains('/') || name.contains('\\') {
+        return Err(CoreError::InvalidState(format!(
+            "invalid profile name: {name:?}"
+        )));
+    }
+    Ok(())
+}
+
+impl AdvancedFileScope {
+    fn resolve(self, name: Option<&str>) -> CoreResult<PathBuf> {
+        let Some(home) = dsh_home() else {
+            return Err(CoreError::InvalidState(
+                "could not resolve the harness home directory".to_string(),
+            ));
+        };
+        match self {
+            Self::GlobalSettings => Ok(home.join("settings.yaml")),
+            Self::SceneSettings | Self::SceneCordis => {
+                let name = name.unwrap_or_default();
+                validate_profile_name(name)?;
+                let file = if self == Self::SceneCordis {
+                    "cordis.patch.yml"
+                } else {
+                    "settings.yaml"
+                };
+                Ok(home.join("profiles").join(name).join(file))
+            }
+        }
+    }
+}
+
+// Read one advanced document as raw text. `Ok(None)` when the file does not
+// exist yet (the editor then starts from an empty draft).
+pub fn read_advanced_file(
+    scope: AdvancedFileScope,
+    name: Option<&str>,
+) -> CoreResult<Option<String>> {
+    let path = scope.resolve(name)?;
+    match std::fs::read_to_string(&path) {
+        Ok(text) => Ok(Some(text)),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(err.into()),
+    }
+}
+
+// Write one advanced document back, backing up the previous file first
+// (mirroring the settings editor's `.deepmate.bak` habit).
+//
+// settings.yaml documents are validated as YAML before the write, so a syntax
+// error refuses the save with a readable message; cordis.patch.yml is exempt
+// because its `!!js dshHomePath(...)` custom tag defeats serde_yml.
+pub fn save_advanced_file(
+    scope: AdvancedFileScope,
+    name: Option<&str>,
+    content: &str,
+) -> CoreResult<()> {
+    let path = scope.resolve(name)?;
+    if scope != AdvancedFileScope::SceneCordis {
+        serde_yml::from_str::<Value>(content).map_err(|err| {
+            CoreError::InvalidState(format!("invalid settings {}: {err}", path.display()))
+        })?;
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    if path.is_file() {
+        let backup = PathBuf::from(format!("{}{}", path.display(), SETTINGS_BACKUP_SUFFIX));
+        let _ = std::fs::copy(&path, &backup);
+    }
+    std::fs::write(&path, content)?;
+    Ok(())
+}
+
 // Convert a raw JSON string back to a `serde_yml::Value`, validating it.
 fn json_to_yaml(raw: &Option<String>) -> CoreResult<Option<Value>> {
     let Some(text) = raw else {
@@ -1222,6 +1319,50 @@ pub fn remove_profile(name: &str) -> CoreResult<()> {
         )));
     }
     std::fs::remove_dir_all(&dir)?;
+    Ok(())
+}
+
+// Update a profile's `description` field in its manifest.
+//
+// `None` (or an empty string) removes the field, so the engine's bundles
+// fallback description takes over again. Follows `rename_profile`'s
+// read-edit-write habit with a `.deepmate.bak` backup.
+pub fn set_profile_description(name: &str, description: Option<String>) -> CoreResult<()> {
+    validate_profile_name(name)?;
+    let Some(home) = dsh_home() else {
+        return Err(CoreError::InvalidState(
+            "could not resolve the harness home directory".to_string(),
+        ));
+    };
+    let manifest = home.join("profiles").join(name).join("package.json");
+    if !manifest.is_file() {
+        return Err(CoreError::InvalidState(format!(
+            "profile not found: {name}"
+        )));
+    }
+    let text = std::fs::read_to_string(&manifest)?;
+    let mut doc: serde_json::Value = serde_json::from_str(&text).map_err(|err| {
+        CoreError::InvalidState(format!(
+            "invalid profile manifest {}: {err}",
+            manifest.display()
+        ))
+    })?;
+    match description.as_deref() {
+        Some("") | None => {
+            if let Some(object) = doc.as_object_mut() {
+                object.remove("description");
+            }
+        }
+        Some(text) => {
+            doc["description"] = serde_json::Value::from(text);
+        }
+    }
+    let backup = PathBuf::from(format!("{}{}", manifest.display(), MANIFEST_BACKUP_SUFFIX));
+    let _ = std::fs::copy(&manifest, &backup);
+    let text = serde_json::to_string_pretty(&doc).map_err(|err| {
+        CoreError::InvalidState(format!("failed to serialize {}: {err}", manifest.display()))
+    })?;
+    std::fs::write(&manifest, text)?;
     Ok(())
 }
 
@@ -2098,6 +2239,90 @@ pet:
         assert!(discover_profiles().unwrap().iter().all(|p| p.id != "tui"));
         // Removing a missing profile is rejected.
         assert!(remove_profile("tui").is_err());
+
+        restore_env(DSH_HOME_ENV, previous);
+    }
+
+    #[test]
+    fn set_profile_description_writes_and_clears_the_manifest_field() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let previous = std::env::var_os(DSH_HOME_ENV);
+        let home = fixture_home();
+        std::fs::create_dir_all(home.join("profiles")).unwrap();
+        write_profile(&home, "work", &[], &["@deepseek-ai/dsh-base"]);
+        std::env::set_var(DSH_HOME_ENV, &home);
+
+        set_profile_description("work", Some("日常打字".to_string())).unwrap();
+        let profiles = discover_profiles().unwrap();
+        let work = profiles.iter().find(|p| p.id == "work").unwrap();
+        assert_eq!(work.description.as_deref(), Some("日常打字"));
+
+        // Clearing the field restores the engine's bundles fallback.
+        set_profile_description("work", Some(String::new())).unwrap();
+        let profiles = discover_profiles().unwrap();
+        let work = profiles.iter().find(|p| p.id == "work").unwrap();
+        assert_eq!(
+            work.description.as_deref(),
+            Some("bundles: @deepseek-ai/dsh-base")
+        );
+
+        // A missing profile is rejected.
+        assert!(set_profile_description("ghost", Some("x".to_string())).is_err());
+        assert!(set_profile_description("a/b", Some("x".to_string())).is_err());
+
+        restore_env(DSH_HOME_ENV, previous);
+    }
+
+    #[test]
+    fn advanced_files_roundtrip_and_validate() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let previous = std::env::var_os(DSH_HOME_ENV);
+        let home = fixture_home();
+        std::fs::create_dir_all(home.join("profiles")).unwrap();
+        std::env::set_var(DSH_HOME_ENV, &home);
+
+        // Scene settings: save, read back, refuse invalid YAML.
+        let scene = AdvancedFileScope::SceneSettings;
+        assert_eq!(read_advanced_file(scene, Some("work")).unwrap(), None);
+        save_advanced_file(
+            scene,
+            Some("work"),
+            "llm-deepseek:\n  baseURL: https://api.example.com\n",
+        )
+        .unwrap();
+        assert_eq!(
+            read_advanced_file(scene, Some("work")).unwrap().as_deref(),
+            Some("llm-deepseek:\n  baseURL: https://api.example.com\n")
+        );
+        assert!(save_advanced_file(scene, Some("work"), "x: { a: 1").is_err());
+
+        // The global settings document is reachable without a scenario name.
+        let global = AdvancedFileScope::GlobalSettings;
+        save_advanced_file(global, None, "agent-default-model: deepseek-v4-flash\n").unwrap();
+        assert_eq!(
+            read_advanced_file(global, None).unwrap().as_deref(),
+            Some("agent-default-model: deepseek-v4-flash\n")
+        );
+
+        // cordis.patch.yml is exempt from YAML validation: its custom
+        // `dshHomePath` tag defeats serde_yml.
+        let cordis = AdvancedFileScope::SceneCordis;
+        save_advanced_file(
+            cordis,
+            Some("work"),
+            "- id: settings\n  name: '@deepseek-ai/dsh-settings-file'\n  config:\n    path: !!js dshHomePath('profiles/work/settings.yaml')\n",
+        )
+        .unwrap();
+        assert!(read_advanced_file(cordis, Some("work")).unwrap().is_some());
+
+        // Names that could escape the profiles directory are refused.
+        for bad in ["../evil", "a/b", "node_modules", ""] {
+            assert!(
+                save_advanced_file(scene, Some(bad), "x: 1").is_err(),
+                "{bad:?}"
+            );
+            assert!(read_advanced_file(scene, Some(bad)).is_err(), "{bad:?}");
+        }
 
         restore_env(DSH_HOME_ENV, previous);
     }

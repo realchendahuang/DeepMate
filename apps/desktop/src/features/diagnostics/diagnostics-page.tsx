@@ -5,14 +5,26 @@
 
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { CheckCircle2, AlertTriangle, XCircle, MinusCircle, ShieldCheck } from "lucide-react";
+import {
+  CheckCircle2,
+  AlertTriangle,
+  XCircle,
+  MinusCircle,
+  ShieldCheck,
+  Check,
+  Copy,
+  RotateCw,
+} from "lucide-react";
+import { motion } from "motion/react";
 import { useDiagnosticsStore } from "@/app/store/diagnostics";
 import { useBusyStore } from "@/app/store/busy";
 import type { CheckStatus, DoctorCheck } from "@/shared/api/api";
 import type { TFunction } from "i18next";
 import { cn } from "@/shared/lib/utils";
+import { enterTransition } from "@/shared/lib/motion";
 import { Card } from "@/shared/ui/card";
 import { Button } from "@/shared/ui/button";
+import { Badge } from "@/shared/ui/badge";
 import { Skeleton } from "@/shared/ui/skeleton";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { PageBody, SectionHeader } from "@/shared/ui/page";
@@ -229,7 +241,7 @@ export function DiagnosticsPage() {
         title={t("settings.diagnostics")}
         actions={
           <Button variant="primary" onClick={runDoctor} disabled={busy}>
-            <ShieldCheck className="h-4 w-4" />
+            <RotateCw className={cn("h-4 w-4", busyAction === "doctor" && "animate-spin")} />
             {busyAction === "doctor" ? t("overview.running") : t("overview.runDoctor")}
           </Button>
         }
@@ -242,45 +254,96 @@ export function DiagnosticsPage() {
           {t("overview.runDoctorEmpty")}
         </EmptyState>
       ) : (
-        <div className="space-y-3">
+        <motion.div
+          initial={{ opacity: 0, y: 4 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={enterTransition}
+          className="space-y-4"
+        >
+          {/* Missing engine alert */}
           {engineMissing && (
-            <Card className="border-warn/40">
-              <div className="flex flex-col gap-2 p-4 md:flex-row md:items-center md:justify-between">
+            <Card className="border-warn/40 bg-warn/5">
+              <div className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
                 <div>
                   <div className="text-heading font-semibold text-text">
                     {t("overview.notDetected")}
                   </div>
                   <p className="mt-0.5 text-small text-text-dim">{t("overview.notDetectedHint")}</p>
                 </div>
-                <code className="rounded border border-border bg-panel-2 px-2 py-1 font-mono text-caption text-text-dim">
-                  {t("doctor.installCommand")}
-                </code>
+                <div className="flex items-center gap-2">
+                  <code className="rounded border border-border bg-panel-2 px-2.5 py-1 font-mono text-caption text-text">
+                    {t("doctor.installCommand")}
+                  </code>
+                  <Button variant="secondary" size="sm" onClick={copyInstallCommand}>
+                    {copied ? <Check className="h-3.5 w-3.5 text-pass" /> : <Copy className="h-3.5 w-3.5" />}
+                    {copied ? t("doctor.copied") : t("doctor.copyCommand")}
+                  </Button>
+                </div>
               </div>
             </Card>
           )}
 
-          {failingChecks.length === 0 ? (
-            <p className="flex items-center gap-1.5 text-small text-pass">
-              <CheckCircle2 className="h-4 w-4 shrink-0" />
-              {t("doctor.allGoodLine", { count: activeChecks.length })}
-            </p>
-          ) : (
-            <p className="flex items-center gap-1.5 text-small text-warn">
-              <AlertTriangle className="h-4 w-4 shrink-0" />
-              {t("doctor.issuesLine", { count: failingChecks.length })}
-            </p>
-          )}
+          {/* System Health Status Banner */}
+          <Card
+            className={cn(
+              "flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between",
+              failingChecks.length === 0
+                ? "border-pass/30 bg-pass/5"
+                : "border-warn/30 bg-warn/5",
+            )}
+          >
+            <div className="flex items-center gap-3">
+              <div
+                className={cn(
+                  "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl",
+                  failingChecks.length === 0
+                    ? "bg-pass/15 text-pass"
+                    : "bg-warn/15 text-warn",
+                )}
+              >
+                {failingChecks.length === 0 ? (
+                  <CheckCircle2 className="h-5 w-5" />
+                ) : (
+                  <AlertTriangle className="h-5 w-5" />
+                )}
+              </div>
+              <div>
+                <h3 className="text-heading font-semibold text-text">
+                  {failingChecks.length === 0
+                    ? t("settings.healthAllGood")
+                    : t("settings.healthHasIssues", { count: failingChecks.length })}
+                </h3>
+                <p className="text-small text-text-dim">
+                  {failingChecks.length === 0
+                    ? t("doctor.allGoodLine", { count: activeChecks.length })
+                    : t("doctor.issuesLine", { count: failingChecks.length })}
+                </p>
+              </div>
+            </div>
 
-          <Card>
-            <div className="divide-y divide-border px-4 md:px-5">
+            <div className="flex items-center gap-2">
+              <Badge variant={failingChecks.length === 0 ? "pass" : "warn"}>
+                {failingChecks.length === 0
+                  ? `${activeChecks.length}/${activeChecks.length} Passed`
+                  : `${failingChecks.length} Issues`}
+              </Badge>
+            </div>
+          </Card>
+
+          {/* Check Item Cards */}
+          <Card className="overflow-hidden">
+            <div className="divide-y divide-border">
               {doctor.checks.map((check) => {
                 const row = doctorRow(check, t);
                 const Icon = CHECK_ICON[check.status];
                 return (
-                  <div key={check.id} className="flex gap-3 py-3">
+                  <div
+                    key={check.id}
+                    className="flex gap-3 p-4 transition-colors hover:bg-hover/20"
+                  >
                     <Icon
                       className={cn(
-                        "mt-0.5 h-[18px] w-[18px] shrink-0",
+                        "mt-0.5 h-5 w-5 shrink-0",
                         CHECK_TONE[check.status],
                       )}
                     />
@@ -309,22 +372,23 @@ export function DiagnosticsPage() {
                         </p>
                       ))}
                       {row.showInstall && (
-                        <div className="mt-1.5 flex items-center gap-1.5">
-                          <code className="rounded border border-border bg-panel-2 px-1.5 py-0.5 font-mono text-caption text-text-dim">
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <code className="rounded border border-border bg-panel-2 px-2 py-1 font-mono text-caption text-text-dim">
                             {t("doctor.installCommand")}
                           </code>
                           <Button variant="secondary" size="sm" onClick={copyInstallCommand}>
+                            {copied ? <Check className="h-3.5 w-3.5 text-pass" /> : <Copy className="h-3.5 w-3.5" />}
                             {copied ? t("doctor.copied") : t("doctor.copyCommand")}
                           </Button>
                         </div>
                       )}
                       {row.rawAction && (
-                        <p className="mt-0.5 text-small text-accent">
+                        <p className="mt-1 text-small text-accent">
                           {t("overview.suggestedAction", { action: row.rawAction })}
                         </p>
                       )}
                       {row.fixes && row.fixes.length > 0 && (
-                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <div className="mt-2.5 flex flex-wrap items-center gap-2">
                           {row.fixes.map((fix) => (
                             <Button
                               key={fix.mode}
@@ -344,7 +408,7 @@ export function DiagnosticsPage() {
               })}
             </div>
           </Card>
-        </div>
+        </motion.div>
       )}
     </PageBody>
   );

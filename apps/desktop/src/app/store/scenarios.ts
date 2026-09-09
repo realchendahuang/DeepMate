@@ -19,6 +19,7 @@ interface ScenarioState {
   createScenario: (name: string, surface: Surface) => Promise<void>;
   renameScenario: (oldId: string, newName: string) => Promise<void>;
   removeScenario: (profile: string) => Promise<void>;
+  updateDescription: (profile: string, description: string) => Promise<void>;
 }
 
 export const useScenarioStore = create<ScenarioState>((set, get) => ({
@@ -53,5 +54,13 @@ export const useScenarioStore = create<ScenarioState>((set, get) => ({
     if (get().selectedScenario === profile || get().selectedScenario === "") {
       set({ selectedScenario: get().profiles[0]?.id ?? "" });
     }
+  },
+  // Set a scenario's description; an empty text clears it (the engine's
+  // bundles fallback description takes over again).
+  updateDescription: async (profile: string, description: string) => {
+    await runBusy("save", () =>
+      api.setScenarioDescription(profile, description.trim() ? description.trim() : null),
+    );
+    await get().loadProfiles();
   },
 }));

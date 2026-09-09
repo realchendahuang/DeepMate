@@ -1,6 +1,9 @@
-// Model editor dialog: id, context/max-token windows and the input
-// modalities. Models always belong to a provider; editing keeps the model's
-// own provider, creating uses the provider the dialog was opened from.
+// Model editor dialog: display name, id, context/max-token windows, input
+// modalities, and the advanced raw capability blocks (compat,
+// reasoning_efforts). Models always belong to a provider; editing keeps the
+// model's own provider, creating uses the provider the dialog was opened
+// from. A display name is optional — empty mirrors the id, which the harness
+// treats as the name anyway.
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -16,7 +19,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/shared/ui/dialog";
+import { Textarea } from "@/shared/ui/textarea";
 import { Field } from "./field";
+import { AdvancedSection } from "./json-field";
+import { jsonOrNull, jsonValid } from "./json-utils";
 
 // Input modalities offered as chips; "text" is the harness baseline and
 // cannot be removed, so its chip is locked checked.
@@ -70,6 +76,8 @@ function ModalityChip({
   );
 }
 
+// Live JSON validity check reuses jsonValid from json-field.tsx.
+
 export function ModelDialog({
   profile,
   open,
@@ -90,6 +98,9 @@ export function ModelDialog({
   // provider, creating uses the provider the dialog was opened from.
   const provider = value?.provider ?? defaultProvider;
   const [id, setId] = useState(value?.id ?? "");
+  const [name, setName] = useState(
+    value?.name && value?.name !== value?.id ? value.name : "",
+  );
   const [contextWindow, setContextWindow] = useState(
     value?.context_window ? String(value.context_window) : "",
   );
@@ -99,8 +110,13 @@ export function ModelDialog({
     if (declared && declared.length > 0) return declared;
     return ["text"];
   });
+  const [reasoningEfforts, setReasoningEfforts] = useState(
+    value?.reasoning_efforts ?? "",
+  );
+  const [compat, setCompat] = useState(value?.compat ?? "");
 
-  const canSave = provider.trim().length > 0 && id.trim().length > 0;
+  const advancedValid = jsonValid(reasoningEfforts) && jsonValid(compat);
+  const canSave = provider.trim().length > 0 && id.trim().length > 0 && advancedValid;
 
   // Numeric fields accept digits only.
   const digitsOnly = (value: string) => value.replace(/\D/g, "");
@@ -115,17 +131,15 @@ export function ModelDialog({
 
   const save = async () => {
     if (!canSave) return;
-    // The display name mirrors the id unless the caller edits YAML directly;
-    // the harness treats a missing name as the id anyway.
     await upsertModel(profile, provider.trim(), {
       id: id.trim(),
-      name: id.trim(),
+      name: name.trim() || id.trim(),
       provider: provider.trim(),
       context_window: contextWindow.trim() ? Number(contextWindow.trim()) : null,
       max_tokens: maxTokens.trim() ? Number(maxTokens.trim()) : null,
       input: modalities.length > 0 ? modalities : null,
-      reasoning_efforts: value?.reasoning_efforts ?? null,
-      compat: value?.compat ?? null,
+      reasoning_efforts: jsonOrNull(reasoningEfforts),
+      compat: jsonOrNull(compat),
     });
     onClose();
   };
@@ -137,15 +151,25 @@ export function ModelDialog({
           <DialogTitle>{value ? t("settings.editModel") : t("settings.addModel")}</DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
-          <Field label={t("settings.modelId")}>
-            <Input
-              value={id}
-              onChange={(event) => setId(event.target.value)}
-              placeholder="deepseek-chat"
-              spellCheck={false}
-              className="font-mono"
-            />
-          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label={t("settings.modelId")}>
+              <Input
+                value={id}
+                onChange={(event) => setId(event.target.value)}
+                placeholder="deepseek-chat"
+                spellCheck={false}
+                className="font-mono"
+              />
+            </Field>
+            <Field label={t("settings.displayName")}>
+              <Input
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder={t("settings.displayNamePlaceholder")}
+                spellCheck={false}
+              />
+            </Field>
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <Field label={t("settings.contextWindow")}>
               <Input
@@ -177,6 +201,30 @@ export function ModelDialog({
               ))}
             </div>
           </Field>
+          <AdvancedSection>
+            <Field label={t("settings.reasoningEfforts")}>
+              <Textarea
+                value={reasoningEfforts}
+                onChange={(event) => setReasoningEfforts(event.target.value)}
+                placeholder={t("settings.jsonPlaceholder", { key: "max" })}
+                spellCheck={false}
+                className="h-20"
+              />
+              <p className="text-caption text-text-faint">{t("settings.reasoningHint")}</p>
+            </Field>
+            <Field label={t("settings.compat")}>
+              <Textarea
+                value={compat}
+                onChange={(event) => setCompat(event.target.value)}
+                placeholder={t("settings.jsonPlaceholder", {
+                  key: "supportsStore",
+                })}
+                spellCheck={false}
+                className="h-20"
+              />
+              <p className="text-caption text-text-faint">{t("settings.compatHint")}</p>
+            </Field>
+          </AdvancedSection>
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>

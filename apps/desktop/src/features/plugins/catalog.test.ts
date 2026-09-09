@@ -79,6 +79,17 @@ describe("filterMarket", () => {
   it("treats missing trust as community", () => {
     expect(filterMarket(entries, "vision", "community")).toEqual([entries[2]]);
   });
+
+  it("filters by source for the community tab", () => {
+    const mixed = [
+      entry("a", { source: "curated" }),
+      entry("b", { source: "community" }),
+      entry("c", { source: "community" }),
+    ];
+    expect(filterMarket(mixed, null, null, "community")).toEqual([mixed[1], mixed[2]]);
+    // No source filter keeps every entry.
+    expect(filterMarket(mixed, null, null, null)).toHaveLength(3);
+  });
 });
 
 describe("scenarioPluginRows", () => {

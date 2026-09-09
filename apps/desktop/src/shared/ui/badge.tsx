@@ -44,20 +44,25 @@ function Badge({
       {...props}
     >
       {dot && (
-        <span
-          className={cn("h-1.5 w-1.5 rounded-full", {
-            "bg-pass": variant === "pass",
-            "bg-warn": variant === "warn",
-            "bg-fail": variant === "fail",
-            "bg-skip": variant === "skip",
-            "bg-accent": variant === "accent",
-            "bg-neutral": variant === "neutral",
-          })}
-        />
+        <span className="relative flex h-1.5 w-1.5 items-center justify-center">
+          {variant === "pass" && (
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-pass opacity-75" />
+          )}
+          <span
+            className={cn("h-1.5 w-1.5 rounded-full", {
+              "bg-pass": variant === "pass",
+              "bg-warn": variant === "warn",
+              "bg-fail": variant === "fail",
+              "bg-skip": variant === "skip",
+              "bg-accent": variant === "accent",
+              "bg-neutral": variant === "neutral",
+            })}
+          />
+        </span>
       )}
       {children}
     </Comp>
   );
 }
 
-export { Badge, badgeVariants };
+export { Badge };

@@ -26,7 +26,7 @@ use deepmate_core::model::{Surface,
 };
 use deepmate_core::CoreResult;
 use deepmate_platform::{PlatformService, SystemPlatform};
-use deepseek_harness::DeepSeekHarness;
+use deepseek_harness::{AdvancedFileScope, DeepSeekHarness};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri::{AppHandle, Manager};
@@ -70,6 +70,11 @@ pub struct UiPrefs {
     pub check_updates: bool,
     pub notify_updates: bool,
     pub close_to_tray: bool,
+    pub market_default_source: String,
+    // Reflects `Config.market.refresh_interval_seconds`; exported as u32
+    // because specta forbids exporting u64.
+    #[specta(type = u32)]
+    pub market_refresh_interval_seconds: u64,
 }
 
 // A newer DeepMate release found on GitHub, if any. `None` means the current
@@ -425,6 +430,24 @@ pub async fn rename_profile(
     .await
 }
 
+// Set (or clear) a scenario's manifest description. `None` restores the
+// engine's bundles fallback description.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_scenario_description(
+    app: AppHandle,
+    name: String,
+    description: Option<String>,
+) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    run_action(
+        &state,
+        "desktop.profile.description",
+        state.harness.set_scenario_description(&name, description),
+    )
+    .await
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn list_plugins(app: AppHandle) -> Result<Vec<Plugin>, String> {
@@ -738,7 +761,92 @@ pub async fn get_config(app: AppHandle) -> Result<UiPrefs, String> {
         check_updates: config.general.check_updates,
         notify_updates: config.general.notify_updates,
         close_to_tray: config.ui.close_to_tray,
+        market_default_source: config.market.default_source,
+        market_refresh_interval_seconds: config.market.refresh_interval_seconds,
     })
+}
+
+// ---- Market settings ----
+
+#[tauri::command]
+#[specta::specta]
+pub async fn set_market_default_source(app: AppHandle, source: String) -> Result<(), String> {
+    if !matches!(source.as_str(), "curated" | "community") {
+        return Err(format!("unsupported market source: {source}"));
+    }
+    let state = app.state::<AppState>();
+    let mut config = deepmate_core::data::Config::load(&state.layout.config_path())
+        .map_err(|e| format!("{e}"))?;
+    config.market.default_source = source;
+    config
+        .save(&state.layout.config_path())
+        .map_err(|e| format!("{e}"))
+}
+
+// The market cache freshness, in seconds. The lower bound keeps a mis-set
+// value from hammering the registry; the upper bound is a week.
+// `u32`, not `u64`: Specta refuses BigInt-style types in bindings exports.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_market_refresh_interval(app: AppHandle, seconds: u32) -> Result<(), String> {
+    let seconds = u64::from(seconds);
+    if !(60..=604800).contains(&seconds) {
+        return Err("market refresh interval must be between 60 and 604800 seconds".to_string());
+    }
+    let state = app.state::<AppState>();
+    let mut config = deepmate_core::data::Config::load(&state.layout.config_path())
+        .map_err(|e| format!("{e}"))?;
+    config.market.refresh_interval_seconds = seconds;
+    config
+        .save(&state.layout.config_path())
+        .map_err(|e| format!("{e}"))
+}
+
+// ---- Advanced raw configuration files ----
+
+// Map the frontend's string scope onto the harness's file-scope enum. The
+// mapping is the only place the wire names for these files are defined.
+fn parse_advanced_scope(scope: &str) -> Result<AdvancedFileScope, String> {
+    match scope {
+        "global-settings" => Ok(AdvancedFileScope::GlobalSettings),
+        "scene-settings" => Ok(AdvancedFileScope::SceneSettings),
+        "scene-cordis" => Ok(AdvancedFileScope::SceneCordis),
+        _ => Err(format!("unknown advanced file scope: {scope}")),
+    }
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn advanced_file_read(
+    app: AppHandle,
+    scope: String,
+    name: Option<String>,
+) -> Result<Option<String>, String> {
+    let state = app.state::<AppState>();
+    let scope = parse_advanced_scope(&scope)?;
+    state
+        .harness
+        .advanced_file_read(scope, name)
+        .await
+        .map_err(|e| format!("{e}"))
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn advanced_file_save(
+    app: AppHandle,
+    scope: String,
+    name: Option<String>,
+    content: String,
+) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let scope = parse_advanced_scope(&scope)?;
+    run_action(
+        &state,
+        "desktop.advanced.save",
+        state.harness.advanced_file_save(scope, name, content),
+    )
+    .await
 }
 
 // ---- Own-settings backup (export / import) ----

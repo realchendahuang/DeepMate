@@ -37,11 +37,14 @@ const CURATED_CACHE_FILENAME: &str = "curated.json";
 const CACHE_TTL: Duration = Duration::from_secs(3600);
 
 // Market access with optional on-disk caching under the DeepMate data
-// directory.
+// directory. The cache freshness (`cache_ttl`) mirrors
+// `Config.market.refresh_interval_seconds`; the harness service wires it from
+// the loaded configuration.
 #[derive(Debug, Clone)]
 pub struct Market {
     cache_path: Option<PathBuf>,
     curated_cache_path: Option<PathBuf>,
+    cache_ttl: Duration,
     // The HTTP client is built once by the adapter and shared across searches
     // (and across search calls) so connections are reused instead of paying
     // for a new TLS handshake per query. reqwest::Client clones share the same
@@ -58,8 +61,15 @@ impl Market {
             curated_cache_path: cache_root
                 .as_ref()
                 .map(|root| root.join(CACHE_DIR).join(CURATED_CACHE_FILENAME)),
+            cache_ttl: CACHE_TTL,
             client,
         }
+    }
+
+    // Override the cache freshness with a configured refresh interval.
+    pub fn with_cache_ttl(mut self, ttl: Duration) -> Self {
+        self.cache_ttl = ttl;
+        self
     }
 
     // Search the market, serving the cached entries for the same query when
@@ -137,7 +147,7 @@ impl Market {
         let age = (chrono::Utc::now() - updated.with_timezone(&chrono::Utc))
             .to_std()
             .ok()?;
-        if age > CACHE_TTL {
+        if age > self.cache_ttl {
             return None;
         }
         Some(file.entries)
@@ -154,7 +164,7 @@ impl Market {
         let age = (chrono::Utc::now() - updated.with_timezone(&chrono::Utc))
             .to_std()
             .ok()?;
-        if age > CACHE_TTL {
+        if age > self.cache_ttl {
             return None;
         }
         Some(file.entries)

@@ -30,7 +30,7 @@
   --fail: 0 70% 68%;
   --skip: 222 10% 47%;
   --neutral: 222 10% 55%;
-  --shadow: 0 0% 0% / 0;
+  --shadow: 222 25% 2% / 0.32;
 
   /* shadcn/ui variable surface, mapped onto the DeepMate tokens above.
      The brand `--accent` keeps its DeepMate meaning (actions, selection,

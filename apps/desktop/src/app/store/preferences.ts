@@ -14,6 +14,8 @@ interface PreferencesState {
   notifyUpdates: boolean;
   closeToTray: boolean;
   autostart: boolean;
+  marketDefaultSource: string;
+  marketRefreshIntervalSeconds: number;
   updateInfo: UpdateInfo | null;
   updateChecked: boolean;
   setLanguage: (language: string) => Promise<void>;
@@ -22,6 +24,8 @@ interface PreferencesState {
   setCheckUpdates: (enabled: boolean) => Promise<void>;
   setNotifyUpdates: (enabled: boolean) => Promise<void>;
   setAutostart: (enabled: boolean) => Promise<void>;
+  setMarketDefaultSource: (source: string) => Promise<void>;
+  setMarketRefreshInterval: (seconds: number) => Promise<void>;
   checkUpdate: () => Promise<void>;
   // Download the desktop bundle for this platform, verify its checksum and
   // hand it to the OS installer. A stale banner (already up to date) clears.
@@ -42,6 +46,8 @@ export const usePreferencesStore = create<PreferencesState>((set, get) => ({
   notifyUpdates: true,
   closeToTray: true,
   autostart: false,
+  marketDefaultSource: "curated",
+  marketRefreshIntervalSeconds: 3600,
   updateInfo: null,
   updateChecked: false,
   setLanguage: async (language: string) => {
@@ -68,6 +74,14 @@ export const usePreferencesStore = create<PreferencesState>((set, get) => ({
   setAutostart: async (enabled: boolean) => {
     await runBusy("prefs", () => api.autostartSet(enabled));
     set({ autostart: enabled });
+  },
+  setMarketDefaultSource: async (source: string) => {
+    await runBusy("prefs", () => api.setMarketDefaultSource(source));
+    set({ marketDefaultSource: source });
+  },
+  setMarketRefreshInterval: async (seconds: number) => {
+    await runBusy("prefs", () => api.setMarketRefreshInterval(seconds));
+    set({ marketRefreshIntervalSeconds: seconds });
   },
   configExport: async () => {
     await runBusy("config", () => api.configExport());
@@ -114,6 +128,8 @@ export const usePreferencesStore = create<PreferencesState>((set, get) => ({
       notifyUpdates: prefs.notify_updates,
       closeToTray: prefs.close_to_tray,
       autostart,
+      marketDefaultSource: prefs.market_default_source,
+      marketRefreshIntervalSeconds: prefs.market_refresh_interval_seconds,
     });
     i18n.changeLanguage(prefs.language);
   },

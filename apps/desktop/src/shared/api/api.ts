@@ -51,6 +51,8 @@ export const api = {
   renameScenario: (oldName: string, newName: string) =>
     unwrap(commands.renameProfile(oldName, newName)),
   removeScenario: (name: string) => unwrap(commands.removeProfile(name)),
+  setScenarioDescription: (name: string, description: string | null) =>
+    unwrap(commands.setScenarioDescription(name, description)),
   // Providers & models (per scenario).
   listProviders: (profile: string) => unwrap(commands.listProviders(profile)),
   listModels: (profile: string) => unwrap(commands.listModels(profile)),
@@ -101,6 +103,15 @@ export const api = {
   setNotifyUpdates: (enabled: boolean) => unwrap(commands.setNotifyUpdates(enabled)),
   autostartGet: () => unwrap(commands.autostartGet()),
   autostartSet: (enabled: boolean) => unwrap(commands.autostartSet(enabled)),
+  // Market settings.
+  setMarketDefaultSource: (source: string) => unwrap(commands.setMarketDefaultSource(source)),
+  setMarketRefreshInterval: (seconds: number) =>
+    unwrap(commands.setMarketRefreshInterval(seconds)),
+  // Advanced raw configuration files.
+  advancedFileRead: (scope: string, name: string | null) =>
+    unwrap(commands.advancedFileRead(scope, name)),
+  advancedFileSave: (scope: string, name: string | null, content: string) =>
+    unwrap(commands.advancedFileSave(scope, name, content)),
   // Updates.
   checkUpdate: () => unwrap(commands.checkUpdate()),
   updateInstall: () => unwrap(commands.updateInstall()),

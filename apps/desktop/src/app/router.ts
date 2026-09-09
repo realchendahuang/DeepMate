@@ -7,7 +7,13 @@ import { create } from "zustand";
 import { useScenarioStore } from "./store/scenarios";
 
 export type ScenarioSection = "overview" | "providers" | "plugins";
-export type SettingSection = "diagnostics" | "snapshots" | "preferences" | "about";
+export type SettingSection =
+  | "diagnostics"
+  | "snapshots"
+  | "preferences"
+  | "market"
+  | "advanced"
+  | "about";
 
 export type Route =
   | { kind: "scenarios" }
@@ -30,6 +36,8 @@ const ROUTE_ORDER: readonly string[] = [
   "settings/diagnostics",
   "settings/snapshots",
   "settings/preferences",
+  "settings/market",
+  "settings/advanced",
   "settings/about",
 ];
 

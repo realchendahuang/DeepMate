@@ -36,9 +36,9 @@ function RailButton({
         <div className="group/rail relative flex w-rail shrink-0 justify-center">
           <span
             className={cn(
-              "absolute top-1/2 left-0 w-1 -translate-y-1/2 rounded-r-full bg-text transition-all",
+              "absolute top-1/2 left-0 w-1 -translate-y-1/2 rounded-r-full bg-text transition-all duration-150",
               active
-                ? "h-10 opacity-100"
+                ? "h-9 opacity-100"
                 : "h-0 opacity-0 group-hover/rail:h-5 group-hover/rail:opacity-70",
             )}
             aria-hidden
@@ -49,9 +49,9 @@ function RailButton({
             aria-label={label}
             aria-current={active ? "true" : undefined}
             className={cn(
-              "relative flex h-12 w-12 shrink-0 items-center justify-center text-small font-bold transition-[border-radius,background-color,color]",
+              "relative flex h-12 w-12 shrink-0 items-center justify-center text-small font-bold transition-all duration-150 active:scale-95",
               active
-                ? "rounded-2xl bg-accent text-on-accent"
+                ? "rounded-2xl bg-accent text-on-accent shadow-sm"
                 : "rounded-full bg-panel-2 text-text-dim hover:rounded-2xl hover:bg-hover hover:text-text",
               className,
             )}
@@ -59,13 +59,18 @@ function RailButton({
             {children}
           </button>
           {running !== undefined && (
-            <span
-              className={cn(
-                "pointer-events-none absolute right-2.5 bottom-0.5 h-3 w-3 rounded-full border-2 border-rail",
-                running ? "bg-pass" : "bg-neutral",
+            <span className="pointer-events-none absolute right-2.5 bottom-0.5 flex h-3.5 w-3.5 items-center justify-center">
+              {running && (
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-pass opacity-75" />
               )}
-              aria-hidden
-            />
+              <span
+                className={cn(
+                  "relative h-3 w-3 rounded-full border-2 border-rail",
+                  running ? "bg-pass" : "bg-neutral",
+                )}
+                aria-hidden
+              />
+            </span>
           )}
         </div>
       </TooltipTrigger>
@@ -143,9 +148,11 @@ export function ScenarioRail() {
             <LayoutGrid className="h-5 w-5" />
           </RailButton>
         </div>
+        <div className="h-[1px] w-8 bg-border" />
         <div className="no-scrollbar flex min-h-0 w-full flex-1 flex-col items-center gap-2 overflow-y-auto py-2">
           {scenes}
         </div>
+        <div className="h-[1px] w-8 bg-border" />
         <div className="flex w-full justify-center py-3">
           <RailButton
             active={settingsActive}

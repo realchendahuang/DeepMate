@@ -36,6 +36,9 @@ interface PluginState {
   forgetPlugin: (profile: string, id: string) => Promise<void>;
   loadMarketSources: () => Promise<void>;
   searchMarket: (query: string) => Promise<void>;
+  // Clear the market result list (used when switching to the community
+  // source whose search starts empty).
+  resetMarket: () => void;
   installPlugin: (profile: string, spec: string) => Promise<void>;
   // Install from the market with a compatibility preflight: a definite
   // "incompatible" verdict refuses the install; unknown or a failed check
@@ -88,6 +91,9 @@ export const usePluginStore = create<PluginState>((set, get) => ({
   searchMarket: async (query: string) => {
     const marketEntries = await runBusy("search", () => api.marketSearch(query));
     set({ marketEntries });
+  },
+  resetMarket: () => {
+    set({ marketEntries: [] });
   },
   installPlugin: async (profile: string, spec: string) => {
     await runBusy("install", () => api.pluginInstall(profile, spec));

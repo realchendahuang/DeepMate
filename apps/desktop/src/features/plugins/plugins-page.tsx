@@ -1,19 +1,31 @@
-// One scenario's plugins: the installed (and remembered-disabled) list with
-// enable/disable/update/remove per row, and the market search below to add
-// more. The live operation strip streams the current install/remove/update.
+// One scenario's plugins: tabbed interface separating installed plugins
+// (with search/filter, update, enable/disable) from the marketplace
+// (curated/community browsing, search, category/trust filters).
+// The live operation strip streams the current install/remove/update.
 
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Download, Loader2, Package, RefreshCw, Search, Trash2 } from "lucide-react";
+import {
+  ArrowUpRight,
+  Download,
+  Loader2,
+  Package,
+  RefreshCw,
+  Search,
+  Store,
+  Trash2,
+  X,
+} from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { usePluginStore } from "@/app/store/plugins";
+import { usePreferencesStore } from "@/app/store/preferences";
 import { useBusyStore } from "@/app/store/busy";
 import type { MarketTrust, Profile } from "@/shared/api/api";
 import { cn } from "@/shared/lib/utils";
 import { enterTransition, MOTION_DURATION, MOTION_EASE } from "@/shared/lib/motion";
 import { Button } from "@/shared/ui/button";
 import { Badge } from "@/shared/ui/badge";
-import { Card, CardContent } from "@/shared/ui/card";
+import { Card } from "@/shared/ui/card";
 import { EmptyState } from "@/shared/ui/empty-state";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
 import { Input } from "@/shared/ui/input";
@@ -35,6 +47,10 @@ const ROW_OP_KEY = {
   remove: "plugins.row.removing",
   update: "plugins.row.updating",
 } as const;
+
+// The market browsing source: the curated storefront or the community
+// (npm) search. Follows `Config.market.default_source` on first visit.
+type MarketSourceTab = "curated" | "community";
 
 // One pill in a market filter row (trust tier or category).
 function FilterChip({
@@ -65,6 +81,33 @@ function FilterChip({
   );
 }
 
+// A count-less pill for the source toggle (curated storefront / community
+// search).
+function SourceChip({
+  active,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "rounded-full border px-3 py-1 text-small font-medium transition-colors",
+        active
+          ? "border-accent/40 bg-accent/10 text-accent"
+          : "border-border bg-panel-2 text-text-dim hover:bg-hover",
+      )}
+    >
+      {label}
+    </button>
+  );
+}
+
 export function PluginsPage({ profile }: { profile: Profile }) {
   const { t } = useTranslation();
 
@@ -77,13 +120,20 @@ export function PluginsPage({ profile }: { profile: Profile }) {
   const loadPlugins = usePluginStore((s) => s.loadPlugins);
   const loadDisabledPlugins = usePluginStore((s) => s.loadDisabledPlugins);
   const searchMarket = usePluginStore((s) => s.searchMarket);
+  const resetMarket = usePluginStore((s) => s.resetMarket);
   const setPluginEnabled = usePluginStore((s) => s.setPluginEnabled);
   const runPluginOp = usePluginStore((s) => s.runPluginOp);
   const marketInstall = usePluginStore((s) => s.marketInstall);
   const dismissPluginOp = usePluginStore((s) => s.dismissPluginOp);
   const busyAction = useBusyStore((s) => s.busyAction);
 
+  const [activeTab, setActiveTab] = useState<"installed" | "market">("installed");
+  const [filter, setFilter] = useState("");
   const [query, setQuery] = useState("");
+  // The market browsing source, seeded from the persisted default source.
+  const [source, setSource] = useState<MarketSourceTab>(() =>
+    usePreferencesStore.getState().marketDefaultSource === "community" ? "community" : "curated",
+  );
   // The row an operation was launched from, so the row shows its own running
   // state while the op streams. Cleared whenever nothing is in flight.
   const [rowOp, setRowOp] = useState<{
@@ -100,14 +150,30 @@ export function PluginsPage({ profile }: { profile: Profile }) {
   useEffect(() => {
     void loadPlugins();
     void loadDisabledPlugins();
-    // The add panel opens on the curated storefront, like the old market tab.
-    void searchMarket("");
-  }, [loadPlugins, loadDisabledPlugins, searchMarket]);
+  }, [loadPlugins, loadDisabledPlugins]);
+
+  // The curated storefront loads on entry; the community tab starts empty
+  // and waits for a keyword search.
+  useEffect(() => {
+    if (source === "community") {
+      resetMarket();
+    } else {
+      void searchMarket("");
+    }
+  }, [source, searchMarket, resetMarket]);
 
   const rows = useMemo(
     () => scenarioPluginRows(plugins, disabledPlugins, profile.id),
     [plugins, disabledPlugins, profile.id],
   );
+
+  const filteredRows = useMemo(() => {
+    if (!filter.trim()) return rows;
+    const q = filter.trim().toLowerCase();
+    return rows.filter((r) => r.name.toLowerCase().includes(q) || r.id.toLowerCase().includes(q));
+  }, [rows, filter]);
+
+  const outdatedCount = useMemo(() => rows.filter((r) => r.outdated).length, [rows]);
 
   // Keys installed (or remembered-disabled) in this scenario, for the market
   // rows and to avoid listing market rows as "install" when they're present.
@@ -126,8 +192,16 @@ export function PluginsPage({ profile }: { profile: Profile }) {
   const categories = useMemo(() => categoryFacets(marketEntries), [marketEntries]);
   const trustTiers = useMemo(() => trustFacets(marketEntries), [marketEntries]);
   const visibleEntries = useMemo(
-    () => filterMarket(marketEntries, category, trust),
-    [marketEntries, category, trust],
+    () =>
+      filterMarket(
+        marketEntries,
+        category,
+        trust,
+        // The community tab shows npm results only; the curated storefront
+        // always includes its own entries at the front.
+        source === "community" ? "community" : null,
+      ),
+    [marketEntries, category, trust, source],
   );
 
   const doToggle = (id: string, enabled: boolean) => {
@@ -171,25 +245,113 @@ export function PluginsPage({ profile }: { profile: Profile }) {
         )}
       </AnimatePresence>
 
-      <section className="space-y-3">
-        <h2 className="text-heading font-semibold text-text">{t("plugins.installed")}</h2>
+      {/* Tabs */}
+      <div className="flex items-center justify-between border-b border-border pb-3">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setActiveTab("installed")}
+            className={cn(
+              "flex items-center gap-2 rounded-lg px-3.5 py-2 text-body font-medium transition-colors",
+              activeTab === "installed"
+                ? "bg-accent-soft text-accent font-semibold"
+                : "text-text-dim hover:bg-hover hover:text-text",
+            )}
+          >
+            <Package className="h-4 w-4" />
+            <span>{t("plugins.tabInstalled")}</span>
+            <span
+              className={cn(
+                "ml-0.5 rounded-full px-2 py-0.5 text-micro font-semibold tabular-nums",
+                activeTab === "installed"
+                  ? "bg-accent/20 text-accent"
+                  : "bg-panel-3 text-text-dim",
+              )}
+            >
+              {rows.length}
+            </span>
+            {outdatedCount > 0 && (
+              <span className="h-2 w-2 rounded-full bg-warn" title={t("plugins.outdated")} />
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("market")}
+            className={cn(
+              "flex items-center gap-2 rounded-lg px-3.5 py-2 text-body font-medium transition-colors",
+              activeTab === "market"
+                ? "bg-accent-soft text-accent font-semibold"
+                : "text-text-dim hover:bg-hover hover:text-text",
+            )}
+          >
+            <Store className="h-4 w-4" />
+            <span>{t("plugins.tabMarket")}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Installed tab */}
+      {activeTab === "installed" && (
         <motion.div
-          initial={{ opacity: 0, y: 6 }}
+          key="tab-installed"
+          initial={{ opacity: 0, y: 4 }}
           animate={{ opacity: 1, y: 0 }}
           transition={enterTransition}
-          className="space-y-3"
+          className="space-y-4"
         >
+          {rows.length > 0 && (
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-faint" />
+              <Input
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder={t("plugins.filterSearchPlaceholder")}
+                className="pl-9 pr-8"
+              />
+              {filter && (
+                <button
+                  type="button"
+                  onClick={() => setFilter("")}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-faint hover:text-text"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+          )}
+
           {!pluginsLoaded ? (
             <Skeleton className="h-32 w-full" />
           ) : rows.length === 0 ? (
-            <EmptyState icon={<Package className="h-8 w-8 text-text-faint" />}>
-              {t("settings.noPluginsInScenario")}
-            </EmptyState>
+            <Card className="p-8 text-center">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-panel-3 text-text-faint">
+                <Package className="h-6 w-6" />
+              </div>
+              <h3 className="mt-3 text-heading font-semibold text-text">
+                {t("settings.noPluginsInScenario")}
+              </h3>
+              <p className="mt-1 text-body text-text-dim">
+                {t("plugins.browseMarketHint")}
+              </p>
+              <div className="mt-4">
+                <Button variant="primary" onClick={() => setActiveTab("market")}>
+                  <Store className="h-4 w-4" />
+                  {t("plugins.exploreMarket")}
+                </Button>
+              </div>
+            </Card>
+          ) : filteredRows.length === 0 ? (
+            <Card className="p-8 text-center">
+              <p className="text-body text-text-dim">{t("plugins.noInstalledMatches")}</p>
+              <Button variant="ghost" size="sm" className="mt-3" onClick={() => setFilter("")}>
+                {t("plugins.clearSearch")}
+              </Button>
+            </Card>
           ) : (
             <Card className="overflow-hidden">
               <div className="divide-y divide-border">
                 <AnimatePresence initial={false}>
-                  {rows.map((plugin) => {
+                  {filteredRows.map((plugin) => {
                     const active = activeRowOp?.id === plugin.id ? activeRowOp : null;
                     return (
                       <motion.div
@@ -216,10 +378,10 @@ export function PluginsPage({ profile }: { profile: Profile }) {
                                 <Badge variant="warn">{t("plugins.outdated")}</Badge>
                               )}
                             </div>
-                            <div className="mt-0.5 flex flex-wrap gap-x-2 text-small text-text-faint">
-                              <span>{plugin.id}</span>
+                            <div className="mt-1 flex flex-wrap items-center gap-x-3 text-small text-text-faint">
+                              <span className="font-mono text-micro">{plugin.id}</span>
                               {plugin.version && (
-                                <span className={plugin.outdated ? "text-warn" : undefined}>
+                                <span className={cn(plugin.outdated && "text-warn font-medium")}>
                                   {t("plugins.versionLatest", {
                                     version: plugin.version,
                                     latest: plugin.latest ?? "-",
@@ -238,6 +400,7 @@ export function PluginsPage({ profile }: { profile: Profile }) {
                               <>
                                 <Button
                                   variant="primary"
+                                  size="sm"
                                   onClick={() => doToggle(plugin.id, true)}
                                   disabled={busy}
                                 >
@@ -246,6 +409,7 @@ export function PluginsPage({ profile }: { profile: Profile }) {
                                 </Button>
                                 <Button
                                   variant="danger"
+                                  size="sm"
                                   onClick={() =>
                                     setRemoving({ id: plugin.id, name: plugin.name })
                                   }
@@ -268,14 +432,30 @@ export function PluginsPage({ profile }: { profile: Profile }) {
                                     { name: plugin.name },
                                   )}
                                 />
-                                {plugin.enabled && (
-                                  <Button onClick={() => doUpdate(plugin.id)} disabled={busy}>
+                                {plugin.outdated ? (
+                                  <Button
+                                    variant="primary"
+                                    size="sm"
+                                    onClick={() => doUpdate(plugin.id)}
+                                    disabled={busy}
+                                  >
+                                    <RefreshCw className="h-4 w-4" />
+                                    {t("plugins.update")}
+                                  </Button>
+                                ) : (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => doUpdate(plugin.id)}
+                                    disabled={busy}
+                                  >
                                     <RefreshCw className="h-4 w-4" />
                                     {t("plugins.update")}
                                   </Button>
                                 )}
                                 <Button
                                   variant="danger"
+                                  size="sm"
                                   onClick={() =>
                                     setRemoving({ id: plugin.id, name: plugin.name })
                                   }
@@ -295,22 +475,83 @@ export function PluginsPage({ profile }: { profile: Profile }) {
               </div>
             </Card>
           )}
-        </motion.div>
-      </section>
 
-      <section className="space-y-3">
-        <div className="text-small font-bold text-text-dim">{t("settings.addPlugin")}</div>
-        <Card>
-          <CardContent className="flex flex-col gap-2 p-4 md:flex-row">
-            <Input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={t("settings.searchPluginPlaceholder")}
-              className="w-full flex-1"
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && query.trim()) searchMarket(query.trim());
-              }}
-            />
+          {/* Quick CTA to Marketplace */}
+          {rows.length > 0 && (
+            <Card
+              interactive
+              onClick={() => setActiveTab("market")}
+              className="flex items-center justify-between p-4 cursor-pointer hover:border-accent/40"
+            >
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent-soft text-accent">
+                  <Store className="h-5 w-5" />
+                </div>
+                <div>
+                  <h4 className="text-body font-semibold text-text">
+                    {t("plugins.exploreMarket")}
+                  </h4>
+                  <p className="text-small text-text-dim">
+                    {t("plugins.browseMarketHint")}
+                  </p>
+                </div>
+              </div>
+              <ArrowUpRight className="h-4 w-4 text-text-faint" />
+            </Card>
+          )}
+        </motion.div>
+      )}
+
+      {/* Marketplace tab */}
+      {activeTab === "market" && (
+        <motion.div
+          key="tab-market"
+          initial={{ opacity: 0, y: 4 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={enterTransition}
+          className="space-y-4"
+        >
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <SourceChip
+                active={source === "curated"}
+                label={t("plugins.marketSourceCurated")}
+                onClick={() => setSource("curated")}
+              />
+              <SourceChip
+                active={source === "community"}
+                label={t("plugins.marketSourceCommunity")}
+                onClick={() => setSource("community")}
+              />
+            </div>
+          </div>
+
+          <div className="relative flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-faint" />
+              <Input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={t("settings.searchPluginPlaceholder")}
+                className="pl-9 pr-8"
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && query.trim()) searchMarket(query.trim());
+                }}
+              />
+              {query && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setQuery("");
+                    if (source === "community") resetMarket();
+                    else searchMarket("");
+                  }}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-faint hover:text-text"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
             <Button
               variant="primary"
               onClick={() => searchMarket(query.trim())}
@@ -319,116 +560,123 @@ export function PluginsPage({ profile }: { profile: Profile }) {
               <Search className="h-4 w-4" />
               {t("plugins.search")}
             </Button>
-          </CardContent>
-        </Card>
+          </div>
 
-        {!pluginsLoaded ? (
-          <Skeleton className="h-24 w-full" />
-        ) : marketEntries.length === 0 ? (
-          <EmptyState icon={<Package className="h-8 w-8 text-text-faint" />}>
-            {query ? t("plugins.searchEmpty") : t("plugins.marketEmpty")}
-          </EmptyState>
-        ) : (
-          <>
-            {(trustTiers.length > 0 || categories.length > 0) && (
-              <div className="flex flex-wrap items-center gap-1.5">
-                <FilterChip
-                  active={trust === null}
-                  label={t("plugins.all")}
-                  count={marketEntries.length}
-                  onClick={() => setTrust(null)}
-                />
-                {trustTiers.map(({ key, count }) => (
+          {!pluginsLoaded ? (
+            <Skeleton className="h-24 w-full" />
+          ) : marketEntries.length === 0 ? (
+            <EmptyState icon={<Package className="h-8 w-8 text-text-faint" />}>
+              {query
+                ? t("plugins.searchEmpty")
+                : source === "community"
+                  ? t("plugins.marketEmptyCommunity")
+                  : t("plugins.marketEmpty")}
+            </EmptyState>
+          ) : (
+            <>
+              {(trustTiers.length > 0 || categories.length > 0) && (
+                <div className="flex flex-wrap items-center gap-1.5">
                   <FilterChip
-                    key={key}
-                    active={trust === key}
-                    label={t(`plugins.trust.${key}`)}
-                    count={count}
-                    onClick={() => setTrust(trust === key ? null : (key as MarketTrust))}
+                    active={trust === null}
+                    label={t("plugins.all")}
+                    count={marketEntries.length}
+                    onClick={() => setTrust(null)}
                   />
-                ))}
-                <FilterChip
-                  active={category === null}
-                  label={t("plugins.all")}
-                  count={marketEntries.length}
-                  onClick={() => setCategory(null)}
-                />
-                {categories.map(({ key, count }) => (
+                  {trustTiers.map(({ key, count }) => (
+                    <FilterChip
+                      key={key}
+                      active={trust === key}
+                      label={t(`plugins.trust.${key}`)}
+                      count={count}
+                      onClick={() => setTrust(trust === key ? null : (key as MarketTrust))}
+                    />
+                  ))}
+                  <div className="mx-1 h-4 w-px bg-border" />
                   <FilterChip
-                    key={key}
-                    active={category === key}
-                    label={t(`plugins.categories.${key}`, { defaultValue: key })}
-                    count={count}
-                    onClick={() => setCategory(category === key ? null : key)}
+                    active={category === null}
+                    label={t("plugins.all")}
+                    count={marketEntries.length}
+                    onClick={() => setCategory(null)}
                   />
-                ))}
-              </div>
-            )}
+                  {categories.map(({ key, count }) => (
+                    <FilterChip
+                      key={key}
+                      active={category === key}
+                      label={t(`plugins.categories.${key}`, { defaultValue: key })}
+                      count={count}
+                      onClick={() => setCategory(category === key ? null : key)}
+                    />
+                  ))}
+                </div>
+              )}
 
-            <Card className="overflow-hidden">
-              <div className="divide-y divide-border">
-                {visibleEntries.map((entry) => {
-                  const installed = installedKeys.has(entry.id);
-                  const disabledHere = !installed && disabledKeys.has(entry.id);
-                  return (
-                    <div key={entry.id} className="p-4">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-heading font-semibold text-text">{entry.id}</span>
-                        <TrustBadge trust={entry.trust ?? "community"} />
-                        {entry.category && (
-                          <Badge variant="neutral" dot={false}>
-                            {t(`plugins.categories.${entry.category}`, {
-                              defaultValue: entry.category,
-                            })}
-                          </Badge>
-                        )}
-                        {entry.version && (
-                          <Badge variant="skip" dot={false}>
-                            v{entry.version}
-                          </Badge>
-                        )}
-                        <span className="flex-1" />
-                        {installing === entry.id ? (
-                          <span className="flex items-center gap-2 text-small text-accent">
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                            {t("plugins.row.installing")}
-                          </span>
-                        ) : installed ? (
-                          <Badge variant="pass">{t("plugins.installedBadge")}</Badge>
-                        ) : disabledHere ? (
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            disabled={busy}
-                            onClick={() => doToggle(entry.id, true)}
-                          >
-                            <Download className="h-4 w-4" />
-                            {t("plugins.enableAction")}
-                          </Button>
-                        ) : (
-                          <Button
-                            variant="primary"
-                            size="sm"
-                            disabled={busy}
-                            title={t("settings.installToScenario")}
-                            onClick={() => doMarketInstall(entry.id)}
-                          >
-                            <Download className="h-4 w-4" />
-                            {t("plugins.install")}
-                          </Button>
+              <Card className="overflow-hidden">
+                <div className="divide-y divide-border">
+                  {visibleEntries.map((entry) => {
+                    const installed = installedKeys.has(entry.id);
+                    const disabledHere = !installed && disabledKeys.has(entry.id);
+                    return (
+                      <div key={entry.id} className="p-4 hover:bg-hover/30 transition-colors">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-heading font-semibold text-text">{entry.id}</span>
+                          <TrustBadge trust={entry.trust ?? "community"} />
+                          {entry.category && (
+                            <Badge variant="neutral" dot={false}>
+                              {t(`plugins.categories.${entry.category}`, {
+                                defaultValue: entry.category,
+                              })}
+                            </Badge>
+                          )}
+                          {entry.version && (
+                            <Badge variant="skip" dot={false}>
+                              v{entry.version}
+                            </Badge>
+                          )}
+                          <span className="flex-1" />
+                          {installing === entry.id ? (
+                            <span className="flex items-center gap-2 text-small text-accent">
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              {t("plugins.row.installing")}
+                            </span>
+                          ) : installed ? (
+                            <Badge variant="pass">{t("plugins.installedBadge")}</Badge>
+                          ) : disabledHere ? (
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              disabled={busy}
+                              onClick={() => doToggle(entry.id, true)}
+                            >
+                              <Download className="h-4 w-4" />
+                              {t("plugins.enableAction")}
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="primary"
+                              size="sm"
+                              disabled={busy}
+                              title={t("settings.installToScenario")}
+                              onClick={() => doMarketInstall(entry.id)}
+                            >
+                              <Download className="h-4 w-4" />
+                              {t("plugins.install")}
+                            </Button>
+                          )}
+                        </div>
+                        {entry.description && (
+                          <p className="mt-1.5 text-body text-text-dim leading-relaxed">
+                            {entry.description}
+                          </p>
                         )}
                       </div>
-                      {entry.description && (
-                        <p className="mt-1 text-body text-text-dim">{entry.description}</p>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </Card>
-          </>
-        )}
-      </section>
+                    );
+                  })}
+                </div>
+              </Card>
+            </>
+          )}
+        </motion.div>
+      )}
 
       <ConfirmDialog
         open={removing !== null}

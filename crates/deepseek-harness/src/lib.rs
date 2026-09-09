@@ -36,8 +36,12 @@ mod registry;
 use deepmate_core::model::{RuntimeInstance, Surface};
 use dsh::{
     create_profile, discover_profiles, list_all_plugins, list_models, list_providers,
-    profile_surface, remove_profile, SettingsEditor, BASE_BUNDLE, HEADLESS_BUNDLE, WEB_APP_BUNDLE,
+    profile_surface, read_advanced_file, remove_profile, save_advanced_file,
+    set_profile_description, SettingsEditor, BASE_BUNDLE, HEADLESS_BUNDLE, WEB_APP_BUNDLE,
 };
+// The raw-editor file scopes are part of the harness contract: the desktop
+// command layer maps its string arguments onto them.
+pub use dsh::AdvancedFileScope;
 use ports::PortRegistry;
 
 const HARNESS_ID: &str = "deepseek-harness";
@@ -90,6 +94,9 @@ pub struct DeepSeekHarness {
     data_dir: Option<PathBuf>,
     cli_cache: OnceLock<Option<String>>,
     http: reqwest::Client,
+    // Market cache freshness; mirrors `Config.market.refresh_interval_seconds`
+    // when assembled through `deepmate_app::build_harness`.
+    market_ttl: Duration,
 }
 
 // One failing loader entry from the runtime bundle probe.
@@ -109,6 +116,7 @@ impl DeepSeekHarness {
             data_dir: None,
             cli_cache: OnceLock::new(),
             http: market::build_http_client(),
+            market_ttl: Duration::from_secs(3600),
         }
     }
 
@@ -126,6 +134,12 @@ impl DeepSeekHarness {
     // a harness started by DeepMate and the harness's own web log.
     pub fn with_data_dir(mut self, dir: impl Into<PathBuf>) -> Self {
         self.data_dir = Some(dir.into());
+        self
+    }
+
+    // Override the market cache freshness in seconds.
+    pub fn with_market_ttl(mut self, seconds: u64) -> Self {
+        self.market_ttl = Duration::from_secs(seconds);
         self
     }
 
@@ -807,6 +821,37 @@ impl DeepSeekHarness {
         Ok(())
     }
 
+    // Set (or, with `None`, clear) a scenario's manifest description. The
+    // default `web` scenario and any other profile may set it; only
+    // rename/remove are protected.
+    pub async fn set_scenario_description(
+        &self,
+        name: &str,
+        description: Option<String>,
+    ) -> CoreResult<()> {
+        set_profile_description(name, description)
+    }
+
+    // Read one raw advanced document for the desktop raw editor.
+    pub async fn advanced_file_read(
+        &self,
+        scope: AdvancedFileScope,
+        name: Option<String>,
+    ) -> CoreResult<Option<String>> {
+        read_advanced_file(scope, name.as_deref())
+    }
+
+    // Write one raw advanced document back (validated and backed up by the
+    // harness filesystem contract).
+    pub async fn advanced_file_save(
+        &self,
+        scope: AdvancedFileScope,
+        name: Option<String>,
+        content: String,
+    ) -> CoreResult<()> {
+        save_advanced_file(scope, name.as_deref(), &content)
+    }
+
     pub async fn plugins(&self) -> CoreResult<Vec<Plugin>> {
         let mut plugins = list_all_plugins()?;
         // Enrich each plugin with its trust tier from the curated market, so
@@ -814,6 +859,7 @@ impl DeepSeekHarness {
         // hitting the network: the curated list is cached (1h TTL, offline
         // fallback) and a fetch failure degrades to no trust signal.
         let curated = market::Market::new(self.data_dir.clone(), self.http.clone())
+            .with_cache_ttl(self.market_ttl)
             .curated()
             .await
             .unwrap_or_default();
@@ -1184,7 +1230,8 @@ impl DeepSeekHarness {
     }
 
     pub async fn search_plugins(&self, query: &str) -> CoreResult<Vec<MarketEntry>> {
-        let market = market::Market::new(self.data_dir.clone(), self.http.clone());
+        let market = market::Market::new(self.data_dir.clone(), self.http.clone())
+            .with_cache_ttl(self.market_ttl);
         // The curated list is merged into every search so the curated source
         // is visible without a dedicated query. An empty query skips the npm
         // search entirely and shows the curated list alone — that is the
