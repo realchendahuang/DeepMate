@@ -59,12 +59,19 @@ impl PortRegistry {
         if let Some(existing) = file.ports.get(profile) {
             return Ok(*existing);
         }
-        let mut candidate = preferred.unwrap_or(DEFAULT_WEB_PORT);
-        if profile != "web" && preferred.is_none() {
-            candidate = FIRST_SCENARIO_PORT;
-            while file.ports.values().any(|port| *port == candidate) || listening(candidate) {
-                candidate += 1;
-            }
+        // A port is unavailable when another scenario already owns it or a
+        // live process listens on it. A `preferred` port that fails either
+        // check is skipped: handing it out anyway makes two engines fight
+        // over one port, and the loser only fails after the boot timeout.
+        let unavailable =
+            |port: u16| file.ports.values().any(|assigned| *assigned == port) || listening(port);
+        let mut candidate = match preferred {
+            Some(port) if !unavailable(port) => port,
+            _ if profile == "web" && preferred.is_none() => DEFAULT_WEB_PORT,
+            _ => FIRST_SCENARIO_PORT,
+        };
+        while unavailable(candidate) {
+            candidate += 1;
         }
         file.ports.insert(profile.to_string(), candidate);
         self.write(path, &file)?;
@@ -129,14 +136,12 @@ mod tests {
     use super::*;
 
     fn temp_registry() -> (PortRegistry, PathBuf) {
-        let dir = std::env::temp_dir().join(format!(
-            "deepmate-ports-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
+        // Tests run concurrently in one process: a wall-clock name can collide
+        // and let two tests share (and truncate) the same ports.json.
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir =
+            std::env::temp_dir().join(format!("deepmate-ports-test-{}-{seq}", std::process::id()));
         (PortRegistry::new(Some(dir.clone())), dir)
     }
 
@@ -167,6 +172,27 @@ mod tests {
         let free = |_port: u16| false;
         let port = registry.assign("coding", Some(4200), free).unwrap();
         assert_eq!(port, 4200);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn preferred_port_is_skipped_when_owned_by_another_scenario() {
+        let (registry, dir) = temp_registry();
+        let free = |_port: u16| false;
+        registry.assign("coding", Some(4200), free).unwrap();
+        // The port is taken: the second scenario must get the next free one
+        // instead of double-booking 4200.
+        let port = registry.assign("daily", Some(4200), free).unwrap();
+        assert_eq!(port, FIRST_SCENARIO_PORT);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn preferred_port_is_skipped_when_listening() {
+        let (registry, dir) = temp_registry();
+        let listening = |port: u16| port == 4200;
+        let port = registry.assign("coding", Some(4200), listening).unwrap();
+        assert_eq!(port, FIRST_SCENARIO_PORT);
         std::fs::remove_dir_all(&dir).ok();
     }
 

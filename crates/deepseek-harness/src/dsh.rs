@@ -14,7 +14,10 @@ use std::path::{Path, PathBuf};
 
 use deepmate_core::error::{CoreError, CoreResult};
 use deepmate_core::model::{Model, Plugin, Profile, Provider, Surface};
-use serde_yml::{Mapping, Sequence, Value};
+// YAML surface: noyalib's `serde_yaml`-compatible shim (string-keyed
+// mappings with `Value::insert`), replacing the archived `serde_yml`.
+use noyalib::compat::serde_yaml as yaml;
+use noyalib::compat::serde_yaml::{Mapping, Sequence, Value};
 
 const DSH_HOME_ENV: &str = "DSH_HOME";
 const DSH_HOME_DIR_NAME: &str = ".dsh";
@@ -597,9 +600,9 @@ struct CatalogModel {
     #[serde(default)]
     input: Option<Vec<String>>,
     #[serde(rename = "reasoningEfforts", default)]
-    reasoning_efforts: Option<serde_yml::Value>,
+    reasoning_efforts: Option<yaml::Value>,
     #[serde(default)]
-    compat: Option<serde_yml::Value>,
+    compat: Option<yaml::Value>,
 }
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -611,7 +614,7 @@ struct PiAiProviderProfile {
     base_url: Option<String>,
     #[serde(rename = "apiKeyEnv")]
     api_key_env: Option<String>,
-    compat: Option<serde_yml::Value>,
+    compat: Option<yaml::Value>,
     models: Option<Vec<CatalogModel>>,
 }
 
@@ -630,7 +633,7 @@ const SCENE_SETTINGS_PATCH: &str = "- id: settings
 // The per-scenario settings document, when the profile's cordis.patch.yml
 // redirects the `settings` row to one. The harness resolves
 // `!!js dshHomePath('profiles/<scene>/settings.yaml')` at boot; the custom
-// tag defeats serde_yml, so the expression is extracted textually. A plain
+// tag defeats the YAML parser, so the expression is extracted textually. A plain
 // literal `path:` is parsed structurally as a fallback.
 fn scene_settings_path(profile_id: &str) -> CoreResult<Option<PathBuf>> {
     let Some(home) = dsh_home() else {
@@ -650,7 +653,7 @@ fn scene_settings_path(profile_id: &str) -> CoreResult<Option<PathBuf>> {
             }
         }
     }
-    if let Ok(patch) = serde_yml::from_str::<Value>(&text) {
+    if let Ok(patch) = yaml::from_str::<Value>(&text) {
         if let Some(rows) = patch.as_sequence() {
             for row in rows {
                 if row.get("id").and_then(|v| v.as_str()) == Some("settings") {
@@ -710,7 +713,7 @@ pub fn ensure_scene_settings(profile_id: &str) -> CoreResult<()> {
         // Carry the legacy global document's LLM sections over once.
         let global = home.join("settings.yaml");
         if let Ok(text) = std::fs::read_to_string(&global) {
-            if let Ok(doc) = serde_yml::from_str::<Value>(&text) {
+            if let Ok(doc) = yaml::from_str::<Value>(&text) {
                 if let Some(map) = doc.as_mapping() {
                     let mut carry = Mapping::new();
                     for key in ["llm-deepseek", "llm-pi-ai", "agent-default-model"] {
@@ -719,7 +722,7 @@ pub fn ensure_scene_settings(profile_id: &str) -> CoreResult<()> {
                         }
                     }
                     if !carry.is_empty() {
-                        let out = serde_yml::to_string(&Value::Mapping(carry)).map_err(|err| {
+                        let out = yaml::to_string(&Value::Mapping(carry)).map_err(|err| {
                             CoreError::InvalidState(format!(
                                 "failed to serialize migrated settings: {err}"
                             ))
@@ -760,7 +763,7 @@ fn read_settings(profile_id: &str) -> CoreResult<SettingsDocument> {
     if text.trim().is_empty() {
         return Ok(SettingsDocument::default());
     }
-    serde_yml::from_str(&text).map_err(|err| {
+    yaml::from_str(&text).map_err(|err| {
         CoreError::InvalidState(format!("invalid settings {}: {err}", path.display()))
     })
 }
@@ -779,7 +782,7 @@ fn model_from_catalog(provider: &str, model: &CatalogModel) -> Model {
     }
 }
 
-// Convert a `serde_yml::Value` to its JSON string form. `serde_yml::Value`
+// Convert a `yaml::Value` to its JSON string form. `yaml::Value`
 // implements `Serialize`, so this round-trips opaque blocks losslessly.
 fn yaml_to_json(value: &Value) -> Option<String> {
     match value {
@@ -884,7 +887,7 @@ const SETTINGS_BACKUP_SUFFIX: &str = ".deepmate.bak";
 // Reads and rewrites the harness settings document (`$DSH_HOME/settings.yaml`)
 // while preserving every section DeepMate does not manage.
 //
-// The document is loaded as an order-preserving `serde_yml::Value` tree
+// The document is loaded as an order-preserving `yaml::Value` tree
 // (backed by an insertion-ordered map), only the `llm-pi-ai.providers` and
 // `llm-deepseek.models` subtrees are mutated, and the whole document is
 // written back. Unmanaged sections (`pet`, `ui-theme`, `llm-deepseek` scalar
@@ -908,7 +911,7 @@ impl SettingsEditor {
         if text.trim().is_empty() {
             return Ok(Value::Mapping(Mapping::new()));
         }
-        serde_yml::from_str::<Value>(&text).map_err(|err| {
+        yaml::from_str::<Value>(&text).map_err(|err| {
             CoreError::InvalidState(format!("invalid settings {}: {err}", path.display()))
         })
     }
@@ -928,7 +931,7 @@ impl SettingsEditor {
             let backup = PathBuf::from(format!("{}{}", path.display(), SETTINGS_BACKUP_SUFFIX));
             let _ = std::fs::copy(&path, &backup);
         }
-        let text = serde_yml::to_string(doc).map_err(|err| {
+        let text = yaml::to_string(doc).map_err(|err| {
             CoreError::InvalidState(format!("failed to serialize settings: {err}"))
         })?;
         std::fs::write(&path, text)?;
@@ -1185,7 +1188,7 @@ pub fn read_advanced_file(
 //
 // settings.yaml documents are validated as YAML before the write, so a syntax
 // error refuses the save with a readable message; cordis.patch.yml is exempt
-// because its `!!js dshHomePath(...)` custom tag defeats serde_yml.
+// because its `!!js dshHomePath(...)` custom tag defeats the YAML parser.
 pub fn save_advanced_file(
     scope: AdvancedFileScope,
     name: Option<&str>,
@@ -1193,7 +1196,7 @@ pub fn save_advanced_file(
 ) -> CoreResult<()> {
     let path = scope.resolve(name)?;
     if scope != AdvancedFileScope::SceneCordis {
-        serde_yml::from_str::<Value>(content).map_err(|err| {
+        yaml::from_str::<Value>(content).map_err(|err| {
             CoreError::InvalidState(format!("invalid settings {}: {err}", path.display()))
         })?;
     }
@@ -1208,7 +1211,7 @@ pub fn save_advanced_file(
     Ok(())
 }
 
-// Convert a raw JSON string back to a `serde_yml::Value`, validating it.
+// Convert a raw JSON string back to a `yaml::Value`, validating it.
 fn json_to_yaml(raw: &Option<String>) -> CoreResult<Option<Value>> {
     let Some(text) = raw else {
         return Ok(None);
@@ -1218,12 +1221,12 @@ fn json_to_yaml(raw: &Option<String>) -> CoreResult<Option<Value>> {
     }
     let value: serde_json::Value = serde_json::from_str(text)
         .map_err(|err| CoreError::InvalidState(format!("invalid JSON capability block: {err}")))?;
-    let yaml: Value = serde_yml::to_value(value)
+    let yaml: Value = yaml::to_value(value)
         .map_err(|err| CoreError::InvalidState(format!("invalid capability block: {err}")))?;
     Ok(Some(yaml))
 }
 
-// Build the `serde_yml::Value` for one model entry.
+// Build the `yaml::Value` for one model entry.
 fn model_to_yaml(model: &Model) -> CoreResult<Value> {
     let mut entry = Mapping::new();
     entry.insert("id", Value::from(model.id.as_str()));
@@ -2305,7 +2308,7 @@ pet:
         );
 
         // cordis.patch.yml is exempt from YAML validation: its custom
-        // `dshHomePath` tag defeats serde_yml.
+        // `dshHomePath` tag defeats the YAML parser.
         let cordis = AdvancedFileScope::SceneCordis;
         save_advanced_file(
             cordis,

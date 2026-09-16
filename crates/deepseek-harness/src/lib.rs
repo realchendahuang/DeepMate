@@ -190,11 +190,13 @@ async fn run_streamed_child(
             );
             stdout_task.abort();
             stderr_task.abort();
-            let pid = child.id().unwrap_or_default();
             #[cfg(unix)]
-            unsafe {
-                libc::kill(-(pid as i32), libc::SIGKILL);
-                libc::kill(pid as i32, libc::SIGKILL);
+            {
+                let pid = child.id().unwrap_or_default();
+                unsafe {
+                    libc::kill(-(pid as i32), libc::SIGKILL);
+                    libc::kill(pid as i32, libc::SIGKILL);
+                }
             }
             let _ = child.kill().await;
             let _ = child.wait().await;
@@ -209,7 +211,7 @@ pub struct DeepSeekHarness {
     ui_url: Option<String>,
     cli_names: Vec<String>,
     data_dir: Option<PathBuf>,
-    cli_cache: OnceLock<Option<String>>,
+    cli_cache: OnceLock<String>,
     http: reqwest::Client,
     // Market cache freshness; mirrors `Config.market.refresh_interval_seconds`
     // when assembled through `deepmate_app::build_harness`.
@@ -362,20 +364,23 @@ impl DeepSeekHarness {
         None
     }
 
-    // Locate the harness CLI, probing each candidate command once and caching
-    // the result.
+    // Locate the harness CLI, probing each candidate command. Only a
+    // successful probe is cached: the desktop app is a long-lived tray
+    // process, and a user who installs the harness after launching DeepMate
+    // must be picked up without a restart.
     fn find_cli(&self) -> Option<String> {
-        self.cli_cache
-            .get_or_init(|| {
-                self.candidate_commands().into_iter().find_map(|name| {
-                    // If the process can be spawned at all, we treat it as
-                    // present. A non-zero exit may still mean a real CLI
-                    // exists but uses a different flag.
-                    Command::new(&name).arg("--version").output().ok()?;
-                    Some(name)
-                })
-            })
-            .clone()
+        if let Some(cli) = self.cli_cache.get() {
+            return Some(cli.clone());
+        }
+        let found = self.candidate_commands().into_iter().find_map(|name| {
+            // If the process can be spawned at all, we treat it as present.
+            // A non-zero exit may still mean a real CLI exists but uses a
+            // different flag.
+            Command::new(&name).arg("--version").output().ok()?;
+            Some(name)
+        })?;
+        let _ = self.cli_cache.set(found.clone());
+        Some(found)
     }
 
     // Best-effort version from `--version` output. The real `dsh` launcher
@@ -1149,12 +1154,6 @@ impl DeepSeekHarness {
     // The disabled-plugin registry, sorted by (profile, id).
     pub fn disabled_plugins(&self) -> CoreResult<Vec<DisabledPlugin>> {
         self.registry().list()
-    }
-
-    // Forget a disabled-plugin record without reinstalling it: the row
-    // disappears from the listing and enable is no longer offered.
-    pub fn forget_plugin(&self, profile: &str, id: &str) -> CoreResult<()> {
-        self.registry().remove(profile, id)
     }
 
     fn registry(&self) -> registry::DisabledRegistry {
