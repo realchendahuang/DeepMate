@@ -330,20 +330,20 @@ fn deepseek_official_route_edits_llm_deepseek() {
     );
 }
 
+// A fake `dsh` that keeps the test hermetic (no npm traffic) while recording
+// the exact arguments the bootstrap forwards. The launcher is a POSIX shell
+// script, so the test is unix-only: Windows would need a batch-file dialect
+// that cannot be verified on the project's macOS build host, and the project
+// ships macOS artifacts only (see AGENTS.md). The forwarded-argument logic
+// itself is platform-independent Rust and is covered by this test on macOS
+// and Linux.
+#[cfg(unix)]
 #[test]
 fn profile_create_and_remove_via_cli() {
     let home = test_data_dir();
-    // Scenario creation bootstraps the surface bundles through the engine;
-    // a fake `dsh` keeps the test hermetic (no npm traffic) while recording
-    // the exact pnpm arguments.
     let work = test_data_dir();
     std::fs::create_dir_all(&work).unwrap();
     let recorded = work.join("recorded-args");
-    // The fake launcher must be a real executable on every platform: a POSIX
-    // shell script on unix, a batch file on Windows (which `Command` runs via
-    // cmd.exe). Both write the arguments one per line next to themselves and
-    // answer `--version` without recording.
-    #[cfg(unix)]
     let fake = {
         use std::os::unix::fs::PermissionsExt;
         let fake = work.join("fake-dsh");
@@ -358,26 +358,6 @@ fn profile_create_and_remove_via_cli() {
         let mut perms = std::fs::metadata(&fake).unwrap().permissions();
         perms.set_mode(0o755);
         std::fs::set_permissions(&fake, perms).unwrap();
-        fake
-    };
-    #[cfg(windows)]
-    let fake = {
-        let fake = work.join("fake-dsh.cmd");
-        // `%~dp0` is the script's own directory, which avoids embedding an
-        // absolute path (and its backslashes) into the batch file.
-        std::fs::write(
-            &fake,
-            "@echo off\r\n\
-             if \"%~1\"==\"--version\" exit /b 0\r\n\
-             :loop\r\n\
-             if \"%~1\"==\"\" goto end\r\n\
-             echo %~1>>\"%~dp0recorded-args\"\r\n\
-             shift\r\n\
-             goto loop\r\n\
-             :end\r\n\
-             exit /b 0\r\n",
-        )
-        .unwrap();
         fake
     };
 
