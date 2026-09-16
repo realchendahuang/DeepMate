@@ -1909,7 +1909,9 @@ pub(crate) mod tests {
     use super::*;
     use deepmate_platform::SystemPlatform;
 
-    // Serializes DSH_HOME mutation against the dsh.rs tests.
+    // Serializes DSH_HOME mutation against the dsh.rs tests. Only the two
+    // unix-only snapshot tests take it, so the import is gated the same way.
+    #[cfg(unix)]
     pub(crate) use crate::dsh::tests::ENV_LOCK as DSH_ENV_LOCK;
 
     #[tokio::test]
@@ -2541,6 +2543,7 @@ pub(crate) mod tests {
         restore_env("DSH_HOME", previous);
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     #[allow(clippy::await_holding_lock)]
     async fn instances_reports_every_scenario_state() {
@@ -3936,6 +3939,7 @@ llm-pi-ai:
     }
 
     #[cfg(unix)]
+    #[cfg(unix)]
     #[tokio::test]
     #[allow(clippy::await_holding_lock)]
     async fn doctor_bundle_probe_skips_clientless_bundles() {
@@ -4124,6 +4128,7 @@ llm-pi-ai:
         restore_env("DSH_HOME", previous);
     }
 
+    #[cfg(unix)]
     #[cfg(unix)]
     #[tokio::test]
     #[allow(clippy::await_holding_lock)]

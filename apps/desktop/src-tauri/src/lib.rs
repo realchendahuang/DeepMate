@@ -13,7 +13,9 @@ use deepmate_app::{build_harness, init_tracing, load_config_or_default};
 use deepmate_platform::{PlatformService, SystemPlatform};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{Manager, RunEvent};
+use tauri::Manager;
+#[cfg(target_os = "macos")]
+use tauri::RunEvent;
 
 use commands::AppState;
 
@@ -123,12 +125,12 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building the DeepMate application");
 
-    app.run(|app_handle, event| {
-        // macOS dock click while the window is hidden restores it.
-        match event {
-            #[cfg(target_os = "macos")]
-            RunEvent::Reopen { .. } => show_main_window(app_handle),
-            _ => {}
+    // The handler body is macOS-only (a dock click while the window is hidden
+    // restores it), so both bindings are unused on the other platforms.
+    app.run(|_app_handle, _event| {
+        #[cfg(target_os = "macos")]
+        if let RunEvent::Reopen { .. } = _event {
+            show_main_window(_app_handle);
         }
     });
 }
