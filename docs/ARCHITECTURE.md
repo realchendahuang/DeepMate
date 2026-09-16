@@ -107,7 +107,7 @@ The bridge also uses:
   pattern matching
 - **semantic types** — `chrono::DateTime` maps to a real `Date` in the
   generated bindings (e.g. `MarketEntry.updated`), with the conversion code
-  generated into `bindings.ts`
+  generated into `shared/api/bindings.ts`
 - **`tauri::ipc::Channel` streaming** — `plugin_op_stream` runs a plugin
   operation (install / remove / update) while pushing `PluginOpEvent`
   (Started / Line / Finished) to the frontend, which renders a live progress

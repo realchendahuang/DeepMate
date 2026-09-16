@@ -51,6 +51,6 @@
 - **质量门禁**：根 workspace `make ci`；另有 core purity gate（`crates/deepmate-core` 内不得出现 deepseek/dsh 字样，CI 强制）。
 - **编译缓存**：src-tauri 已并入根 workspace，全项目只有一个 `target/`（2026-09-16 重构）。`profile.dev` 用 `debug = "line-tables-only"` 控制 debug 缓存体积；target/debug 膨胀到数 GB 时跑 `make cache-clean` 清增量编译垃圾（Cargo 自己从不清理）。
 - **桌面端**：Tauri 2 + React + Tailwind（v4，CSS-first）；设计令牌只存在于 `apps/desktop/src/styles.css` 的 `@theme`，组件/页面禁止硬编码视觉值（见 docs/DESIGN_SYSTEM.md）。
-- **bindings 再生成**：改了 Tauri 命令面/模型后跑 `cargo test -p deepmate-desktop --lib export_bindings`，生成物是 `apps/desktop/src/shared/api/bindings.ts`（前端唯一 import 的路径）；生成文件勿跑 prettier。
+- **bindings 再生成**：改了 Tauri 命令面/模型后跑 `cargo test -p deepmate-desktop --lib export_bindings_headless`（debug 启动时也会自动导出），生成物是 `apps/desktop/src/shared/api/bindings.ts`（前端唯一 import 的路径）；生成文件勿跑 prettier（`.prettierignore` 已排除）。
 - **i18n**：新增 UI 文案必须同时加 `apps/desktop/src/locales/en.json` 和 `zh.json`；托盘菜单在 Rust 侧按语言分支。
 - **文档同步**：改了架构/设计/命令面，同一批更新 README.md 与 docs/，不允许文档漂移（Slint 时代的教训）。
