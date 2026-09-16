@@ -1,4 +1,4 @@
-.PHONY: build test run dev dev-release fmt fmt-check clippy check ci
+.PHONY: build test run dev dev-release fmt fmt-check clippy check ci cache-clean
 
 build:
 	cargo build --workspace
@@ -30,3 +30,8 @@ check:
 	cargo check --workspace
 
 ci: fmt-check clippy test
+
+# Cargo never prunes stale incremental-cache fingerprints on its own; run this
+# when target/debug grows into the multiple-GB range.
+cache-clean:
+	rm -rf target/debug/incremental

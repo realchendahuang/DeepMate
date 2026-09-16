@@ -9,23 +9,22 @@
 ### 发版步骤（macOS arm64 主机）
 
 1. **同步版本号（5 处，全部从旧号 sed 到新号）：**
-   - `Cargo.toml`（workspace.package.version）
+   - `Cargo.toml`（workspace.package.version，src-tauri crate 与前端包均继承/同步此号）
    - `apps/desktop/package.json`
    - `apps/desktop/package-lock.json`（第 3、9 两行）
    - `apps/desktop/src-tauri/Cargo.toml`
    - `apps/desktop/src-tauri/tauri.conf.json`
-2. **两个 Cargo.lock 必须同步**（根 `Cargo.lock` + `apps/desktop/src-tauri/Cargo.lock`，后者是独立 workspace）。构建用 `--locked`，lockfile 不同步会直接失败。
+2. **只有一个 Cargo.lock**（根目录）。src-tauri 已并入根 workspace，构建用 `--locked`。
 3. **CHANGELOG.md** 顶部加 `## [x.y.z] - 日期` 段落（Keep a Changelog 格式）。该段落之后会被提取为 GitHub Release body。
 4. **发布前验证全绿：**
    ```bash
-   make ci                                            # fmt + clippy -D warnings + test（根 workspace）
-   (cd apps/desktop/src-tauri && cargo clippy --all-targets -- -D warnings)  # src-tauri 不在根 workspace，必须单独跑
-   (cd apps/desktop && npx tsc --noEmit && npm run build)                    # 前端
+   make ci                              # fmt + clippy -D warnings + test（根 workspace，含 src-tauri）
+   (cd apps/desktop && npx tsc --noEmit && npm run build)  # 前端
    ```
 5. **本地构建：**
    ```bash
    cargo build --release --workspace --locked --target aarch64-apple-darwin
-   cd apps/desktop/src-tauri && CARGO_TARGET_DIR="$PWD/../../target" npm run tauri build -- --target aarch64-apple-darwin
+   cd apps/desktop && npm run tauri build -- --target aarch64-apple-darwin
    # 产物：target/aarch64-apple-darwin/release/{deepmate,deepmate-desktop}
    #       target/aarch64-apple-darwin/release/bundle/dmg/DeepMate_x.y.z_aarch64.dmg
    ```
@@ -51,6 +50,7 @@
 ## 其他项目约定
 
 - **质量门禁**：根 workspace `make ci`；另有 core purity gate（`crates/deepmate-core` 内不得出现 deepseek/dsh 字样，CI 强制）。
+- **编译缓存**：src-tauri 已并入根 workspace，全项目只有一个 `target/`（2026-09-16 重构）。`profile.dev` 用 `debug = "line-tables-only"` 控制 debug 缓存体积；target/debug 膨胀到数 GB 时跑 `make cache-clean` 清增量编译垃圾（Cargo 自己从不清理）。
 - **桌面端**：Tauri 2 + React + Tailwind；设计令牌只存在于 `apps/desktop/src/styles.css` + `tailwind.config.ts`，组件/页面禁止硬编码视觉值（见 docs/DESIGN_SYSTEM.md）。
 - **i18n**：新增 UI 文案必须同时加 `apps/desktop/src/locales/en.json` 和 `zh.json`；托盘菜单在 Rust 侧按语言分支。
 - **文档同步**：改了架构/设计/命令面，同一批更新 README.md 与 docs/，不允许文档漂移（Slint 时代的教训）。

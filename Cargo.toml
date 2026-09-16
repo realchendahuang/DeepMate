@@ -6,7 +6,13 @@ members = [
     "crates/deepmate-app",
     "crates/deepseek-harness",
     "apps/cli",
+    "apps/desktop/src-tauri",
 ]
+
+[profile.dev]
+# Keep backtraces readable (line numbers) while dropping full type debuginfo,
+# which is the single biggest contributor to target/debug bloat.
+debug = "line-tables-only"
 
 [workspace.package]
 version = "0.7.0"

@@ -190,6 +190,9 @@ npm run tauri dev
 
 # Full workspace gate (formatting, clippy, tests)
 make ci
+
+# Prune the incremental build cache when target/debug grows too large
+make cache-clean
 ```
 
 Prebuilt binaries for Linux (x86_64), macOS (Apple Silicon and Intel) and

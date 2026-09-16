@@ -6,10 +6,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/realchendahuang/DeepMate"
 description = "DeepMate desktop control center (Tauri)"
 
-# This crate is intentionally outside the root workspace: it has its own
-# Node-based build (Tauri + Vite) and must not be part of `cargo build
-# --workspace` / CI's core gate.
-[workspace]
+# Part of the root workspace now (single Cargo.lock, single target dir).
 
 [lib]
 name = "deepmate_desktop_lib"
@@ -25,12 +22,12 @@ tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-process = "2"
 tauri-plugin-store = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-anyhow = "1"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time"] }
-tracing = "0.1"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+reqwest = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
 specta = { version = "=2.0.0-rc.25", features = ["derive"] }
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
 specta-typescript = "0.0.12"

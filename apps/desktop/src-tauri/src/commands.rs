@@ -20,9 +20,10 @@ use std::sync::Arc;
 
 use deepmate_app::record_action;
 use deepmate_core::data::DataLayout;
-use deepmate_core::model::{Surface,
+use deepmate_core::model::{
     CompatReport, Detection, DisabledPlugin, DoctorReport, MarketEntry, MarketSourceInfo, Model,
     Plugin, PluginOpEvent, PluginOpKind, Profile, Provider, RuntimeInstance, RuntimeStatus,
+    Surface,
 };
 use deepmate_core::CoreResult;
 use deepmate_platform::{PlatformService, SystemPlatform};
@@ -163,9 +164,7 @@ pub async fn refresh_all(app: AppHandle) -> Result<Overview, String> {
 
 // A list result reduced to its item count for the overview payload.
 fn count<T>(items: CoreResult<Vec<T>>) -> Result<u32, String> {
-    items
-        .map(|items| items.len() as u32)
-        .map_err(command_error)
+    items.map(|items| items.len() as u32).map_err(command_error)
 }
 
 // ---- Runtime ----
@@ -227,7 +226,12 @@ async fn runtime_op(
 #[specta::specta]
 pub async fn open_harness(app: AppHandle, profile: String) -> Result<(), String> {
     let state = app.state::<AppState>();
-    run_action(&state, "desktop.open", state.harness.open_ui_scenario(&profile)).await
+    run_action(
+        &state,
+        "desktop.open",
+        state.harness.open_ui_scenario(&profile),
+    )
+    .await
 }
 
 // Stream one task run against a task-surface scenario: events (Started /
@@ -338,7 +342,11 @@ pub async fn list_models(app: AppHandle, profile: String) -> Result<Vec<Model>, 
 
 #[tauri::command]
 #[specta::specta]
-pub async fn upsert_provider(app: AppHandle, profile: String, provider: Provider) -> Result<(), String> {
+pub async fn upsert_provider(
+    app: AppHandle,
+    profile: String,
+    provider: Provider,
+) -> Result<(), String> {
     let state = app.state::<AppState>();
     run_action(
         &state,
@@ -372,7 +380,9 @@ pub async fn upsert_model(
     run_action(
         &state,
         "desktop.model.set",
-        state.harness.upsert_model_scenario(&profile, &provider, model),
+        state
+            .harness
+            .upsert_model_scenario(&profile, &provider, model),
     )
     .await
 }
@@ -389,7 +399,9 @@ pub async fn remove_model(
     run_action(
         &state,
         "desktop.model.remove",
-        state.harness.remove_model_scenario(&profile, &provider, &id),
+        state
+            .harness
+            .remove_model_scenario(&profile, &provider, &id),
     )
     .await
 }
@@ -432,11 +444,7 @@ pub async fn remove_profile(app: AppHandle, name: String) -> Result<(), String> 
 
 #[tauri::command]
 #[specta::specta]
-pub async fn rename_profile(
-    app: AppHandle,
-    old: String,
-    new_name: String,
-) -> Result<(), String> {
+pub async fn rename_profile(app: AppHandle, old: String, new_name: String) -> Result<(), String> {
     let state = app.state::<AppState>();
     run_action(
         &state,
@@ -612,11 +620,7 @@ pub async fn plugin_op_stream(
 #[specta::specta]
 pub async fn list_market_sources(app: AppHandle) -> Result<Vec<MarketSourceInfo>, String> {
     let state = app.state::<AppState>();
-    state
-        .harness
-        .market_sources()
-        .await
-        .map_err(command_error)
+    state.harness.market_sources().await.map_err(command_error)
 }
 
 #[tauri::command]
@@ -704,8 +708,8 @@ pub async fn set_language(app: AppHandle, language: String) -> Result<(), String
         return Err(format!("unsupported language: {language}"));
     }
     let state = app.state::<AppState>();
-    let mut config = deepmate_core::data::Config::load(&state.layout.config_path())
-        .map_err(command_error)?;
+    let mut config =
+        deepmate_core::data::Config::load(&state.layout.config_path()).map_err(command_error)?;
     config.general.language = language;
     config
         .save(&state.layout.config_path())
@@ -716,8 +720,8 @@ pub async fn set_language(app: AppHandle, language: String) -> Result<(), String
 #[specta::specta]
 pub async fn set_notify_updates(app: AppHandle, enabled: bool) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let mut config = deepmate_core::data::Config::load(&state.layout.config_path())
-        .map_err(command_error)?;
+    let mut config =
+        deepmate_core::data::Config::load(&state.layout.config_path()).map_err(command_error)?;
     config.general.notify_updates = enabled;
     config
         .save(&state.layout.config_path())
@@ -731,8 +735,8 @@ pub async fn set_theme(app: AppHandle, theme: String) -> Result<(), String> {
         return Err(format!("unsupported theme: {theme}"));
     }
     let state = app.state::<AppState>();
-    let mut config = deepmate_core::data::Config::load(&state.layout.config_path())
-        .map_err(command_error)?;
+    let mut config =
+        deepmate_core::data::Config::load(&state.layout.config_path()).map_err(command_error)?;
     config.ui.theme = theme;
     config
         .save(&state.layout.config_path())
@@ -743,8 +747,8 @@ pub async fn set_theme(app: AppHandle, theme: String) -> Result<(), String> {
 #[specta::specta]
 pub async fn set_close_to_tray(app: AppHandle, enabled: bool) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let mut config = deepmate_core::data::Config::load(&state.layout.config_path())
-        .map_err(command_error)?;
+    let mut config =
+        deepmate_core::data::Config::load(&state.layout.config_path()).map_err(command_error)?;
     config.ui.close_to_tray = enabled;
     config
         .save(&state.layout.config_path())
@@ -757,8 +761,8 @@ pub async fn set_close_to_tray(app: AppHandle, enabled: bool) -> Result<(), Stri
 #[specta::specta]
 pub async fn set_check_updates(app: AppHandle, enabled: bool) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let mut config = deepmate_core::data::Config::load(&state.layout.config_path())
-        .map_err(command_error)?;
+    let mut config =
+        deepmate_core::data::Config::load(&state.layout.config_path()).map_err(command_error)?;
     config.general.check_updates = enabled;
     config
         .save(&state.layout.config_path())
@@ -769,8 +773,8 @@ pub async fn set_check_updates(app: AppHandle, enabled: bool) -> Result<(), Stri
 #[specta::specta]
 pub async fn get_config(app: AppHandle) -> Result<UiPrefs, String> {
     let state = app.state::<AppState>();
-    let config = deepmate_core::data::Config::load(&state.layout.config_path())
-        .map_err(command_error)?;
+    let config =
+        deepmate_core::data::Config::load(&state.layout.config_path()).map_err(command_error)?;
     Ok(UiPrefs {
         language: config.general.language,
         theme: config.ui.theme,
@@ -791,8 +795,8 @@ pub async fn set_market_default_source(app: AppHandle, source: String) -> Result
         return Err(format!("unsupported market source: {source}"));
     }
     let state = app.state::<AppState>();
-    let mut config = deepmate_core::data::Config::load(&state.layout.config_path())
-        .map_err(command_error)?;
+    let mut config =
+        deepmate_core::data::Config::load(&state.layout.config_path()).map_err(command_error)?;
     config.market.default_source = source;
     config
         .save(&state.layout.config_path())
@@ -810,8 +814,8 @@ pub async fn set_market_refresh_interval(app: AppHandle, seconds: u32) -> Result
         return Err("market refresh interval must be between 60 and 604800 seconds".to_string());
     }
     let state = app.state::<AppState>();
-    let mut config = deepmate_core::data::Config::load(&state.layout.config_path())
-        .map_err(command_error)?;
+    let mut config =
+        deepmate_core::data::Config::load(&state.layout.config_path()).map_err(command_error)?;
     config.market.refresh_interval_seconds = seconds;
     config
         .save(&state.layout.config_path())
@@ -881,8 +885,8 @@ pub async fn config_export(app: AppHandle) -> Result<Option<String>, String> {
         return Ok(None);
     };
     let state = app.state::<AppState>();
-    let config = deepmate_core::data::Config::load(&state.layout.config_path())
-        .map_err(command_error)?;
+    let config =
+        deepmate_core::data::Config::load(&state.layout.config_path()).map_err(command_error)?;
     deepmate_core::ConfigBackup::capture(&config)
         .save(&path)
         .map_err(command_error)?;
@@ -936,8 +940,8 @@ pub async fn autostart_set(app: AppHandle, enabled: bool) -> Result<(), String> 
     result.map_err(|e| format!("failed to update auto-start state: {e}"))?;
 
     let state = app.state::<AppState>();
-    let mut config = deepmate_core::data::Config::load(&state.layout.config_path())
-        .map_err(command_error)?;
+    let mut config =
+        deepmate_core::data::Config::load(&state.layout.config_path()).map_err(command_error)?;
     config.general.auto_start = enabled;
     config
         .save(&state.layout.config_path())
