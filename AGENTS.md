@@ -36,7 +36,7 @@
    awk -v marker="## [x.y.z]" 'index($0, marker) == 1 { found=1; next } found && /^## \[/ { exit } found { print }' CHANGELOG.md > release-notes.md
    gh release create vX.Y.Z --title "DeepMate vX.Y.Z" --notes-file release-notes.md dist/<产物…>
    ```
-8. **发布后验证：** `gh release view vX.Y.Z` 核对标题、body、产物数量；用产物二进制做冒烟测试（如 `DSH_HOME=$(mktemp -d) deepmate snapshot export/list/import`、`doctor`）。
+8. **发布后验证：** `gh release view vX.Y.Z` 核对标题、body、产物数量；用产物二进制做冒烟测试：`DSH_HOME=$(mktemp -d) deepmate --data-dir $(mktemp -d) snapshot export/list/import` + `status` + `doctor`。**注意 `--data-dir` 不能省**：`DSH_HOME` 只管 harness 侧，snapshot 等 DeepMate 自有数据写在真实应用数据目录（`~/Library/Application Support/DeepMate`），只设 `DSH_HOME` 会在用户数据里留下测试残留。
 
 ### 发版铁律
 

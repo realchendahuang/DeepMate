@@ -73,7 +73,18 @@ pub fn dsh_home() -> Option<PathBuf> {
 
 fn read_manifest(dir: &Path) -> CoreResult<ProfileManifest> {
     let path = dir.join("package.json");
-    let text = std::fs::read_to_string(&path)?;
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        // A profile that has never been created (a fresh harness home, or a
+        // scenario that was declared but never started) has no manifest yet.
+        // Every caller of this function is a read-only query — status,
+        // plugin listing, bundle declarations — so the empty manifest is the
+        // honest answer; failing here surfaced a raw I/O error to the user.
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(ProfileManifest::default())
+        }
+        Err(err) => return Err(err.into()),
+    };
     serde_json::from_str(&text).map_err(|err| {
         CoreError::InvalidState(format!(
             "invalid profile manifest {}: {err}",
@@ -1968,6 +1979,22 @@ llm-pi-ai:
         let models = list_models("web").unwrap();
         let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(ids, ["deepseek-v4-flash", "deepseek-v4-pro"]);
+        restore_env(DSH_HOME_ENV, previous);
+    }
+
+    #[test]
+    fn missing_profile_manifest_reads_as_empty() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let previous = std::env::var_os(DSH_HOME_ENV);
+        let home = fixture_home();
+        std::fs::create_dir_all(&home).unwrap();
+        std::env::set_var(DSH_HOME_ENV, &home);
+        // A fresh harness home has no profiles: every read-only query must
+        // answer rather than fail (this is what `deepmate status` hits).
+        assert_eq!(profile_surface("web").unwrap(), Surface::Undetermined);
+        assert!(list_plugins("web").unwrap().is_empty());
+        assert_eq!(declared_spec("web", "dsh-mnemon").unwrap(), None);
+        assert!(!bundle_declared("web", "dsh-mnemon").unwrap());
         restore_env(DSH_HOME_ENV, previous);
     }
 

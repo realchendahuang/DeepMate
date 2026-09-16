@@ -15,22 +15,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scenario's plugin set visually — an installed list with enable/disable,
   update and remove, plus an in-place market search to add plugins behind
   the compatibility preflight.
-
 - Profile rename (`rename_profile` in the service layer and the desktop
   command surface): moves the profile directory, updates the manifest
   `name` field and carries disabled-plugin records over. The launcher-owned
   `web` profile is protected from rename and remove at the service layer
   (previously only the UI refused).
-
 - Bundle-install reconciliation: `dsh plugin add` installs the dependency
   but leaves `dsh.profile.bundles` untouched, so a freshly installed plugin
   was never loaded by the harness web UI. An install of a package that
   declares harness capabilities now also declares the bundle
   (`add_bundle`, idempotent); plain library dependencies are left alone.
-
 - Profile manifests may carry a `description` field, surfaced by discovery
   with the synthesized bundle list as fallback.
-
 - Curated plugin list:
   - The marketplace's **Curated** source is now driven by a
     DeepMate-maintained list (`plugins/curated.json` in this repository)
@@ -53,7 +49,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     that distinguish official (DeepSeek Harness vendor), vetted
     (DeepMate-reviewed) and community entries. Curated entries carry a
     `category` field; npm search results are uncategorized.
-
 - Self-update loop:
   - `deepmate update` — checks the latest release, downloads the CLI
     archive for this platform, verifies it against the published sha256,
@@ -65,11 +60,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     banner clears itself when the install finds no newer release.
   - Both flows can be exercised against a test release with
     `DEEPMATE_UPDATE_API_URL`.
-
 - Update availability and asset selection (target-triple matching,
   checksum parsing and verification) now live in the core's `update`
   module, shared by the CLI and the desktop app.
-
 - Live plugin-operation progress:
   - The desktop Plugins page now runs install / update / remove through a
     streamed command (`plugin_op_stream`): the harness CLI's output lines
@@ -79,12 +72,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The stream carries a well-formed Started/Line/Finished sequence; the
     harness layer forwards the child process's stdout/stderr lines as they
     arrive.
-
 - Semantic types in the generated bindings: `MarketEntry.updated` is now a
   real `Date` on the frontend (converted from the RFC3339 wire format by the
   generated binding code) instead of a string the UI had to slice; the
   desktop market list renders it with `toLocaleDateString()`.
-
 - The Settings page gained an About section showing the app version, which
   is exported into the bindings as a constant (`appVersion`) from
   `CARGO_PKG_VERSION` instead of being hard-coded in the UI.
@@ -97,44 +88,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   running, Start otherwise, Run Doctor when the harness is missing). The
   removed decorative capability badges and the old detection badges are gone;
   the sidebar footer shows the harness name instead of the adapter id.
-
 - `HarnessInfo` no longer carries `adapter_version`, `DoctorReport` no longer
   carries `adapter_id`, and the desktop overview `counts` are plain numbers
   (`InventoryCounts`) instead of nullable capability-gated values.
-
 - CLI `status`/`doctor` output no longer print an `adapter:` line, and
   `detect` no longer prints `adapter version:`. Deterministic fake-adapter
   CLI tests were replaced by isolated `DSH_HOME` fixture tests; snapshot
   roundtrip tests run against a temp `DSH_HOME` instead of `--adapter test`.
-
 - Snapshot files no longer carry `adapter`/`adapter_version` fields and the
   format moved to `deepmate-snapshot/2`; the cross-harness rejection in
   `snapshot import` is gone. The action-history JSONL no longer records a
   harness attribute at all.
-
 - The on-disk data layout no longer creates an `adapters/` subdirectory.
-
 - **Scenarios are the top-level unit.** The sidebar gained a scenario group
   above the workspace tools; switching scenarios switches the whole setup.
   Each scenario's home page owns its runtime controls, its providers &
   models and its plugins; the old global "profiles" and "models" settings
   pages are gone (providers/models live per scenario now).
-
 - Provider/model configuration is isolated per scenario: the engine's
   `settings` row is redirected per profile (`cordis.patch.yml` →
   `profiles/<scenario>/settings.yaml`), so the scenario's engine process —
   web Models page included — reads and writes its own document. Existing
   global LLM configuration is migrated into the `web` scenario once; the
   redirection takes effect on scenario restart.
-
 - `runtime` CLI/desktop commands drive any scenario: `runtime start|stop|
   restart --scenario`, `runtime list`, `runtime task <scenario> "prompt"`;
   `provider`/`model` subcommands take `--scenario` (default `web`).
-
 - The plugins `bundles.load` doctor check now probes only the running
   scenario and its fix mode restarts the scenario (a running console keeps
   the bundle set it started with).
-
 - Build, tooling & cleanup:
   - The CI check job installs the Tauri Linux system dependencies (the
     desktop shell is a workspace member now), concurrent runs for a branch
@@ -150,7 +132,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `version.workspace = true` and `tauri.conf.json` no longer pins its own
     `version` (it falls back to the Cargo version), so a release bump is
     3 files instead of 5.
-
 - Removed dead code: the unreferenced `plugin_remove`, `plugin_update`,
   `plugin_forget` and `list_market_sources` commands (and their wrappers),
   six unused plugin-store actions, unused Tauri `process`/`store` plugins,
@@ -181,22 +162,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   form values into the new selection. The detail pane remounts per provider
   (it is keyed by provider id), so an unsaved edit can never be written onto
   the wrong provider.
-
 - Desktop: the 10-second overview poll no longer disables every control in
   the app. Read-only refreshes track themselves without blocking the UI, and
   concurrent actions no longer clear each other's busy flag.
-
 - Desktop: a harness CLI installed after DeepMate launched is now detected
   without restarting the app; only successful CLI lookups are cached.
-
 - Port assignment no longer hands out a `preferred` port that is already
   owned by another scenario or currently listening, which previously let two
   scenarios fight over one port and fail at the boot timeout.
-
 - English plural forms are correct at count = 1 across the overview, doctor
   and scenario strings ("1 provider" instead of "1 providers"); the doctor
   badge labels ("3/7 Passed") are localized instead of hard-coded.
-
+- `deepmate status` no longer fails with a raw I/O error on a harness home
+  where the scenario has never been created: a missing profile manifest now
+  reads as an empty manifest for every read-only query (status, plugin
+  listing, bundle declaration), matching what those callers already assumed.
 - Windows CI: the group-kill `pid` is unix-only now, fixing the
   `unused variable` clippy failure that had kept `main` red.
 
