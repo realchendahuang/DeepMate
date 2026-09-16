@@ -224,8 +224,6 @@ pub struct MarketEntry {
     pub quality: Option<f64>,
 }
 
-impl Eq for MarketEntry {}
-
 // Where a market entry came from.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]

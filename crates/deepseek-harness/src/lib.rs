@@ -1389,11 +1389,21 @@ impl DeepSeekHarness {
                 if let Some(dir) = self.data_dir.as_ref() {
                     let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
                     let log = dir.join("logs").join(format!("task-{profile}-{stamp}.log"));
-                    if let Some(parent) = log.parent() {
-                        let _ = std::fs::create_dir_all(parent);
+                    // The run itself succeeded; a failed log write is worth a
+                    // warning, not a task failure.
+                    let written = std::fs::create_dir_all(log.parent().unwrap_or(dir))
+                        .and_then(|()| std::fs::write(&log, run.stdout_lines.join("\n")));
+                    match written {
+                        Ok(()) => {
+                            tracing::info!(profile, path = %log.display(), "task log written")
+                        }
+                        Err(err) => tracing::warn!(
+                            profile,
+                            path = %log.display(),
+                            error = %err,
+                            "failed to write the task log"
+                        ),
                     }
-                    let _ = std::fs::write(&log, run.stdout_lines.join("\n"));
-                    tracing::info!(profile, path = %log.display(), "task log written");
                 }
                 let _ = tx
                     .send(PluginOpEvent::Finished {

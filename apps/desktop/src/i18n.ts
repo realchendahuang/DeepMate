@@ -1,6 +1,6 @@
 // i18n setup. Both catalogs are bundled; zh is the default language (loaded
-// from config at startup, switchable at runtime). English remains the
-// fallback for malformed preference values.
+// from config at startup, switchable at runtime). A malformed or missing
+// preference value also falls back to zh, matching the zh-first product.
 
 import i18n from "i18next";
 import { initReactI18next } from "react-i18next";

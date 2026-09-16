@@ -341,6 +341,22 @@ pub fn installed_in_profile(profile_id: &str, id: &str) -> CoreResult<bool> {
 // `package.json.bak-*` habit and SettingsEditor's `.deepmate.bak`.
 const MANIFEST_BACKUP_SUFFIX: &str = ".deepmate.bak";
 
+// Copy `path` to `<path><suffix>` before it is rewritten. The backup is the
+// only way back from a destructive edit, so a failed copy is reported rather
+// than swallowed; the caller still proceeds, matching the previous behavior
+// while making the failure visible in the log.
+fn write_backup(path: &Path, suffix: &str) {
+    let backup = PathBuf::from(format!("{}{suffix}", path.display()));
+    match std::fs::copy(path, &backup) {
+        Ok(_) => {}
+        Err(err) => tracing::warn!(
+            path = %path.display(),
+            error = %err,
+            "failed to back up the file before rewriting it"
+        ),
+    }
+}
+
 // Strip a plugin from a profile's `dsh.profile.bundles` list, rewriting the
 // manifest in place while preserving every other field and key order.
 //
@@ -381,8 +397,7 @@ pub fn remove_bundle(profile_id: &str, id: &str) -> CoreResult<bool> {
         return Ok(false);
     }
     if path.is_file() {
-        let backup = PathBuf::from(format!("{}{}", path.display(), MANIFEST_BACKUP_SUFFIX));
-        let _ = std::fs::copy(&path, &backup);
+        write_backup(&path, MANIFEST_BACKUP_SUFFIX);
     }
     let text = serde_json::to_string_pretty(&doc).map_err(|err| {
         CoreError::InvalidState(format!("failed to serialize {}: {err}", path.display()))
@@ -485,8 +500,7 @@ pub fn add_bundle(profile_id: &str, id: &str) -> CoreResult<bool> {
     }
     bundles.push(serde_json::Value::from(id));
     if path.is_file() {
-        let backup = PathBuf::from(format!("{}{}", path.display(), MANIFEST_BACKUP_SUFFIX));
-        let _ = std::fs::copy(&path, &backup);
+        write_backup(&path, MANIFEST_BACKUP_SUFFIX);
     }
     let text = serde_json::to_string_pretty(&doc).map_err(|err| {
         CoreError::InvalidState(format!("failed to serialize {}: {err}", path.display()))
@@ -547,8 +561,7 @@ pub fn rename_profile(old: &str, new: &str) -> CoreResult<()> {
     if let Some(name) = doc.get_mut("name") {
         *name = serde_json::Value::from(format!("dsh-profile-{new}"));
     }
-    let backup = PathBuf::from(format!("{}{}", manifest.display(), MANIFEST_BACKUP_SUFFIX));
-    let _ = std::fs::copy(&manifest, &backup);
+    write_backup(&manifest, MANIFEST_BACKUP_SUFFIX);
     let text = serde_json::to_string_pretty(&doc).map_err(|err| {
         CoreError::InvalidState(format!("failed to serialize {}: {err}", manifest.display()))
     })?;
@@ -699,9 +712,7 @@ pub fn ensure_scene_settings(profile_id: &str) -> CoreResult<()> {
             }
             out.push_str(&SCENE_SETTINGS_PATCH.replace("__SCENE__", profile_id));
             if patch.is_file() {
-                let backup =
-                    PathBuf::from(format!("{}{}", patch.display(), MANIFEST_BACKUP_SUFFIX));
-                let _ = std::fs::copy(&patch, &backup);
+                write_backup(&patch, MANIFEST_BACKUP_SUFFIX);
             }
             if let Some(parent) = patch.parent() {
                 std::fs::create_dir_all(parent)?;
@@ -928,8 +939,7 @@ impl SettingsEditor {
             std::fs::create_dir_all(parent)?;
         }
         if path.is_file() {
-            let backup = PathBuf::from(format!("{}{}", path.display(), SETTINGS_BACKUP_SUFFIX));
-            let _ = std::fs::copy(&path, &backup);
+            write_backup(&path, SETTINGS_BACKUP_SUFFIX);
         }
         let text = yaml::to_string(doc).map_err(|err| {
             CoreError::InvalidState(format!("failed to serialize settings: {err}"))
@@ -1204,8 +1214,7 @@ pub fn save_advanced_file(
         std::fs::create_dir_all(parent)?;
     }
     if path.is_file() {
-        let backup = PathBuf::from(format!("{}{}", path.display(), SETTINGS_BACKUP_SUFFIX));
-        let _ = std::fs::copy(&path, &backup);
+        write_backup(&path, SETTINGS_BACKUP_SUFFIX);
     }
     std::fs::write(&path, content)?;
     Ok(())
@@ -1360,8 +1369,7 @@ pub fn set_profile_description(name: &str, description: Option<String>) -> CoreR
             doc["description"] = serde_json::Value::from(text);
         }
     }
-    let backup = PathBuf::from(format!("{}{}", manifest.display(), MANIFEST_BACKUP_SUFFIX));
-    let _ = std::fs::copy(&manifest, &backup);
+    write_backup(&manifest, MANIFEST_BACKUP_SUFFIX);
     let text = serde_json::to_string_pretty(&doc).map_err(|err| {
         CoreError::InvalidState(format!("failed to serialize {}: {err}", manifest.display()))
     })?;
