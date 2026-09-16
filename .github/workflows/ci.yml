@@ -44,7 +44,10 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Test
-        run: cargo test --workspace --locked
+        # --no-fail-fast: report every failing test binary in one run instead
+        # of stopping at the first, which keeps platform-specific breakage
+        # visible without a debugging cycle per failure.
+        run: cargo test --workspace --locked --no-fail-fast
 
       # Architectural gate: the control core stays a pure data layer.
       # Harness-specific names live in crates/deepseek-harness, never in the core.

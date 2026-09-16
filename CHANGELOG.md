@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fixtures those tests reach are now gated to the platforms that use them
   (ungated, they compile as dead code off macOS). These only reproduced
   outside macOS, so the release push was the first time CI saw them.
+- The `profile create/remove` CLI test now builds its fake harness launcher
+  per platform (POSIX shell script, or a batch file on Windows) instead of
+  only on unix, so the Windows test run exercises the bundle bootstrap
+  instead of failing to find a CLI. CI also runs tests with
+  `--no-fail-fast` so a platform failure reports every failing binary at
+  once.
 
 ## [0.8.0] - 2026-09-17
 

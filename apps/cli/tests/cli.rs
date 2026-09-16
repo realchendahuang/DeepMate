@@ -339,10 +339,14 @@ fn profile_create_and_remove_via_cli() {
     let work = test_data_dir();
     std::fs::create_dir_all(&work).unwrap();
     let recorded = work.join("recorded-args");
-    let fake = work.join("fake-dsh");
+    // The fake launcher must be a real executable on every platform: a POSIX
+    // shell script on unix, a batch file on Windows (which `Command` runs via
+    // cmd.exe). Both write the arguments one per line next to themselves and
+    // answer `--version` without recording.
     #[cfg(unix)]
-    {
+    let fake = {
         use std::os::unix::fs::PermissionsExt;
+        let fake = work.join("fake-dsh");
         std::fs::write(
             &fake,
             format!(
@@ -354,7 +358,28 @@ fn profile_create_and_remove_via_cli() {
         let mut perms = std::fs::metadata(&fake).unwrap().permissions();
         perms.set_mode(0o755);
         std::fs::set_permissions(&fake, perms).unwrap();
-    }
+        fake
+    };
+    #[cfg(windows)]
+    let fake = {
+        let fake = work.join("fake-dsh.cmd");
+        // `%~dp0` is the script's own directory, which avoids embedding an
+        // absolute path (and its backslashes) into the batch file.
+        std::fs::write(
+            &fake,
+            "@echo off\r\n\
+             if \"%~1\"==\"--version\" exit /b 0\r\n\
+             :loop\r\n\
+             if \"%~1\"==\"\" goto end\r\n\
+             echo %~1>>\"%~dp0recorded-args\"\r\n\
+             shift\r\n\
+             goto loop\r\n\
+             :end\r\n\
+             exit /b 0\r\n",
+        )
+        .unwrap();
+        fake
+    };
 
     let run = |args: &[&str]| {
         let dir = test_data_dir();
