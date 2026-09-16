@@ -57,8 +57,6 @@ pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_store::Builder::new().build())
         // Remember the window size and position across sessions.
         .plugin(tauri_plugin_window_state::Builder::default().build())
         // A second instance focuses the existing window instead of opening
@@ -276,14 +274,10 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::set_scenario_description,
             commands::list_plugins,
             commands::plugin_install,
-            commands::plugin_remove,
-            commands::plugin_update,
             commands::plugin_disable,
             commands::plugin_enable,
             commands::list_disabled_plugins,
-            commands::plugin_forget,
             commands::plugin_op_stream,
-            commands::list_market_sources,
             commands::market_search,
             commands::plugin_check,
             commands::snapshot_export,
@@ -336,7 +330,7 @@ fn export_bindings() {
     specta_builder()
         .export(
             specta_typescript::Typescript::default(),
-            "../src/bindings.ts",
+            "../src/shared/api/bindings.ts",
         )
         .expect("failed to export TypeScript bindings");
 }

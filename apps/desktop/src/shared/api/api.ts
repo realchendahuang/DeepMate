@@ -33,11 +33,7 @@ export const api = {
   openHarness: (profile: string) => unwrap(commands.openHarness(profile)),
   // Stream one task run: `onEvent` receives the task's Started / Line /
   // Finished events; the promise resolves when the run ends.
-  taskRun: (
-    profile: string,
-    prompt: string,
-    onEvent: (event: PluginOpEvent) => void,
-  ) => {
+  taskRun: (profile: string, prompt: string, onEvent: (event: PluginOpEvent) => void) => {
     const channel = new Channel<PluginOpEvent>();
     channel.onmessage = onEvent;
     return unwrap(commands.taskRun(channel, profile, prompt));
@@ -47,7 +43,8 @@ export const api = {
   doctorFix: (checkId: string, mode: string) => unwrap(commands.doctorFix(checkId, mode)),
   // Scenarios (the harness calls them profiles).
   listScenarios: () => unwrap(commands.listProfiles()),
-  createScenario: (name: string, surface: Surface) => unwrap(commands.createScenario(name, surface)),
+  createScenario: (name: string, surface: Surface) =>
+    unwrap(commands.createScenario(name, surface)),
   renameScenario: (oldName: string, newName: string) =>
     unwrap(commands.renameProfile(oldName, newName)),
   removeScenario: (name: string) => unwrap(commands.removeProfile(name)),
@@ -67,12 +64,9 @@ export const api = {
   listPlugins: () => unwrap(commands.listPlugins()),
   pluginInstall: (profile: string, spec: string) => unwrap(commands.pluginInstall(profile, spec)),
   pluginCheck: (spec: string) => unwrap(commands.pluginCheck(spec)),
-  pluginRemove: (profile: string, id: string) => unwrap(commands.pluginRemove(profile, id)),
-  pluginUpdate: (profile: string, id: string) => unwrap(commands.pluginUpdate(profile, id)),
   pluginDisable: (profile: string, id: string) => unwrap(commands.pluginDisable(profile, id)),
   pluginEnable: (profile: string, id: string) => unwrap(commands.pluginEnable(profile, id)),
   listDisabledPlugins: () => unwrap(commands.listDisabledPlugins()),
-  pluginForget: (profile: string, id: string) => unwrap(commands.pluginForget(profile, id)),
   // Stream a plugin operation: `onEvent` receives Started / Line / Finished
   // events as they happen; the promise resolves when the operation ends.
   pluginOpStream: (
@@ -86,7 +80,6 @@ export const api = {
     return unwrap(commands.pluginOpStream(channel, profile, kind, target));
   },
   // Market.
-  listMarketSources: () => unwrap(commands.listMarketSources()),
   marketSearch: (query: string) => unwrap(commands.marketSearch(query)),
   // Snapshots.
   snapshotExport: (name: string) => unwrap(commands.snapshotExport(name)),
@@ -105,8 +98,7 @@ export const api = {
   autostartSet: (enabled: boolean) => unwrap(commands.autostartSet(enabled)),
   // Market settings.
   setMarketDefaultSource: (source: string) => unwrap(commands.setMarketDefaultSource(source)),
-  setMarketRefreshInterval: (seconds: number) =>
-    unwrap(commands.setMarketRefreshInterval(seconds)),
+  setMarketRefreshInterval: (seconds: number) => unwrap(commands.setMarketRefreshInterval(seconds)),
   // Advanced raw configuration files.
   advancedFileRead: (scope: string, name: string | null) =>
     unwrap(commands.advancedFileRead(scope, name)),
@@ -126,7 +118,6 @@ export type {
   DoctorReport,
   DisabledPlugin,
   MarketEntry,
-  MarketSourceInfo,
   MarketTrust,
   Model,
   Overview,

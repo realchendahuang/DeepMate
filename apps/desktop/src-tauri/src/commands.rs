@@ -21,9 +21,8 @@ use std::sync::Arc;
 use deepmate_app::record_action;
 use deepmate_core::data::DataLayout;
 use deepmate_core::model::{
-    CompatReport, Detection, DisabledPlugin, DoctorReport, MarketEntry, MarketSourceInfo, Model,
-    Plugin, PluginOpEvent, PluginOpKind, Profile, Provider, RuntimeInstance, RuntimeStatus,
-    Surface,
+    CompatReport, Detection, DisabledPlugin, DoctorReport, MarketEntry, Model, Plugin,
+    PluginOpEvent, PluginOpKind, Profile, Provider, RuntimeInstance, RuntimeStatus, Surface,
 };
 use deepmate_core::CoreResult;
 use deepmate_platform::{PlatformService, SystemPlatform};
@@ -493,30 +492,6 @@ pub async fn plugin_install(app: AppHandle, profile: String, spec: String) -> Re
     .await
 }
 
-#[tauri::command]
-#[specta::specta]
-pub async fn plugin_remove(app: AppHandle, profile: String, id: String) -> Result<(), String> {
-    let state = app.state::<AppState>();
-    run_action(
-        &state,
-        "desktop.plugin.remove",
-        state.harness.remove_plugin(&profile, &id),
-    )
-    .await
-}
-
-#[tauri::command]
-#[specta::specta]
-pub async fn plugin_update(app: AppHandle, profile: String, id: String) -> Result<(), String> {
-    let state = app.state::<AppState>();
-    run_action(
-        &state,
-        "desktop.plugin.update",
-        state.harness.update_plugin(&profile, Some(&id)),
-    )
-    .await
-}
-
 // Disable a plugin: uninstall it while remembering its package spec, so
 // enabling restores the same range later.
 #[tauri::command]
@@ -550,18 +525,6 @@ pub async fn plugin_enable(app: AppHandle, profile: String, id: String) -> Resul
 pub async fn list_disabled_plugins(app: AppHandle) -> Result<Vec<DisabledPlugin>, String> {
     let state = app.state::<AppState>();
     state.harness.disabled_plugins().map_err(command_error)
-}
-
-// Drop a disabled-plugin record without reinstalling (the "remove" affordance
-// on a disabled row; the package is already uninstalled).
-#[tauri::command]
-#[specta::specta]
-pub async fn plugin_forget(app: AppHandle, profile: String, id: String) -> Result<(), String> {
-    let state = app.state::<AppState>();
-    run_action(&state, "desktop.plugin.forget", async {
-        state.harness.forget_plugin(&profile, &id)
-    })
-    .await
 }
 
 // Run a plugin operation while streaming progress events to the frontend
@@ -615,13 +578,6 @@ pub async fn plugin_op_stream(
 }
 
 // ---- Market ----
-
-#[tauri::command]
-#[specta::specta]
-pub async fn list_market_sources(app: AppHandle) -> Result<Vec<MarketSourceInfo>, String> {
-    let state = app.state::<AppState>();
-    state.harness.market_sources().await.map_err(command_error)
-}
 
 #[tauri::command]
 #[specta::specta]

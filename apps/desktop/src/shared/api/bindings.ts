@@ -27,14 +27,10 @@ export const commands = {
 	setScenarioDescription: (name: string, description: string | null) => typedError<null, string>(__TAURI_INVOKE("set_scenario_description", { name, description })),
 	listPlugins: () => typedError<Plugin[], string>(__TAURI_INVOKE("list_plugins")),
 	pluginInstall: (profile: string, spec: string) => typedError<null, string>(__TAURI_INVOKE("plugin_install", { profile, spec })),
-	pluginRemove: (profile: string, id: string) => typedError<null, string>(__TAURI_INVOKE("plugin_remove", { profile, id })),
-	pluginUpdate: (profile: string, id: string) => typedError<null, string>(__TAURI_INVOKE("plugin_update", { profile, id })),
 	pluginDisable: (profile: string, id: string) => typedError<null, string>(__TAURI_INVOKE("plugin_disable", { profile, id })),
 	pluginEnable: (profile: string, id: string) => typedError<null, string>(__TAURI_INVOKE("plugin_enable", { profile, id })),
 	listDisabledPlugins: () => typedError<DisabledPlugin[], string>(__TAURI_INVOKE("list_disabled_plugins")),
-	pluginForget: (profile: string, id: string) => typedError<null, string>(__TAURI_INVOKE("plugin_forget", { profile, id })),
 	pluginOpStream: (channel: Channel<PluginOpEvent>, profile: string, kind: PluginOpKind, target: string) => typedError<null, string>(__TAURI_INVOKE("plugin_op_stream", { channel, profile, kind, target })),
-	listMarketSources: () => typedError<MarketSourceInfo[], string>(__TAURI_INVOKE("list_market_sources")),
 	marketSearch: (query: string) => typedError<MarketEntry[], string>(__TAURI_INVOKE("market_search", { query })).then((v) => ((v.status === "ok" ? { ...v, data: v.data.map(i=>({...i,updated:i.updated==null?i.updated:new Date(i.updated)})) } : v) as typeof v)),
 	pluginCheck: (spec: string) => typedError<CompatReport, string>(__TAURI_INVOKE("plugin_check", { spec })),
 	snapshotExport: (name: string) => typedError<null, string>(__TAURI_INVOKE("snapshot_export", { name })),
@@ -157,13 +153,6 @@ export type MarketEntry = {
 };
 
 export type MarketSource = "curated" | "community";
-
-export type MarketSourceInfo = {
-	id: string,
-	name: string,
-	description: string,
-	source: MarketSource,
-};
 
 export type MarketTrust = "official" | "vetted" | "community";
 

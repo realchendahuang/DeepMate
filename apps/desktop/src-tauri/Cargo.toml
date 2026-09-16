@@ -1,12 +1,14 @@
 [package]
 name = "deepmate-desktop"
-version = "0.7.0"
-edition = "2021"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/realchendahuang/DeepMate"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
 description = "DeepMate desktop control center (Tauri)"
 
-# Part of the root workspace now (single Cargo.lock, single target dir).
+# Part of the root workspace (single Cargo.lock, single target dir). The app
+# version lives in the root `[workspace.package]`; tauri.conf.json omits its
+# own `version`, so the bundle falls back to this Cargo.toml version.
 
 [lib]
 name = "deepmate_desktop_lib"
@@ -20,8 +22,6 @@ tauri = { version = "2", features = ["tray-icon", "specta"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
-tauri-plugin-process = "2"
-tauri-plugin-store = "2"
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
