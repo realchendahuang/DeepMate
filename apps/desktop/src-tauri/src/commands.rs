@@ -100,6 +100,22 @@ pub struct UpdateInstallOutcome {
 
 // ---- Command plumbing ----
 
+// The IPC error contract: commands still resolve errors to a `String`, but
+// core errors are serialized as a JSON envelope
+// `{"code":"<stable code>","message":"..."}` built from the core error's
+// classification (`CoreError::code`), so the frontend maps exact codes to
+// localized text instead of pattern-matching prose. Errors that do not come
+// from core (update plumbing) stay plain strings and fall back to the
+// frontend's regex mapping.
+fn command_error(e: deepmate_core::CoreError) -> String {
+    serde_json::json!({ "code": e.code(), "message": e.to_string() }).to_string()
+}
+
+// `command_error` with a context prefix kept in the message.
+fn command_error_ctx(context: &str, e: deepmate_core::CoreError) -> String {
+    serde_json::json!({ "code": e.code(), "message": format!("{context}: {e}") }).to_string()
+}
+
 // Run a harness operation, record it in the action history and normalize the
 // error to the human-readable string the frontend surfaces.
 async fn run_action(
@@ -112,7 +128,7 @@ async fn run_action(
             record_action(&state.layout, action.to_string());
             Ok(())
         }
-        Err(e) => Err(format!("{e}")),
+        Err(e) => Err(command_error(e)),
     }
 }
 
@@ -127,11 +143,11 @@ pub async fn refresh_all(app: AppHandle) -> Result<Overview, String> {
     let detection = harness
         .detect()
         .await
-        .map_err(|e| format!("detect failed: {e}"))?;
+        .map_err(|e| command_error_ctx("detect failed", e))?;
     let status = harness
         .status()
         .await
-        .map_err(|e| format!("status failed: {e}"))?;
+        .map_err(|e| command_error_ctx("status failed", e))?;
     let counts = InventoryCounts {
         profiles: count(harness.profiles().await)?,
         providers: count(harness.providers().await)?,
@@ -149,7 +165,7 @@ pub async fn refresh_all(app: AppHandle) -> Result<Overview, String> {
 fn count<T>(items: CoreResult<Vec<T>>) -> Result<u32, String> {
     items
         .map(|items| items.len() as u32)
-        .map_err(|e| format!("{e}"))
+        .map_err(command_error)
 }
 
 // ---- Runtime ----
@@ -176,7 +192,7 @@ pub async fn runtime_restart(app: AppHandle, profile: String) -> Result<(), Stri
 #[specta::specta]
 pub async fn runtime_list(app: AppHandle) -> Result<Vec<RuntimeInstance>, String> {
     let state = app.state::<AppState>();
-    state.harness.instances().await.map_err(|e| format!("{e}"))
+    state.harness.instances().await.map_err(command_error)
 }
 
 enum RuntimeOp {
@@ -203,7 +219,7 @@ async fn runtime_op(
             record_action(&state.layout, action.to_string());
             Ok(())
         }
-        Err(e) => Err(format!("{e}")),
+        Err(e) => Err(command_error(e)),
     }
 }
 
@@ -243,7 +259,7 @@ pub async fn task_run(
             record_action(&state.layout, "desktop.task.run".to_string());
             Ok(())
         }
-        Err(e) => Err(format!("{e}")),
+        Err(e) => Err(command_error(e)),
     }
 }
 
@@ -256,7 +272,7 @@ pub async fn run_doctor(app: AppHandle) -> Result<DoctorReport, String> {
             record_action(&state.layout, "desktop.doctor".to_string());
             Ok(report)
         }
-        Err(e) => Err(format!("{e}")),
+        Err(e) => Err(command_error(e)),
     }
 }
 
@@ -283,7 +299,7 @@ pub async fn doctor_fix(
             record_action(&state.layout, "desktop.doctor.fix".to_string());
             Ok(DoctorFixReport { fixed })
         }
-        Err(e) => Err(format!("{e}")),
+        Err(e) => Err(command_error(e)),
     }
 }
 
@@ -293,7 +309,7 @@ pub async fn doctor_fix(
 #[specta::specta]
 pub async fn list_profiles(app: AppHandle) -> Result<Vec<Profile>, String> {
     let state = app.state::<AppState>();
-    state.harness.profiles().await.map_err(|e| format!("{e}"))
+    state.harness.profiles().await.map_err(command_error)
 }
 
 #[tauri::command]
@@ -304,7 +320,7 @@ pub async fn list_providers(app: AppHandle, profile: String) -> Result<Vec<Provi
         .harness
         .providers_scenario(&profile)
         .await
-        .map_err(|e| format!("{e}"))
+        .map_err(command_error)
 }
 
 #[tauri::command]
@@ -315,7 +331,7 @@ pub async fn list_models(app: AppHandle, profile: String) -> Result<Vec<Model>, 
         .harness
         .models_scenario(&profile)
         .await
-        .map_err(|e| format!("{e}"))
+        .map_err(command_error)
 }
 
 // ---- Configuration editing (per-scenario) ----
@@ -452,7 +468,7 @@ pub async fn set_scenario_description(
 #[specta::specta]
 pub async fn list_plugins(app: AppHandle) -> Result<Vec<Plugin>, String> {
     let state = app.state::<AppState>();
-    state.harness.plugins().await.map_err(|e| format!("{e}"))
+    state.harness.plugins().await.map_err(command_error)
 }
 
 // ---- Plugins ----
@@ -525,7 +541,7 @@ pub async fn plugin_enable(app: AppHandle, profile: String, id: String) -> Resul
 #[specta::specta]
 pub async fn list_disabled_plugins(app: AppHandle) -> Result<Vec<DisabledPlugin>, String> {
     let state = app.state::<AppState>();
-    state.harness.disabled_plugins().map_err(|e| format!("{e}"))
+    state.harness.disabled_plugins().map_err(command_error)
 }
 
 // Drop a disabled-plugin record without reinstalling (the "remove" affordance
@@ -586,7 +602,7 @@ pub async fn plugin_op_stream(
             record_action(&state.layout, action.to_string());
             Ok(())
         }
-        Err(e) => Err(format!("{e}")),
+        Err(e) => Err(command_error(e)),
     }
 }
 
@@ -600,7 +616,7 @@ pub async fn list_market_sources(app: AppHandle) -> Result<Vec<MarketSourceInfo>
         .harness
         .market_sources()
         .await
-        .map_err(|e| format!("{e}"))
+        .map_err(command_error)
 }
 
 #[tauri::command]
@@ -611,7 +627,7 @@ pub async fn market_search(app: AppHandle, query: String) -> Result<Vec<MarketEn
         .harness
         .search_plugins(&query)
         .await
-        .map_err(|e| format!("{e}"))
+        .map_err(command_error)
 }
 
 // Check a market package's compatibility with the detected harness before an
@@ -624,7 +640,7 @@ pub async fn plugin_check(app: AppHandle, spec: String) -> Result<CompatReport, 
         .harness
         .plugin_compat(&spec)
         .await
-        .map_err(|e| format!("{e}"))
+        .map_err(command_error)
 }
 
 // ---- Snapshots ----
@@ -640,9 +656,9 @@ pub async fn snapshot_export(app: AppHandle, name: String) -> Result<(), String>
                 record_action(&state.layout, "desktop.snapshot.export".to_string());
                 Ok(())
             }
-            Err(e) => Err(format!("{e}")),
+            Err(e) => Err(command_error(e)),
         },
-        Err(e) => Err(format!("{e}")),
+        Err(e) => Err(command_error(e)),
     }
 }
 
@@ -657,9 +673,9 @@ pub async fn snapshot_import(app: AppHandle, name: String) -> Result<(), String>
                 record_action(&state.layout, "desktop.snapshot.import".to_string());
                 Ok(())
             }
-            Err(e) => Err(format!("{e}")),
+            Err(e) => Err(command_error(e)),
         },
-        Err(e) => Err(format!("{e}")),
+        Err(e) => Err(command_error(e)),
     }
 }
 
@@ -668,7 +684,7 @@ pub async fn snapshot_import(app: AppHandle, name: String) -> Result<(), String>
 pub async fn snapshot_list(app: AppHandle) -> Result<Vec<String>, String> {
     let state = app.state::<AppState>();
     let store = deepmate_core::SnapshotStore::new(state.layout.snapshots_dir());
-    store.list().map_err(|e| format!("{e}"))
+    store.list().map_err(command_error)
 }
 
 #[tauri::command]
@@ -676,7 +692,7 @@ pub async fn snapshot_list(app: AppHandle) -> Result<Vec<String>, String> {
 pub async fn snapshot_delete(app: AppHandle, name: String) -> Result<(), String> {
     let state = app.state::<AppState>();
     let store = deepmate_core::SnapshotStore::new(state.layout.snapshots_dir());
-    store.delete(&name).map_err(|e| format!("{e}"))
+    store.delete(&name).map_err(command_error)
 }
 
 // ---- Config (language / theme / preferences) ----
@@ -689,11 +705,11 @@ pub async fn set_language(app: AppHandle, language: String) -> Result<(), String
     }
     let state = app.state::<AppState>();
     let mut config = deepmate_core::data::Config::load(&state.layout.config_path())
-        .map_err(|e| format!("{e}"))?;
+        .map_err(command_error)?;
     config.general.language = language;
     config
         .save(&state.layout.config_path())
-        .map_err(|e| format!("{e}"))
+        .map_err(command_error)
 }
 
 #[tauri::command]
@@ -701,11 +717,11 @@ pub async fn set_language(app: AppHandle, language: String) -> Result<(), String
 pub async fn set_notify_updates(app: AppHandle, enabled: bool) -> Result<(), String> {
     let state = app.state::<AppState>();
     let mut config = deepmate_core::data::Config::load(&state.layout.config_path())
-        .map_err(|e| format!("{e}"))?;
+        .map_err(command_error)?;
     config.general.notify_updates = enabled;
     config
         .save(&state.layout.config_path())
-        .map_err(|e| format!("{e}"))
+        .map_err(command_error)
 }
 
 #[tauri::command]
@@ -716,11 +732,11 @@ pub async fn set_theme(app: AppHandle, theme: String) -> Result<(), String> {
     }
     let state = app.state::<AppState>();
     let mut config = deepmate_core::data::Config::load(&state.layout.config_path())
-        .map_err(|e| format!("{e}"))?;
+        .map_err(command_error)?;
     config.ui.theme = theme;
     config
         .save(&state.layout.config_path())
-        .map_err(|e| format!("{e}"))
+        .map_err(command_error)
 }
 
 #[tauri::command]
@@ -728,11 +744,11 @@ pub async fn set_theme(app: AppHandle, theme: String) -> Result<(), String> {
 pub async fn set_close_to_tray(app: AppHandle, enabled: bool) -> Result<(), String> {
     let state = app.state::<AppState>();
     let mut config = deepmate_core::data::Config::load(&state.layout.config_path())
-        .map_err(|e| format!("{e}"))?;
+        .map_err(command_error)?;
     config.ui.close_to_tray = enabled;
     config
         .save(&state.layout.config_path())
-        .map_err(|e| format!("{e}"))?;
+        .map_err(command_error)?;
     state.close_to_tray.store(enabled, Ordering::Relaxed);
     Ok(())
 }
@@ -742,11 +758,11 @@ pub async fn set_close_to_tray(app: AppHandle, enabled: bool) -> Result<(), Stri
 pub async fn set_check_updates(app: AppHandle, enabled: bool) -> Result<(), String> {
     let state = app.state::<AppState>();
     let mut config = deepmate_core::data::Config::load(&state.layout.config_path())
-        .map_err(|e| format!("{e}"))?;
+        .map_err(command_error)?;
     config.general.check_updates = enabled;
     config
         .save(&state.layout.config_path())
-        .map_err(|e| format!("{e}"))
+        .map_err(command_error)
 }
 
 #[tauri::command]
@@ -754,7 +770,7 @@ pub async fn set_check_updates(app: AppHandle, enabled: bool) -> Result<(), Stri
 pub async fn get_config(app: AppHandle) -> Result<UiPrefs, String> {
     let state = app.state::<AppState>();
     let config = deepmate_core::data::Config::load(&state.layout.config_path())
-        .map_err(|e| format!("{e}"))?;
+        .map_err(command_error)?;
     Ok(UiPrefs {
         language: config.general.language,
         theme: config.ui.theme,
@@ -776,11 +792,11 @@ pub async fn set_market_default_source(app: AppHandle, source: String) -> Result
     }
     let state = app.state::<AppState>();
     let mut config = deepmate_core::data::Config::load(&state.layout.config_path())
-        .map_err(|e| format!("{e}"))?;
+        .map_err(command_error)?;
     config.market.default_source = source;
     config
         .save(&state.layout.config_path())
-        .map_err(|e| format!("{e}"))
+        .map_err(command_error)
 }
 
 // The market cache freshness, in seconds. The lower bound keeps a mis-set
@@ -795,11 +811,11 @@ pub async fn set_market_refresh_interval(app: AppHandle, seconds: u32) -> Result
     }
     let state = app.state::<AppState>();
     let mut config = deepmate_core::data::Config::load(&state.layout.config_path())
-        .map_err(|e| format!("{e}"))?;
+        .map_err(command_error)?;
     config.market.refresh_interval_seconds = seconds;
     config
         .save(&state.layout.config_path())
-        .map_err(|e| format!("{e}"))
+        .map_err(command_error)
 }
 
 // ---- Advanced raw configuration files ----
@@ -828,7 +844,7 @@ pub async fn advanced_file_read(
         .harness
         .advanced_file_read(scope, name)
         .await
-        .map_err(|e| format!("{e}"))
+        .map_err(command_error)
 }
 
 #[tauri::command]
@@ -866,10 +882,10 @@ pub async fn config_export(app: AppHandle) -> Result<Option<String>, String> {
     };
     let state = app.state::<AppState>();
     let config = deepmate_core::data::Config::load(&state.layout.config_path())
-        .map_err(|e| format!("{e}"))?;
+        .map_err(command_error)?;
     deepmate_core::ConfigBackup::capture(&config)
         .save(&path)
-        .map_err(|e| format!("{e}"))?;
+        .map_err(command_error)?;
     record_action(&state.layout, "desktop.config.export".to_string());
     Ok(Some(path.display().to_string()))
 }
@@ -886,11 +902,11 @@ pub async fn config_import(app: AppHandle) -> Result<Option<String>, String> {
         return Ok(None);
     };
     let state = app.state::<AppState>();
-    let backup = deepmate_core::ConfigBackup::load(&path).map_err(|e| format!("{e}"))?;
+    let backup = deepmate_core::ConfigBackup::load(&path).map_err(command_error)?;
     backup
         .config
         .save(&state.layout.config_path())
-        .map_err(|e| format!("{e}"))?;
+        .map_err(command_error)?;
     record_action(&state.layout, "desktop.config.import".to_string());
     Ok(Some(path.display().to_string()))
 }
@@ -921,11 +937,11 @@ pub async fn autostart_set(app: AppHandle, enabled: bool) -> Result<(), String> 
 
     let state = app.state::<AppState>();
     let mut config = deepmate_core::data::Config::load(&state.layout.config_path())
-        .map_err(|e| format!("{e}"))?;
+        .map_err(command_error)?;
     config.general.auto_start = enabled;
     config
         .save(&state.layout.config_path())
-        .map_err(|e| format!("{e}"))
+        .map_err(command_error)
 }
 
 // ---- Update check ----
