@@ -64,11 +64,7 @@ export function TaskRunner({ profileId }: { profileId: string }) {
               if (event.key === "Enter") run();
             }}
           />
-          <Button
-            variant="primary"
-            onClick={run}
-            disabled={task.running || !prompt.trim()}
-          >
+          <Button variant="primary" onClick={run} disabled={task.running || !prompt.trim()}>
             {task.running ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (

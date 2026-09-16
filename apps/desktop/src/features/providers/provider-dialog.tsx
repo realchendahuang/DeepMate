@@ -8,13 +8,7 @@ import { useTranslation } from "react-i18next";
 import { useProviderStore } from "@/app/store/providers";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/shared/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/shared/ui/dialog";
 import { Textarea } from "@/shared/ui/textarea";
 import { Field } from "./field";
 import { AdvancedSection } from "./json-field";
@@ -102,7 +96,9 @@ export function NewProviderDialog({
                 spellCheck={false}
                 className={compatValid ? "h-20" : "h-20 border-warn focus-visible:border-warn"}
               />
-              <p className={compatValid ? "text-caption text-text-faint" : "text-caption text-warn"}>
+              <p
+                className={compatValid ? "text-caption text-text-faint" : "text-caption text-warn"}
+              >
                 {compatValid ? t("settings.compatHint") : t("settings.invalidJson")}
               </p>
             </Field>

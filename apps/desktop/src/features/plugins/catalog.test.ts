@@ -115,7 +115,10 @@ describe("installedPluginKeys / disabledPluginKeys", () => {
     );
     expect(
       disabledPluginKeys(
-        [{ profile: "web", id: "a", spec: "a" }, { profile: "work", id: "b", spec: "b" }],
+        [
+          { profile: "web", id: "a", spec: "a" },
+          { profile: "work", id: "b", spec: "b" },
+        ],
         "work",
       ),
     ).toEqual(new Set(["b"]));

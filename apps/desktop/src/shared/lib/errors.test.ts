@@ -12,8 +12,7 @@ describe("mapError", () => {
   });
 
   it("maps the JSON envelope codes from the Rust side exactly", () => {
-    const envelope = (code: string, message: string) =>
-      JSON.stringify({ code, message });
+    const envelope = (code: string, message: string) => JSON.stringify({ code, message });
     expect(mapError(envelope("not_found", "harness CLI was not found on PATH"))).toBe("notFound");
     expect(mapError(envelope("timeout", "task timed out after 2m"))).toBe("timeout");
     expect(mapError(envelope("invalid_state", "scenario X is not running"))).toBe("generic");

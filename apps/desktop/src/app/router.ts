@@ -8,16 +8,10 @@ import { useScenarioStore } from "./store/scenarios";
 
 export type ScenarioSection = "overview" | "providers" | "plugins";
 export type SettingSection =
-  | "diagnostics"
-  | "snapshots"
-  | "preferences"
-  | "market"
-  | "advanced"
-  | "about";
+  "diagnostics" | "snapshots" | "preferences" | "market" | "advanced" | "about";
 
 export type Route =
-  | { kind: "scenario"; section: ScenarioSection }
-  | { kind: "settings"; section: SettingSection };
+  { kind: "scenario"; section: ScenarioSection } | { kind: "settings"; section: SettingSection };
 
 // A scenario's overview is the app's landing view.
 export const SCENARIO_HOME: Route = { kind: "scenario", section: "overview" };

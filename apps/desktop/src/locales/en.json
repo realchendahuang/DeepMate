@@ -37,18 +37,20 @@
     "openConsole": "Open Console",
     "engineReady": "Engine ready",
     "modelsCount": "{{count}} models",
-    "providersCount": "{{count}} providers",
-    "pluginsActive": "{{count}} enabled",
-    "pluginsOutdatedAlert": "{{count}} updates available",
     "portLabel": "Port",
     "pidLabel": "PID",
     "urlLabel": "URL",
     "taskClearLogs": "Clear logs",
     "taskCopyLogs": "Copy logs",
-    "taskLogsCopied": "Logs copied"
+    "taskLogsCopied": "Logs copied",
+    "pluginsActive_one": "{{count}} enabled",
+    "pluginsActive_other": "{{count}} enabled",
+    "pluginsOutdatedAlert_one": "{{count}} update available",
+    "pluginsOutdatedAlert_other": "{{count}} updates available",
+    "providersCount_one": "{{count}} provider",
+    "providersCount_other": "{{count}} providers"
   },
   "doctor": {
-    "allGoodLine": "All good — all {{count}} checks passed.",
     "issuesLine_one": "{{count}} check needs attention.",
     "issuesLine_other": "{{count}} checks need attention.",
     "runtimeFound": "AI engine installed",
@@ -84,7 +86,13 @@
     "uiUrlInvalidDesc": "The configured web UI address cannot be parsed, so the status checks would be misleading. Remove the custom address to restore the default.",
     "uiReachSkipped": "Web UI check skipped",
     "uiReachSkippedDesc": "Skipped while the harness CLI is missing or the web UI address is not usable.",
-    "fixRestart": "Restart scenario"
+    "fixRestart": "Restart scenario",
+    "allGoodLine_one": "All good — the only check passed.",
+    "allGoodLine_other": "All good — all {{count}} checks passed.",
+    "passedBadge_one": "{{count}} check passed",
+    "passedBadge_other": "All {{count}} checks passed",
+    "issuesBadge_one": "{{count}} issue",
+    "issuesBadge_other": "{{count}} issues"
   },
   "plugins": {
     "installed": "Installed",
@@ -213,7 +221,6 @@
     "protectedProfile": "The default scenario cannot be renamed or deleted",
     "rename": "Rename",
     "runningBadge": "Running",
-    "scenarioPluginCount": "{{count}} plugins",
     "renameScenarioTitle": "Rename scenario",
     "deleteProfileConfirmTitle": "Delete scenario?",
     "deleteProfileConfirmBody": "This deletes \"{{name}}\" and its configuration. This cannot be undone.",
@@ -280,8 +287,11 @@
     "webCount": "{{count}} Web UI",
     "taskCount": "{{count}} Task",
     "healthAllGood": "All checks passed",
-    "healthHasIssues": "{{count}} issues need attention",
-    "healthSummary": "System Health"
+    "healthSummary": "System Health",
+    "healthHasIssues_one": "{{count}} issue needs attention",
+    "healthHasIssues_other": "{{count}} issues need attention",
+    "scenarioPluginCount_one": "{{count}} plugin",
+    "scenarioPluginCount_other": "{{count}} plugins"
   },
   "common": {
     "close": "Close",

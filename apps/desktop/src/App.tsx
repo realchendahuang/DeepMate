@@ -18,11 +18,14 @@ export default function App() {
     void useRuntimeStore.getState().refreshOverview();
     void useScenarioStore.getState().loadProfiles();
     void useRuntimeStore.getState().loadInstances();
-    void usePreferencesStore.getState().loadPrefs().then(() => {
-      if (usePreferencesStore.getState().checkUpdates) {
-        void usePreferencesStore.getState().checkUpdate();
-      }
-    });
+    void usePreferencesStore
+      .getState()
+      .loadPrefs()
+      .then(() => {
+        if (usePreferencesStore.getState().checkUpdates) {
+          void usePreferencesStore.getState().checkUpdate();
+        }
+      });
   }, []);
 
   // Keep the runtime status fresh: refresh when the window regains focus and

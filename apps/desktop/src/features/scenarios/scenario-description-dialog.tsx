@@ -8,13 +8,7 @@ import { useTranslation } from "react-i18next";
 import { useScenarioStore } from "@/app/store/scenarios";
 import type { Profile } from "@/shared/api/api";
 import { Button } from "@/shared/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/shared/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/shared/ui/dialog";
 import { Textarea } from "@/shared/ui/textarea";
 
 // The engine-bundled fallback description ("bundles: a, b, c") is derived,

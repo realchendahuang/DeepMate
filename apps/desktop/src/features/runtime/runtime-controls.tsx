@@ -4,7 +4,7 @@
 import { useTranslation } from "react-i18next";
 import { ExternalLink, Play, RotateCw, Square } from "lucide-react";
 import { useRuntimeStore } from "@/app/store/runtime";
-import { useBusyStore } from "@/app/store/busy";
+import { useBlocking } from "@/app/store/busy";
 import { Button } from "@/shared/ui/button";
 
 export function WebRuntimeControls({
@@ -23,16 +23,11 @@ export function WebRuntimeControls({
   const runtimeStop = useRuntimeStore((s) => s.runtimeStop);
   const runtimeRestart = useRuntimeStore((s) => s.runtimeRestart);
   const openHarness = useRuntimeStore((s) => s.openHarness);
-  const busy = useBusyStore((s) => s.busyAction) !== null;
+  const busy = useBlocking();
 
   if (!running) {
     return (
-      <Button
-        variant="primary"
-        size={size}
-        onClick={() => runtimeStart(profileId)}
-        disabled={busy}
-      >
+      <Button variant="primary" size={size} onClick={() => runtimeStart(profileId)} disabled={busy}>
         <Play className="h-4 w-4" />
         {t("overview.start")}
       </Button>
@@ -41,20 +36,11 @@ export function WebRuntimeControls({
 
   return (
     <>
-      <Button
-        variant="primary"
-        size={size}
-        onClick={() => openHarness(profileId)}
-        disabled={busy}
-      >
+      <Button variant="primary" size={size} onClick={() => openHarness(profileId)} disabled={busy}>
         <ExternalLink className="h-4 w-4" />
         {t("overview.openHarness")}
       </Button>
-      <Button
-        size={size}
-        onClick={() => runtimeRestart(profileId)}
-        disabled={busy || pid == null}
-      >
+      <Button size={size} onClick={() => runtimeRestart(profileId)} disabled={busy || pid == null}>
         <RotateCw className="h-4 w-4" />
         {t("overview.restart")}
       </Button>

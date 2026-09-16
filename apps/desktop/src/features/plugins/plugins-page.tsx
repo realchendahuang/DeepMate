@@ -19,7 +19,7 @@ import {
 import { AnimatePresence, motion } from "motion/react";
 import { usePluginStore } from "@/app/store/plugins";
 import { usePreferencesStore } from "@/app/store/preferences";
-import { useBusyStore } from "@/app/store/busy";
+import { useBlocking } from "@/app/store/busy";
 import type { MarketTrust, Profile } from "@/shared/api/api";
 import { cn } from "@/shared/lib/utils";
 import { enterTransition, MOTION_DURATION, MOTION_EASE } from "@/shared/lib/motion";
@@ -125,7 +125,7 @@ export function PluginsPage({ profile }: { profile: Profile }) {
   const runPluginOp = usePluginStore((s) => s.runPluginOp);
   const marketInstall = usePluginStore((s) => s.marketInstall);
   const dismissPluginOp = usePluginStore((s) => s.dismissPluginOp);
-  const busyAction = useBusyStore((s) => s.busyAction);
+  const blocking = useBlocking();
 
   const [activeTab, setActiveTab] = useState<"installed" | "market">("installed");
   const [filter, setFilter] = useState("");
@@ -186,7 +186,9 @@ export function PluginsPage({ profile }: { profile: Profile }) {
     [disabledPlugins, profile.id],
   );
 
-  const busy = busyAction !== null || opActive;
+  // Plugin operations disable the page's controls; background list refreshes
+  // no longer do.
+  const busy = blocking || opActive;
   const activeRowOp = busy ? rowOp : null;
 
   const categories = useMemo(() => categoryFacets(marketEntries), [marketEntries]);
@@ -263,9 +265,7 @@ export function PluginsPage({ profile }: { profile: Profile }) {
             <span
               className={cn(
                 "ml-0.5 rounded-full px-2 py-0.5 text-micro font-semibold tabular-nums",
-                activeTab === "installed"
-                  ? "bg-accent/20 text-accent"
-                  : "bg-panel-3 text-text-dim",
+                activeTab === "installed" ? "bg-accent/20 text-accent" : "bg-panel-3 text-text-dim",
               )}
             >
               {rows.length}
@@ -330,9 +330,7 @@ export function PluginsPage({ profile }: { profile: Profile }) {
               <h3 className="mt-3 text-heading font-semibold text-text">
                 {t("settings.noPluginsInScenario")}
               </h3>
-              <p className="mt-1 text-body text-text-dim">
-                {t("plugins.browseMarketHint")}
-              </p>
+              <p className="mt-1 text-body text-text-dim">{t("plugins.browseMarketHint")}</p>
               <div className="mt-4">
                 <Button variant="primary" onClick={() => setActiveTab("market")}>
                   <Store className="h-4 w-4" />
@@ -370,9 +368,7 @@ export function PluginsPage({ profile }: { profile: Profile }) {
                               </span>
                               {plugin.trust && <TrustBadge trust={plugin.trust} />}
                               <Badge variant={plugin.enabled ? "pass" : "neutral"}>
-                                {plugin.enabled
-                                  ? t("plugins.enabled")
-                                  : t("plugins.disabled")}
+                                {plugin.enabled ? t("plugins.enabled") : t("plugins.disabled")}
                               </Badge>
                               {plugin.outdated && (
                                 <Badge variant="warn">{t("plugins.outdated")}</Badge>
@@ -410,9 +406,7 @@ export function PluginsPage({ profile }: { profile: Profile }) {
                                 <Button
                                   variant="danger"
                                   size="sm"
-                                  onClick={() =>
-                                    setRemoving({ id: plugin.id, name: plugin.name })
-                                  }
+                                  onClick={() => setRemoving({ id: plugin.id, name: plugin.name })}
                                   disabled={busy}
                                 >
                                   <Trash2 className="h-4 w-4" />
@@ -456,9 +450,7 @@ export function PluginsPage({ profile }: { profile: Profile }) {
                                 <Button
                                   variant="danger"
                                   size="sm"
-                                  onClick={() =>
-                                    setRemoving({ id: plugin.id, name: plugin.name })
-                                  }
+                                  onClick={() => setRemoving({ id: plugin.id, name: plugin.name })}
                                   disabled={busy}
                                 >
                                   <Trash2 className="h-4 w-4" />
@@ -491,9 +483,7 @@ export function PluginsPage({ profile }: { profile: Profile }) {
                   <h4 className="text-body font-semibold text-text">
                     {t("plugins.exploreMarket")}
                   </h4>
-                  <p className="text-small text-text-dim">
-                    {t("plugins.browseMarketHint")}
-                  </p>
+                  <p className="text-small text-text-dim">{t("plugins.browseMarketHint")}</p>
                 </div>
               </div>
               <ArrowUpRight className="h-4 w-4 text-text-faint" />

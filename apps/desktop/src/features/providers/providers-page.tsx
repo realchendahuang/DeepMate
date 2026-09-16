@@ -83,9 +83,7 @@ export function ProvidersPage({ profile }: { profile: Profile }) {
         onCreated={(id) => setProviderId(id)}
       />
       <ModelDialog
-        key={
-          modelDialog === "new" ? `new-${providerId ?? "none"}` : (modelDialog?.id ?? "closed")
-        }
+        key={modelDialog === "new" ? `new-${providerId ?? "none"}` : (modelDialog?.id ?? "closed")}
         profile={profile.id}
         open={modelDialog !== null}
         value={modelDialog === "new" ? null : modelDialog}

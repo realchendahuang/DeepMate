@@ -12,13 +12,7 @@ import type { Model } from "@/shared/api/api";
 import { cn } from "@/shared/lib/utils";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/shared/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/shared/ui/dialog";
 import { Textarea } from "@/shared/ui/textarea";
 import { Field } from "./field";
 import { AdvancedSection } from "./json-field";
@@ -48,7 +42,9 @@ function ModalityChip({
       aria-pressed={active}
       className={cn(
         "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-body font-medium transition-colors",
-        active ? "border-accent/40 bg-accent/10 text-text" : "border-border bg-panel-2 text-text-dim",
+        active
+          ? "border-accent/40 bg-accent/10 text-text"
+          : "border-border bg-panel-2 text-text-dim",
         !locked && "hover:bg-hover",
         locked && "cursor-default opacity-90",
       )}
@@ -98,9 +94,7 @@ export function ModelDialog({
   // provider, creating uses the provider the dialog was opened from.
   const provider = value?.provider ?? defaultProvider;
   const [id, setId] = useState(value?.id ?? "");
-  const [name, setName] = useState(
-    value?.name && value?.name !== value?.id ? value.name : "",
-  );
+  const [name, setName] = useState(value?.name && value?.name !== value?.id ? value.name : "");
   const [contextWindow, setContextWindow] = useState(
     value?.context_window ? String(value.context_window) : "",
   );
@@ -110,9 +104,7 @@ export function ModelDialog({
     if (declared && declared.length > 0) return declared;
     return ["text"];
   });
-  const [reasoningEfforts, setReasoningEfforts] = useState(
-    value?.reasoning_efforts ?? "",
-  );
+  const [reasoningEfforts, setReasoningEfforts] = useState(value?.reasoning_efforts ?? "");
   const [compat, setCompat] = useState(value?.compat ?? "");
 
   const advancedValid = jsonValid(reasoningEfforts) && jsonValid(compat);

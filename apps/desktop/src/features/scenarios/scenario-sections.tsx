@@ -6,7 +6,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ScenarioSection } from "@/app/router";
 import { useScenarioStore } from "@/app/store/scenarios";
-import { useBusyStore } from "@/app/store/busy";
+import { useBlocking } from "@/app/store/busy";
 import type { Surface } from "@/shared/api/api";
 import { Card, CardContent } from "@/shared/ui/card";
 import { Button } from "@/shared/ui/button";
@@ -39,7 +39,7 @@ export function ScenarioSections({ section }: { section: ScenarioSection }) {
 function ScenarioCreator() {
   const { t } = useTranslation();
   const createScenario = useScenarioStore((s) => s.createScenario);
-  const busy = useBusyStore((s) => s.busyAction) !== null;
+  const busy = useBlocking();
   const [name, setName] = useState("");
   const [surface, setSurface] = useState<Surface>("web");
 

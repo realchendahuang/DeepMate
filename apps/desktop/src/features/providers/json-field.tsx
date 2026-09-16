@@ -23,9 +23,7 @@ export function AdvancedSection({ children }: { children: React.ReactNode }) {
         aria-expanded={open}
       >
         {t("settings.advanced")}
-        <ChevronDown
-          className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")}
-        />
+        <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
       </button>
       {open && <div className="space-y-3 border-t border-border p-3">{children}</div>}
     </div>

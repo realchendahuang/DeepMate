@@ -19,7 +19,6 @@ const IDLE_TASK: TaskRun = { running: false, done: false, failed: false, lines: 
 
 interface RuntimeState {
   instances: RuntimeInstance[];
-  instancesLoaded: boolean;
   overview: Overview | null;
   tasks: Record<string, TaskRun>;
   loadInstances: () => Promise<void>;
@@ -33,12 +32,11 @@ interface RuntimeState {
 
 export const useRuntimeStore = create<RuntimeState>((set, get) => ({
   instances: [],
-  instancesLoaded: false,
   overview: null,
   tasks: {},
   loadInstances: async () => {
     const instances = await runBusy("load", () => api.runtimeList());
-    set({ instances, instancesLoaded: true });
+    set({ instances });
   },
   refreshOverview: async () => {
     const overview = await runBusy("refresh", () => api.refreshOverview());
@@ -68,11 +66,16 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
         set((s) => {
           const task = s.tasks[profile] ?? IDLE_TASK;
           if (event.phase === "line") {
-            return { tasks: { ...s.tasks, [profile]: { ...task, lines: [...task.lines, event.text] } } };
+            return {
+              tasks: { ...s.tasks, [profile]: { ...task, lines: [...task.lines, event.text] } },
+            };
           }
           if (event.phase === "finished") {
             return {
-              tasks: { ...s.tasks, [profile]: { ...task, running: false, done: true, failed: !event.ok } },
+              tasks: {
+                ...s.tasks,
+                [profile]: { ...task, running: false, done: true, failed: !event.ok },
+              },
             };
           }
           return s;
@@ -83,7 +86,9 @@ export const useRuntimeStore = create<RuntimeState>((set, get) => ({
       // and keeps the partial log, matching a finished-with-error run.
       set((s) => {
         const task = s.tasks[profile] ?? IDLE_TASK;
-        return { tasks: { ...s.tasks, [profile]: { ...task, running: false, done: true, failed: true } } };
+        return {
+          tasks: { ...s.tasks, [profile]: { ...task, running: false, done: true, failed: true } },
+        };
       });
     }
   },

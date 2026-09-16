@@ -9,7 +9,6 @@ import { mapError } from "@/shared/lib/errors";
 import type {
   DisabledPlugin,
   MarketEntry,
-  MarketSourceInfo,
   Plugin,
   PluginOpEvent,
   PluginOpKind,
@@ -21,7 +20,6 @@ interface PluginState {
   plugins: Plugin[];
   disabledPlugins: DisabledPlugin[];
   pluginsLoaded: boolean;
-  marketSources: MarketSourceInfo[];
   marketEntries: MarketEntry[];
   // Live plugin operation (install / remove / update): the event log the
   // progress strip renders, and whether an operation is in flight.
@@ -32,20 +30,14 @@ interface PluginState {
   // Toggle a plugin: disabling uninstalls it (with its spec remembered for a
   // later re-enable), enabling reinstalls the remembered spec.
   setPluginEnabled: (profile: string, id: string, enabled: boolean) => Promise<void>;
-  // Forget a disabled-plugin record without reinstalling it.
-  forgetPlugin: (profile: string, id: string) => Promise<void>;
-  loadMarketSources: () => Promise<void>;
   searchMarket: (query: string) => Promise<void>;
   // Clear the market result list (used when switching to the community
   // source whose search starts empty).
   resetMarket: () => void;
-  installPlugin: (profile: string, spec: string) => Promise<void>;
   // Install from the market with a compatibility preflight: a definite
   // "incompatible" verdict refuses the install; unknown or a failed check
   // lets it proceed (mirroring the CLI's --force-free default).
   marketInstall: (profile: string, spec: string) => Promise<void>;
-  removePlugin: (profile: string, id: string) => Promise<void>;
-  updatePlugin: (profile: string, id: string) => Promise<void>;
   // Run a plugin operation with a live progress log. Events append to
   // `opLog` as they arrive; the strip stays open until the caller dismisses.
   runPluginOp: (profile: string, kind: PluginOpKind, target: string) => Promise<void>;
@@ -57,7 +49,6 @@ export const usePluginStore = create<PluginState>((set, get) => ({
   plugins: [],
   disabledPlugins: [],
   pluginsLoaded: false,
-  marketSources: [],
   marketEntries: [],
   opLog: [],
   opActive: false,
@@ -80,25 +71,12 @@ export const usePluginStore = create<PluginState>((set, get) => ({
     }
     await Promise.all([get().loadPlugins(), get().loadDisabledPlugins()]);
   },
-  forgetPlugin: async (profile: string, id: string) => {
-    await runBusy("remove", () => api.pluginForget(profile, id));
-    await get().loadDisabledPlugins();
-  },
-  loadMarketSources: async () => {
-    const marketSources = await runBusy("load", () => api.listMarketSources());
-    set({ marketSources });
-  },
   searchMarket: async (query: string) => {
     const marketEntries = await runBusy("search", () => api.marketSearch(query));
     set({ marketEntries });
   },
   resetMarket: () => {
     set({ marketEntries: [] });
-  },
-  installPlugin: async (profile: string, spec: string) => {
-    await runBusy("install", () => api.pluginInstall(profile, spec));
-    // Installing a previously disabled plugin clears its registry record.
-    await Promise.all([get().loadPlugins(), get().loadDisabledPlugins()]);
   },
   marketInstall: async (profile: string, spec: string) => {
     await runBusy("install", async () => {
@@ -109,14 +87,6 @@ export const usePluginStore = create<PluginState>((set, get) => ({
       return api.pluginInstall(profile, spec);
     });
     await Promise.all([get().loadPlugins(), get().loadDisabledPlugins()]);
-  },
-  removePlugin: async (profile: string, id: string) => {
-    await runBusy("remove", () => api.pluginRemove(profile, id));
-    await get().loadPlugins();
-  },
-  updatePlugin: async (profile: string, id: string) => {
-    await runBusy("update", () => api.pluginUpdate(profile, id));
-    await get().loadPlugins();
   },
   runPluginOp: async (profile: string, kind: PluginOpKind, target: string) => {
     set({ opLog: [], opActive: true });

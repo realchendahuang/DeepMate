@@ -1,34 +1,66 @@
 import { describe, expect, it } from "vitest";
-import { isBlocked } from "./busy";
+import { isMutating, runBusy, useBusyStore } from "./busy";
 
-describe("isBlocked", () => {
-  it("never blocks when nothing is running", () => {
-    expect(isBlocked(null, "install")).toBe(false);
-    expect(isBlocked(null, "load")).toBe(false);
+// A deferred promise the tests can resolve/reject on demand.
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+describe("isMutating", () => {
+  it("classifies mutating actions", () => {
+    expect(isMutating("install")).toBe(true);
+    expect(isMutating("remove")).toBe(true);
+    expect(isMutating("save")).toBe(true);
+    expect(isMutating("doctor-fix")).toBe(true);
   });
 
-  it("blocks the same action while it is running", () => {
-    expect(isBlocked("install", "install")).toBe(true);
-    expect(isBlocked("load", "load")).toBe(true);
+  it("classifies read-only actions", () => {
+    expect(isMutating("load")).toBe(false);
+    expect(isMutating("refresh")).toBe(false);
+    expect(isMutating("search")).toBe(false);
+    expect(isMutating("doctor")).toBe(false);
+    expect(isMutating("runtime")).toBe(false);
+  });
+});
+
+describe("runBusy", () => {
+  it("tracks the action while it runs and clears it after", async () => {
+    const gate = deferred<void>();
+    const running = runBusy("install", () => gate.promise);
+    expect(useBusyStore.getState().active).toContain("install");
+    gate.resolve();
+    await running;
+    expect(useBusyStore.getState().active).toEqual([]);
   });
 
-  it("lets read-only operations run during any other operation", () => {
-    expect(isBlocked("install", "load")).toBe(false);
-    expect(isBlocked("install", "search")).toBe(false);
-    expect(isBlocked("install", "doctor")).toBe(false);
-    expect(isBlocked("refresh", "load")).toBe(false);
+  it("keeps a concurrent read from clearing a mutation's flag", async () => {
+    const gate = deferred<void>();
+    const mutating = runBusy("install", () => gate.promise);
+    await runBusy("load", async () => {});
+    // The completed read must not have removed the in-flight mutation.
+    expect(useBusyStore.getState().active).toContain("install");
+    gate.resolve();
+    await mutating;
+    expect(useBusyStore.getState().active).toEqual([]);
   });
 
-  it("blocks mutating operations while another mutation runs", () => {
-    expect(isBlocked("install", "remove")).toBe(true);
-    expect(isBlocked("remove", "update")).toBe(true);
-    expect(isBlocked("save", "snapshot")).toBe(true);
-    expect(isBlocked("update-install", "config")).toBe(true);
-  });
-
-  it("does not block mutations during read-only operations", () => {
-    expect(isBlocked("load", "install")).toBe(false);
-    expect(isBlocked("search", "remove")).toBe(false);
-    expect(isBlocked("doctor", "save")).toBe(false);
+  it("removes only one instance when the same action runs twice", async () => {
+    const first = deferred<void>();
+    const second = deferred<void>();
+    const a = runBusy("load", () => first.promise);
+    const b = runBusy("load", () => second.promise);
+    expect(useBusyStore.getState().active).toEqual(["load", "load"]);
+    first.resolve();
+    await a;
+    expect(useBusyStore.getState().active).toEqual(["load"]);
+    second.resolve();
+    await b;
+    expect(useBusyStore.getState().active).toEqual([]);
   });
 });

@@ -4,16 +4,10 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { usePreferencesStore } from "@/app/store/preferences";
-import { useBusyStore } from "@/app/store/busy";
+import { useBlocking } from "@/app/store/busy";
 import { Card } from "@/shared/ui/card";
 import { Button } from "@/shared/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/shared/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shared/ui/select";
 import { Switch } from "@/shared/ui/switch";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
 
@@ -39,7 +33,7 @@ export function PreferencesSection() {
   const autostart = usePreferencesStore((s) => s.autostart);
   const updateInfo = usePreferencesStore((s) => s.updateInfo);
   const updateChecked = usePreferencesStore((s) => s.updateChecked);
-  const busy = useBusyStore((s) => s.busyAction) !== null;
+  const busy = useBlocking();
 
   const [configImportPending, setConfigImportPending] = useState(false);
 
@@ -88,7 +82,9 @@ export function PreferencesSection() {
           </div>
           <div className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
             <div>
-              <div className="text-heading font-semibold text-text">{t("settings.closeToTray")}</div>
+              <div className="text-heading font-semibold text-text">
+                {t("settings.closeToTray")}
+              </div>
             </div>
             <Switch
               checked={closeToTray}
@@ -147,7 +143,9 @@ export function PreferencesSection() {
           </div>
           <div className="flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between">
             <div>
-              <div className="text-heading font-semibold text-text">{t("settings.ownSettings")}</div>
+              <div className="text-heading font-semibold text-text">
+                {t("settings.ownSettings")}
+              </div>
             </div>
             <div className="flex flex-wrap gap-2">
               <Button variant="secondary" size="sm" onClick={configExport} disabled={busy}>

@@ -7,13 +7,7 @@ import { useScenarioStore } from "@/app/store/scenarios";
 import type { Profile } from "@/shared/api/api";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/shared/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/shared/ui/dialog";
 
 export function ScenarioRenameDialog({
   profile,

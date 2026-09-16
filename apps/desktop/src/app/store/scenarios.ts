@@ -13,7 +13,6 @@ import { useRuntimeStore } from "./runtime";
 
 interface ScenarioState {
   profiles: Profile[];
-  profilesLoaded: boolean;
   selectedScenario: string;
   setSelectedScenario: (profile: string) => void;
   loadProfiles: () => Promise<void>;
@@ -25,14 +24,13 @@ interface ScenarioState {
 
 export const useScenarioStore = create<ScenarioState>((set, get) => ({
   profiles: [],
-  profilesLoaded: false,
   selectedScenario: DEFAULT_SCENARIO_ID,
   setSelectedScenario: (profile: string) => {
     set({ selectedScenario: profile });
   },
   loadProfiles: async () => {
     const profiles = await runBusy("load", () => api.listScenarios());
-    set({ profiles, profilesLoaded: true });
+    set({ profiles });
   },
   // Create a scenario with its surface bundles bootstrapped (web-app or
   // headless), select it and refresh the running instances so the new

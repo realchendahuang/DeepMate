@@ -14,11 +14,7 @@ import { useRuntimeStore } from "../store/runtime";
 import { cn } from "@/shared/lib/utils";
 import { isDefaultScenario, scenarioInitial } from "@/shared/lib/scenario";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuTrigger,
-} from "@/shared/ui/context-menu";
+import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/shared/ui/context-menu";
 import { NewScenarioDialog } from "@/features/scenarios/new-scenario-dialog";
 import {
   ScenarioManageDialogs,
@@ -128,13 +124,7 @@ export function ScenarioRail() {
             running={running}
             label={label}
             onClick={() => openScenario(profile.id)}
-            menu={
-              <ScenarioManageMenu
-                profile={profile}
-                busy={manage.busy}
-                open={manage.open}
-              />
-            }
+            menu={<ScenarioManageMenu profile={profile} busy={manage.busy} open={manage.open} />}
           >
             {scenarioInitial(profile.name)}
           </RailButton>

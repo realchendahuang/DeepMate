@@ -44,8 +44,7 @@ function ContextMenuItem({
       data-destructive={destructive || undefined}
       className={cn(
         "flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-small outline-none transition-colors focus:bg-hover focus:text-text data-disabled:pointer-events-none data-disabled:opacity-50",
-        destructive &&
-          "text-fail data-disabled:text-fail focus:bg-fail/10 focus:text-fail",
+        destructive && "text-fail data-disabled:text-fail focus:bg-fail/10 focus:text-fail",
         className,
       )}
       {...props}
@@ -66,4 +65,10 @@ function ContextMenuSeparator({
   );
 }
 
-export { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuSeparator };
+export {
+  ContextMenu,
+  ContextMenuTrigger,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+};

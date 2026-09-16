@@ -81,7 +81,9 @@
     "uiUrlInvalidDesc": "配置的网页地址无法解析，运行状态会检查不准。删除自定义地址即可恢复默认。",
     "uiReachSkipped": "网页检查暂缓",
     "uiReachSkippedDesc": "引擎还没装好，或网页地址还没配对——条件具备后这项检查会自动恢复。",
-    "fixRestart": "重启场景"
+    "fixRestart": "重启场景",
+    "passedBadge_other": "全部 {{count}} 项检查通过",
+    "issuesBadge_other": "{{count}} 项问题"
   },
   "plugins": {
     "installed": "已安装",

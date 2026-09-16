@@ -12,24 +12,12 @@ import { api } from "@/shared/api/api";
 import { DEFAULT_SCENARIO_ID } from "@/shared/lib/scenario";
 import { errorMessage } from "@/shared/lib/errors";
 import { useScenarioStore } from "@/app/store/scenarios";
-import { useBusyStore } from "@/app/store/busy";
+import { useBlocking } from "@/app/store/busy";
 import { Card } from "@/shared/ui/card";
 import { Button } from "@/shared/ui/button";
 import { Badge } from "@/shared/ui/badge";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/shared/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/shared/ui/select";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/shared/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/shared/ui/select";
 import { Skeleton } from "@/shared/ui/skeleton";
 import { Textarea } from "@/shared/ui/textarea";
 
@@ -45,7 +33,7 @@ export function AdvancedSection() {
   const { t } = useTranslation();
   const profiles = useScenarioStore((s) => s.profiles);
   const selectedScenario = useScenarioStore((s) => s.selectedScenario);
-  const busy = useBusyStore((s) => s.busyAction) !== null;
+  const busy = useBlocking();
 
   // The scenario the scene files are scoped to; defaults to the focused one.
   const [scene, setScene] = useState(selectedScenario || DEFAULT_SCENARIO_ID);
@@ -135,7 +123,8 @@ export function AdvancedSection() {
                     {t(item.titleKey)}
                   </span>
                   <span className="block truncate font-mono text-caption text-text-faint">
-                    profiles/{scene}/{item.scope === "scene-cordis" ? "cordis.patch.yml" : "settings.yaml"}
+                    profiles/{scene}/
+                    {item.scope === "scene-cordis" ? "cordis.patch.yml" : "settings.yaml"}
                   </span>
                 </span>
                 <span className="shrink-0">
@@ -160,13 +149,7 @@ export function AdvancedSection() {
 // (settings.yaml) or write verbatim (cordis.patch.yml), with a backup made
 // before each write. Mounted only while a file is selected, and keyed per
 // file so the draft always reseeds.
-function AdvancedFileDialog({
-  file,
-  onClose,
-}: {
-  file: AdvancedFile;
-  onClose: () => void;
-}) {
+function AdvancedFileDialog({ file, onClose }: { file: AdvancedFile; onClose: () => void }) {
   const { t } = useTranslation();
   const [draft, setDraft] = useState<string | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);

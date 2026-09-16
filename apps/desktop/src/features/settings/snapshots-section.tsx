@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Layers, Plus, Trash2 } from "lucide-react";
 import { useSnapshotStore } from "@/app/store/snapshots";
-import { useBusyStore } from "@/app/store/busy";
+import { useBlocking } from "@/app/store/busy";
 import { Card, CardContent } from "@/shared/ui/card";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
@@ -21,13 +21,11 @@ export function SnapshotsSection() {
   const snapshotExport = useSnapshotStore((s) => s.snapshotExport);
   const snapshotImport = useSnapshotStore((s) => s.snapshotImport);
   const snapshotDelete = useSnapshotStore((s) => s.snapshotDelete);
-  const busy = useBusyStore((s) => s.busyAction) !== null;
+  const busy = useBlocking();
 
   const [snapshotName, setSnapshotName] = useState("");
   // Which snapshot/import is pending confirmation.
-  const [confirm, setConfirm] = useState<{ kind: "delete" | "import"; name: string } | null>(
-    null,
-  );
+  const [confirm, setConfirm] = useState<{ kind: "delete" | "import"; name: string } | null>(null);
 
   useEffect(() => {
     void loadSnapshots();

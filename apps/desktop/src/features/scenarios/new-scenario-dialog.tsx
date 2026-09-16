@@ -6,19 +6,13 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Globe, TerminalSquare } from "lucide-react";
 import { useScenarioStore } from "@/app/store/scenarios";
-import { useBusyStore } from "@/app/store/busy";
+import { useBlocking } from "@/app/store/busy";
 import type { Surface } from "@/shared/api/api";
 import { cn } from "@/shared/lib/utils";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
 import { Label } from "@/shared/ui/label";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/shared/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/shared/ui/dialog";
 
 export function NewScenarioDialog({
   open,
@@ -31,7 +25,7 @@ export function NewScenarioDialog({
 }) {
   const { t } = useTranslation();
   const createScenario = useScenarioStore((s) => s.createScenario);
-  const busy = useBusyStore((s) => s.busyAction) !== null;
+  const busy = useBlocking();
   const [name, setName] = useState("");
   const [surface, setSurface] = useState<Surface>("web");
 

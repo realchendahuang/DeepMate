@@ -132,11 +132,7 @@ export function ScenarioOverview({ profile }: { profile: Profile }) {
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {surface !== "task" && (
-                <WebRuntimeControls
-                  profileId={profile.id}
-                  running={running}
-                  pid={instance?.pid}
-                />
+                <WebRuntimeControls profileId={profile.id} running={running} pid={instance?.pid} />
               )}
               <Button
                 variant="ghost"
@@ -207,11 +203,7 @@ export function ScenarioOverview({ profile }: { profile: Profile }) {
                     {instance?.url ?? `http://127.0.0.1:${instance?.port ?? 3080}`}
                   </div>
                   <div className="flex flex-wrap items-center gap-2 pt-1">
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => openHarness(profile.id)}
-                    >
+                    <Button variant="secondary" size="sm" onClick={() => openHarness(profile.id)}>
                       <ExternalLink className="h-3.5 w-3.5" />
                       {t("overview.openConsole")}
                     </Button>
@@ -232,9 +224,7 @@ export function ScenarioOverview({ profile }: { profile: Profile }) {
                 </div>
               ) : (
                 <p className="text-small text-text-dim">
-                  {surface === "web"
-                    ? t("settings.surfaceWebHint")
-                    : t("settings.surfaceTaskHint")}
+                  {surface === "web" ? t("settings.surfaceWebHint") : t("settings.surfaceTaskHint")}
                 </p>
               )}
             </div>
@@ -256,9 +246,7 @@ export function ScenarioOverview({ profile }: { profile: Profile }) {
               <ArrowUpRight className="h-4 w-4 text-text-faint" />
             </div>
             <div className="mt-3">
-              <div className="text-display font-bold text-text">
-                {models.length}
-              </div>
+              <div className="text-display font-bold text-text">{models.length}</div>
               <p className="mt-0.5 text-small text-text-dim">
                 {t("overview.providersCount", { count: providers.length })}
               </p>
@@ -286,9 +274,7 @@ export function ScenarioOverview({ profile }: { profile: Profile }) {
             </div>
             <div className="mt-3">
               <div className="flex items-baseline gap-2">
-                <span className="text-display font-bold text-text">
-                  {scenarioPlugins.length}
-                </span>
+                <span className="text-display font-bold text-text">{scenarioPlugins.length}</span>
                 <span className="text-caption text-text-faint">
                   ({t("overview.pluginsActive", { count: activePlugins.length })})
                 </span>

@@ -8,7 +8,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FileText, SquarePen, Trash2 } from "lucide-react";
-import { useBusyStore } from "@/app/store/busy";
+import { useBlocking } from "@/app/store/busy";
 import type { Profile } from "@/shared/api/api";
 import { isDefaultScenario } from "@/shared/lib/scenario";
 import { ContextMenuItem, ContextMenuSeparator } from "@/shared/ui/context-menu";
@@ -19,7 +19,7 @@ import { ScenarioDeleteDialog } from "./scenario-delete-dialog";
 export type ScenarioManageDialog = "rename" | "description" | "delete";
 
 export function useScenarioManage() {
-  const busy = useBusyStore((s) => s.busyAction) !== null;
+  const busy = useBlocking();
   const [target, setTarget] = useState<Profile | null>(null);
   const [dialog, setDialog] = useState<ScenarioManageDialog | null>(null);
 
@@ -56,11 +56,7 @@ export function ScenarioManageMenu({
         {isDefault ? t("settings.protectedProfile") : t("settings.rename")}
       </ContextMenuItem>
       <ContextMenuSeparator />
-      <ContextMenuItem
-        destructive
-        disabled={locked}
-        onClick={() => open("delete", profile)}
-      >
+      <ContextMenuItem destructive disabled={locked} onClick={() => open("delete", profile)}>
         <Trash2 className="h-4 w-4" />
         {isDefault ? t("settings.protectedProfile") : t("settings.remove")}
       </ContextMenuItem>

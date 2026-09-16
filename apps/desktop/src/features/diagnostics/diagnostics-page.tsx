@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { motion } from "motion/react";
 import { useDiagnosticsStore } from "@/app/store/diagnostics";
-import { useBusyStore } from "@/app/store/busy";
+import { useActionActive, useBlocking } from "@/app/store/busy";
 import type { CheckStatus, DoctorCheck } from "@/shared/api/api";
 import type { TFunction } from "i18next";
 import { cn } from "@/shared/lib/utils";
@@ -210,7 +210,8 @@ export function DiagnosticsPage() {
   const doctor = useDiagnosticsStore((s) => s.doctor);
   const runDoctor = useDiagnosticsStore((s) => s.runDoctor);
   const fixDoctor = useDiagnosticsStore((s) => s.fixDoctor);
-  const busyAction = useBusyStore((s) => s.busyAction);
+  const doctorRunning = useActionActive("doctor");
+  const blocking = useBlocking();
 
   const [copied, setCopied] = useState(false);
 
@@ -219,11 +220,13 @@ export function DiagnosticsPage() {
     void runDoctor();
   }, [runDoctor]);
 
-  const busy = busyAction !== null;
+  // The page's own actions stay disabled while a doctor run or a fix is in
+  // flight; unrelated background refreshes no longer freeze it.
+  const busy = blocking || doctorRunning;
   const activeChecks = doctor?.checks.filter((check) => check.status !== "skip") ?? [];
   const failingChecks = activeChecks.filter((check) => check.status !== "pass");
-  const engineMissing = doctor?.checks.find((check) => check.id === "runtime.installed")
-    ?.status === "fail";
+  const engineMissing =
+    doctor?.checks.find((check) => check.id === "runtime.installed")?.status === "fail";
 
   const copyInstallCommand = async () => {
     try {
@@ -241,8 +244,8 @@ export function DiagnosticsPage() {
         title={t("settings.diagnostics")}
         actions={
           <Button variant="primary" onClick={runDoctor} disabled={busy}>
-            <RotateCw className={cn("h-4 w-4", busyAction === "doctor" && "animate-spin")} />
-            {busyAction === "doctor" ? t("overview.running") : t("overview.runDoctor")}
+            <RotateCw className={cn("h-4 w-4", doctorRunning && "animate-spin")} />
+            {doctorRunning ? t("overview.running") : t("overview.runDoctor")}
           </Button>
         }
       />
@@ -275,7 +278,11 @@ export function DiagnosticsPage() {
                     {t("doctor.installCommand")}
                   </code>
                   <Button variant="secondary" size="sm" onClick={copyInstallCommand}>
-                    {copied ? <Check className="h-3.5 w-3.5 text-pass" /> : <Copy className="h-3.5 w-3.5" />}
+                    {copied ? (
+                      <Check className="h-3.5 w-3.5 text-pass" />
+                    ) : (
+                      <Copy className="h-3.5 w-3.5" />
+                    )}
                     {copied ? t("doctor.copied") : t("doctor.copyCommand")}
                   </Button>
                 </div>
@@ -287,18 +294,14 @@ export function DiagnosticsPage() {
           <Card
             className={cn(
               "flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between",
-              failingChecks.length === 0
-                ? "border-pass/30 bg-pass/5"
-                : "border-warn/30 bg-warn/5",
+              failingChecks.length === 0 ? "border-pass/30 bg-pass/5" : "border-warn/30 bg-warn/5",
             )}
           >
             <div className="flex items-center gap-3">
               <div
                 className={cn(
                   "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl",
-                  failingChecks.length === 0
-                    ? "bg-pass/15 text-pass"
-                    : "bg-warn/15 text-warn",
+                  failingChecks.length === 0 ? "bg-pass/15 text-pass" : "bg-warn/15 text-warn",
                 )}
               >
                 {failingChecks.length === 0 ? (
@@ -324,8 +327,8 @@ export function DiagnosticsPage() {
             <div className="flex items-center gap-2">
               <Badge variant={failingChecks.length === 0 ? "pass" : "warn"}>
                 {failingChecks.length === 0
-                  ? `${activeChecks.length}/${activeChecks.length} Passed`
-                  : `${failingChecks.length} Issues`}
+                  ? t("doctor.passedBadge", { count: activeChecks.length })
+                  : t("doctor.issuesBadge", { count: failingChecks.length })}
               </Badge>
             </div>
           </Card>
@@ -341,21 +344,14 @@ export function DiagnosticsPage() {
                     key={check.id}
                     className="flex gap-3 p-4 transition-colors hover:bg-hover/20"
                   >
-                    <Icon
-                      className={cn(
-                        "mt-0.5 h-5 w-5 shrink-0",
-                        CHECK_TONE[check.status],
-                      )}
-                    />
+                    <Icon className={cn("mt-0.5 h-5 w-5 shrink-0", CHECK_TONE[check.status])} />
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
                         <span className="text-body font-medium text-text">{row.title}</span>
                         {row.meta && (
                           <span className="flex shrink-0 items-center gap-1.5">
                             {row.meta.label && (
-                              <span className="text-caption text-text-faint">
-                                {row.meta.label}
-                              </span>
+                              <span className="text-caption text-text-faint">{row.meta.label}</span>
                             )}
                             <code className="rounded border border-border bg-panel-2 px-1.5 py-0.5 font-mono text-caption text-text-dim">
                               {row.meta.value}
@@ -363,9 +359,7 @@ export function DiagnosticsPage() {
                           </span>
                         )}
                       </div>
-                      {row.desc && (
-                        <p className="mt-0.5 text-small text-text-dim">{row.desc}</p>
-                      )}
+                      {row.desc && <p className="mt-0.5 text-small text-text-dim">{row.desc}</p>}
                       {row.extraLines.map((line) => (
                         <p key={line} className="mt-0.5 text-caption text-text-faint">
                           {line}
@@ -377,7 +371,11 @@ export function DiagnosticsPage() {
                             {t("doctor.installCommand")}
                           </code>
                           <Button variant="secondary" size="sm" onClick={copyInstallCommand}>
-                            {copied ? <Check className="h-3.5 w-3.5 text-pass" /> : <Copy className="h-3.5 w-3.5" />}
+                            {copied ? (
+                              <Check className="h-3.5 w-3.5 text-pass" />
+                            ) : (
+                              <Copy className="h-3.5 w-3.5" />
+                            )}
                             {copied ? t("doctor.copied") : t("doctor.copyCommand")}
                           </Button>
                         </div>

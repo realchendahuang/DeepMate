@@ -91,9 +91,7 @@ export function SidebarNav({ pillId }: { pillId: string }) {
         if (item.view === "plugins" && scenarioPlugins.length > 0) {
           badge = (
             <span className="flex items-center gap-1">
-              {hasOutdated && (
-                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-warn" />
-              )}
+              {hasOutdated && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-warn" />}
               <span className="rounded-full bg-panel-2 px-1.5 py-0.5 font-mono text-micro font-semibold text-text-dim">
                 {scenarioPlugins.length}
               </span>
@@ -135,9 +133,7 @@ function SidebarHeader() {
     const activeProfile = scenarios.find((p) => p.id === selectedScenario);
     return (
       <div className="flex h-[52px] shrink-0 items-center justify-between border-b border-border px-3">
-        <span className="truncate text-heading font-semibold text-text">
-          {t("settings.title")}
-        </span>
+        <span className="truncate text-heading font-semibold text-text">{t("settings.title")}</span>
         {selectedScenario && (
           <Button
             variant="ghost"
@@ -162,8 +158,7 @@ function SidebarHeader() {
       t("settings.newScenarioTitle")
     : t("settings.title");
   const running =
-    scenario &&
-    instances.find((item) => item.profile === selectedScenario)?.status === "running";
+    scenario && instances.find((item) => item.profile === selectedScenario)?.status === "running";
 
   return (
     <div className="flex h-[52px] shrink-0 items-center gap-2.5 border-b border-border px-4">

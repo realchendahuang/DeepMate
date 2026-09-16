@@ -15,9 +15,7 @@ describe("scenarioLayers", () => {
   });
 
   it("splits a bundles fallback into chips", () => {
-    expect(
-      scenarioLayers("bundles: @deepseek-ai/dsh-base, @deepseek-ai/dsh-web-app"),
-    ).toEqual({
+    expect(scenarioLayers("bundles: @deepseek-ai/dsh-base, @deepseek-ai/dsh-web-app")).toEqual({
       bundles: ["@deepseek-ai/dsh-base", "@deepseek-ai/dsh-web-app"],
       blurb: null,
     });
@@ -55,17 +53,20 @@ describe("inferSurface", () => {
 
   it("derives task scenarios from headless bundles", () => {
     expect(
-      inferSurface(profile("cli", "bundles: @deepseek-ai/dsh-base, @deepseek-ai/dsh-headless"), "undetermined"),
+      inferSurface(
+        profile("cli", "bundles: @deepseek-ai/dsh-base, @deepseek-ai/dsh-headless"),
+        "undetermined",
+      ),
     ).toBe("task");
   });
 
   it("derives web scenarios from web-app or web-ui bundles", () => {
-    expect(
-      inferSurface(profile("app", "bundles: @deepseek-ai/dsh-web-app"), "undetermined"),
-    ).toBe("web");
-    expect(
-      inferSurface(profile("ui", "bundles: @deepseek-ai/dsh-web-ui"), "undetermined"),
-    ).toBe("web");
+    expect(inferSurface(profile("app", "bundles: @deepseek-ai/dsh-web-app"), "undetermined")).toBe(
+      "web",
+    );
+    expect(inferSurface(profile("ui", "bundles: @deepseek-ai/dsh-web-ui"), "undetermined")).toBe(
+      "web",
+    );
   });
 
   it("stays undetermined without any signal", () => {
