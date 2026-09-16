@@ -62,7 +62,7 @@ export const commands = {
 };
 
 /* Constants */
-export const appVersion = "0.7.0" as const;
+export const appVersion = "0.8.0" as const;
 
 /* Types */
 export type CheckStatus = "pass" | "warn" | "fail" | "skip";
