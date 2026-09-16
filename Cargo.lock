@@ -844,7 +844,7 @@ dependencies = [
 
 [[package]]
 name = "deepmate-app"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "anyhow",
  "deepmate-core",
@@ -857,7 +857,7 @@ dependencies = [
 
 [[package]]
 name = "deepmate-cli"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -877,7 +877,7 @@ dependencies = [
 
 [[package]]
 name = "deepmate-core"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "chrono",
  "semver",
@@ -891,7 +891,7 @@ dependencies = [
 
 [[package]]
 name = "deepmate-desktop"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "anyhow",
  "deepmate-app",
@@ -917,14 +917,14 @@ dependencies = [
 
 [[package]]
 name = "deepmate-platform"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "thiserror 2.0.20",
 ]
 
 [[package]]
 name = "deepseek-harness"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "chrono",
  "deepmate-core",
