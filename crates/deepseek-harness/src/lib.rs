@@ -86,6 +86,123 @@ fn ui_boot_timeout() -> Duration {
         .unwrap_or(WEB_UI_BOOT_TIMEOUT)
 }
 
+// One completed streamed child run: the pieces a caller needs for its
+// operation-specific handling (task-log persistence, bundle cleanup).
+struct ChildRun {
+    status: std::process::ExitStatus,
+    // Collected stdout lines (trimmed, non-empty), in order.
+    stdout_lines: Vec<String>,
+    // The stderr tail at the moment the run ended.
+    stderr_tail: Vec<String>,
+}
+
+// How a bounded streamed child run failed; the io::Error is passed through
+// so each caller can word its own detail message.
+enum ChildRunFailure {
+    Spawn(std::io::Error),
+    Wait(std::io::Error),
+    TimedOut,
+}
+
+// Run a piped child under the bounded, streamed discipline shared by plugin
+// operations and task runs: stdout/stderr are drained on independent tasks
+// (a single select! loop could truncate the other stream's tail on the first
+// EOF — or hang forever when a pnpm grandchild keeps a pipe open after the
+// child printed its final line), stdout lines are relayed as `Line` events
+// and collected in order, stderr is kept as a bounded tail for the failure
+// detail, and the run is capped by `timeout`. On expiry the drain tasks are
+// aborted and the process group plus the child are killed, then reaped — so
+// the channel always gets its final `Finished` event and no process is left
+// behind.
+async fn run_streamed_child(
+    command: &mut tokio::process::Command,
+    tx: &tokio::sync::mpsc::Sender<PluginOpEvent>,
+    timeout: Duration,
+) -> Result<ChildRun, ChildRunFailure> {
+    // The child gets its own process group (unix) so a timeout can kill dsh
+    // and any pnpm grandchild together instead of orphaning it.
+    command
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    #[cfg(unix)]
+    command.process_group(0);
+    let mut child = command.spawn().map_err(ChildRunFailure::Spawn)?;
+
+    let stdout = child.stdout.take().expect("stdout was piped");
+    let stderr = child.stderr.take().expect("stderr was piped");
+    let stdout_lines: std::sync::Arc<std::sync::Mutex<Vec<String>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let stdout_tx = tx.clone();
+    let collected = std::sync::Arc::clone(&stdout_lines);
+    let mut stdout_task = tokio::spawn(async move {
+        let mut reader = tokio::io::BufReader::new(stdout).lines();
+        while let Ok(Some(line)) = reader.next_line().await {
+            let trimmed = line.trim().to_string();
+            if !trimmed.is_empty() {
+                collected.lock().unwrap().push(trimmed.clone());
+                let _ = stdout_tx.send(PluginOpEvent::Line { text: trimmed }).await;
+            }
+        }
+    });
+    let stderr_tail: std::sync::Arc<std::sync::Mutex<Vec<String>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let tail = std::sync::Arc::clone(&stderr_tail);
+    let mut stderr_task = tokio::spawn(async move {
+        let mut reader = tokio::io::BufReader::new(stderr).lines();
+        while let Ok(Some(line)) = reader.next_line().await {
+            let trimmed = line.trim().to_string();
+            if !trimmed.is_empty() {
+                let mut tail = tail.lock().unwrap();
+                if tail.len() >= STDERR_TAIL {
+                    tail.remove(0);
+                }
+                tail.push(trimmed);
+            }
+        }
+    });
+
+    let outcome = tokio::time::timeout(timeout, async {
+        // Drain both streams, then collect the exit status.
+        let _ = (&mut stdout_task).await;
+        let _ = (&mut stderr_task).await;
+        child.wait().await
+    })
+    .await;
+    let stderr_tail = stderr_tail.lock().unwrap().clone();
+
+    match outcome {
+        Ok(Ok(status)) => Ok(ChildRun {
+            status,
+            stdout_lines: std::mem::take(&mut *stdout_lines.lock().unwrap()),
+            stderr_tail,
+        }),
+        Ok(Err(err)) => Err(ChildRunFailure::Wait(err)),
+        Err(_elapsed) => {
+            // Stop the stream drain tasks first (dropping their channel
+            // clones), then kill the child process group (dsh + any pnpm
+            // grandchild), then reap. `kill(2)` is used directly because
+            // tokio's `Child::kill` did not reliably terminate a stuck child
+            // on macOS; a failed group kill still gets the child pid, so no
+            // leftover process is ever orphaned.
+            tracing::warn!(
+                timeout_secs = timeout.as_secs(),
+                "streamed child run timed out; killing the process group"
+            );
+            stdout_task.abort();
+            stderr_task.abort();
+            let pid = child.id().unwrap_or_default();
+            #[cfg(unix)]
+            unsafe {
+                libc::kill(-(pid as i32), libc::SIGKILL);
+                libc::kill(pid as i32, libc::SIGKILL);
+            }
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            Err(ChildRunFailure::TimedOut)
+        }
+    }
+}
+
 // The DeepSeek Harness service.
 pub struct DeepSeekHarness {
     platform: Arc<dyn PlatformService>,
@@ -305,24 +422,43 @@ impl DeepSeekHarness {
             .map(|dir| dir.join("logs").join(format!("harness-{profile}.log")))
     }
 
-    fn read_pid(&self, profile: &str) -> Option<u32> {
-        // The pid file records a scenario started by DeepMate itself.
+    // Resolve the pid that runs a scenario: the pid file records a scenario
+    // started by DeepMate itself, a legacy single pid file holds older `web`
+    // harnesses, and otherwise whoever serves the scenario's port is the
+    // runtime to manage (a scenario started outside DeepMate, e.g. `dsh web`
+    // in a terminal, or a process that died without clearing the file). The
+    // port fallback spawns `lsof`/`netstat` and blocks, so it must not run
+    // on a tokio worker thread; the pid-file checks are cheap file reads
+    // and stay inline.
+    async fn read_pid_async(&self, profile: &str) -> Option<u32> {
         if let Some(pid) = self.pid_file_pid(profile) {
             return Some(pid);
         }
-        // A `web` harness started by an older DeepMate recorded under the
-        // legacy single pid file.
         if profile == WEB_PROFILE {
             if let Some(pid) = self.legacy_pid_file_pid() {
                 return Some(pid);
             }
         }
-        // Fallback for a scenario started outside DeepMate (e.g. `dsh web`
-        // in a terminal, or a process that died without clearing the file):
-        // whoever serves the scenario's port is the runtime to manage.
         let url = self.scenario_url(profile).ok()?;
         let port = url.parse::<reqwest::Url>().ok()?.port_or_known_default()?;
-        self.platform.find_listener_pid(port)
+        self.find_listener_pid(port).await
+    }
+
+    // `PlatformService::find_listener_pid` off the async worker threads.
+    async fn find_listener_pid(&self, port: u16) -> Option<u32> {
+        let platform = Arc::clone(&self.platform);
+        tokio::task::spawn_blocking(move || platform.find_listener_pid(port))
+            .await
+            .unwrap_or_default()
+    }
+
+    // `PlatformService::kill_process` off the async worker threads.
+    async fn kill_process(&self, pid: u32) -> CoreResult<()> {
+        let platform = Arc::clone(&self.platform);
+        tokio::task::spawn_blocking(move || platform.kill_process(pid))
+            .await
+            .map_err(|err| CoreError::InvalidState(format!("kill task failed: {err}")))?
+            .map_err(|err| CoreError::InvalidState(err.to_string()))
     }
 
     fn pid_file_pid(&self, profile: &str) -> Option<u32> {
@@ -395,9 +531,9 @@ impl DeepSeekHarness {
     // `remove`, `update`); a bare `dsh plugin --profile <name>` would run a
     // full pnpm install, which is a side effect callers here never intend.
     async fn run_plugin(&self, profile: &str, forwarded: &[&str]) -> CoreResult<()> {
-        let cli = self.find_cli().ok_or_else(|| {
-            CoreError::InvalidState("harness CLI was not found on PATH".to_string())
-        })?;
+        let cli = self
+            .find_cli()
+            .ok_or_else(|| CoreError::NotFound("harness CLI was not found on PATH".to_string()))?;
         let output = tokio::process::Command::new(&cli)
             .arg("plugin")
             .arg("--profile")
@@ -405,11 +541,11 @@ impl DeepSeekHarness {
             .args(forwarded)
             .output()
             .await
-            .map_err(|err| CoreError::InvalidState(format!("failed to run `dsh plugin`: {err}")))?;
+            .map_err(|err| CoreError::SpawnFailed(format!("failed to run `dsh plugin`: {err}")))?;
         if !output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(CoreError::InvalidState(format!(
+            return Err(CoreError::CommandFailed(format!(
                 "`dsh plugin` failed with exit {:?}: {} {}",
                 output.status.code(),
                 stdout.trim(),
@@ -470,7 +606,7 @@ impl DeepSeekHarness {
             if self.ui_reachable_at(&url).await {
                 return Ok(RuntimeStatus {
                     kind: RuntimeStatusKind::Running,
-                    pid: self.read_pid(profile),
+                    pid: self.read_pid_async(profile).await,
                     message: Some(format!("scenario web UI is reachable at {url}")),
                 });
             }
@@ -512,10 +648,10 @@ impl DeepSeekHarness {
                 )));
             }
         }
-        let cli = self.find_cli().ok_or_else(|| {
-            CoreError::InvalidState("harness CLI was not found on PATH".to_string())
-        })?;
-        let url = self.scenario_url_for(profile, port_override)?;
+        let cli = self
+            .find_cli()
+            .ok_or_else(|| CoreError::NotFound("harness CLI was not found on PATH".to_string()))?;
+        let url = self.scenario_url_for(profile, port_override).await?;
         if self.ui_reachable_at(&url).await {
             return Ok(());
         }
@@ -552,7 +688,7 @@ impl DeepSeekHarness {
         // of the DeepMate process.
         let child = command
             .spawn()
-            .map_err(|err| CoreError::InvalidState(format!("failed to start scenario: {err}")))?;
+            .map_err(|err| CoreError::SpawnFailed(format!("failed to start scenario: {err}")))?;
         self.write_pid(profile, child.id())?;
 
         // Wait until the scenario's web UI actually answers. The hero status
@@ -569,7 +705,18 @@ impl DeepSeekHarness {
             }
             tokio::time::sleep(Duration::from_millis(300)).await;
         }
-        Err(CoreError::InvalidState(format!(
+        // The UI never came up: kill the half-started instance and clear the
+        // pid file, otherwise a zombie keeps the scenario marked as running.
+        // The port assignment stays: it is the scenario's stable address,
+        // not a leak.
+        let pid = child.id();
+        if let Err(err) = self.kill_process(pid).await {
+            tracing::warn!(profile, pid, error = %err, "failed to kill the scenario that missed its boot deadline");
+        }
+        if let Err(err) = self.clear_pid(profile) {
+            tracing::warn!(profile, error = %err, "failed to clear the scenario pid file");
+        }
+        Err(CoreError::Timeout(format!(
             "scenario web UI did not come up within {timeout:?}; check {}",
             self.log_path(profile)
                 .map(|path| path.to_string_lossy().into_owned())
@@ -580,15 +727,29 @@ impl DeepSeekHarness {
     // Resolve the URL a scenario starts on, assigning a new port when
     // needed. The `web` scenario without an override uses the legacy URL
     // override or the engine default.
-    fn scenario_url_for(&self, profile: &str, port_override: Option<u16>) -> CoreResult<String> {
+    async fn scenario_url_for(
+        &self,
+        profile: &str,
+        port_override: Option<u16>,
+    ) -> CoreResult<String> {
         let registry = PortRegistry::new(self.data_dir.clone());
         let port = if profile == WEB_PROFILE && port_override.is_none() {
             self.scenario_port(profile)?
                 .unwrap_or(ports::DEFAULT_WEB_PORT)
         } else {
-            registry.assign(profile, port_override, |port| {
-                self.platform.find_listener_pid(port).is_some()
-            })?
+            // The assignment loop probes listeners with `lsof`/`netstat`,
+            // which block; run it off the async worker threads.
+            let platform = Arc::clone(&self.platform);
+            let profile = profile.to_string();
+            tokio::task::spawn_blocking(move || {
+                registry.assign(&profile, port_override, |port| {
+                    platform.find_listener_pid(port).is_some()
+                })
+            })
+            .await
+            .map_err(|err| {
+                CoreError::InvalidState(format!("port assignment task failed: {err}"))
+            })??
         };
         Ok(format!("http://127.0.0.1:{port}"))
     }
@@ -599,7 +760,7 @@ impl DeepSeekHarness {
     }
 
     pub async fn stop_scenario(&self, profile: &str) -> CoreResult<()> {
-        let Some(pid) = self.read_pid(profile) else {
+        let Some(pid) = self.read_pid_async(profile).await else {
             tracing::warn!(
                 profile,
                 "no harness pid recorded; the scenario may have been started manually"
@@ -669,7 +830,7 @@ impl DeepSeekHarness {
                     instance.url = Some(url);
                     if up {
                         instance.status = RuntimeStatusKind::Running;
-                        instance.pid = self.read_pid(&profile.id);
+                        instance.pid = self.read_pid_async(&profile.id).await;
                     }
                 }
             } else if surface == Surface::Task {
@@ -1019,9 +1180,9 @@ impl DeepSeekHarness {
         target: Option<&str>,
         tx: tokio::sync::mpsc::Sender<PluginOpEvent>,
     ) -> CoreResult<()> {
-        let cli = self.find_cli().ok_or_else(|| {
-            CoreError::InvalidState("harness CLI was not found on PATH".to_string())
-        })?;
+        let cli = self
+            .find_cli()
+            .ok_or_else(|| CoreError::NotFound("harness CLI was not found on PATH".to_string()))?;
         let target = target.unwrap_or("").to_string();
         let forwarded: &[&str] = match kind {
             PluginOpKind::Install => &["add", &target],
@@ -1060,7 +1221,7 @@ impl DeepSeekHarness {
                             detail: Some(detail.clone()),
                         })
                         .await;
-                    return Err(CoreError::InvalidState(detail));
+                    return Err(CoreError::NotFound(detail));
                 }
                 let _ = tx
                     .send(PluginOpEvent::Finished {
@@ -1079,49 +1240,8 @@ impl DeepSeekHarness {
             .arg("plugin")
             .arg("--profile")
             .arg(profile)
-            .args(forwarded)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
-        #[cfg(unix)]
-        command.process_group(0);
-        let mut child = command
-            .spawn()
-            .map_err(|err| CoreError::InvalidState(format!("failed to run `dsh plugin`: {err}")))?;
+            .args(forwarded);
 
-        let stdout = child.stdout.take().expect("stdout was piped");
-        let stderr = child.stderr.take().expect("stderr was piped");
-        // The two streams are drained as independent tasks: a single select!
-        // loop that broke on the first EOF could drop the other stream's tail
-        // (truncating the failure detail) — or hang forever when a pnpm
-        // grandchild keeps the stdout pipe open after the child printed its
-        // final line. Reading both to EOF first also means the tail below is
-        // complete when the exit status arrives.
-        let stdout_tx = tx.clone();
-        let mut stdout_task = tokio::spawn(async move {
-            let mut lines = tokio::io::BufReader::new(stdout).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                let trimmed = line.trim().to_string();
-                if !trimmed.is_empty() {
-                    let _ = stdout_tx.send(PluginOpEvent::Line { text: trimmed }).await;
-                }
-            }
-        });
-        let stderr_tail: std::sync::Arc<std::sync::Mutex<Vec<String>>> =
-            std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        let tail = std::sync::Arc::clone(&stderr_tail);
-        let mut stderr_task = tokio::spawn(async move {
-            let mut lines = tokio::io::BufReader::new(stderr).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                let trimmed = line.trim().to_string();
-                if !trimmed.is_empty() {
-                    let mut tail = tail.lock().unwrap();
-                    if tail.len() >= STDERR_TAIL {
-                        tail.remove(0);
-                    }
-                    tail.push(trimmed);
-                }
-            }
-        });
         let timeout = plugin_op_timeout();
         tracing::debug!(
             profile,
@@ -1129,21 +1249,11 @@ impl DeepSeekHarness {
             timeout_secs = timeout.as_secs(),
             "running `dsh plugin`"
         );
-        let outcome = tokio::time::timeout(timeout, async {
-            // Drain both streams, then collect the exit status. On timeout
-            // the drain tasks are aborted (their tx clones dropped) and the
-            // kill below takes over, so the dialog always gets a finished
-            // event and the channel can close.
-            let _ = (&mut stdout_task).await;
-            let _ = (&mut stderr_task).await;
-            child.wait().await
-        })
-        .await;
-        let stderr_tail = stderr_tail.lock().unwrap().clone();
+        let run = run_streamed_child(&mut command, &tx, timeout).await;
 
-        match outcome {
-            Ok(Ok(status)) => {
-                if status.success() {
+        match run {
+            Ok(run) => {
+                if run.status.success() {
                     tracing::debug!(profile, target = %target, "`dsh plugin` finished");
                     // `dsh plugin remove` drops the dependency but leaves the
                     // bundle declaration behind; strip it so the web UI stops
@@ -1161,13 +1271,13 @@ impl DeepSeekHarness {
                         .await;
                     Ok(())
                 } else {
-                    let detail = if stderr_tail.is_empty() {
-                        format!("`dsh plugin` failed with exit {:?}", status.code())
+                    let detail = if run.stderr_tail.is_empty() {
+                        format!("`dsh plugin` failed with exit {:?}", run.status.code())
                     } else {
                         format!(
                             "`dsh plugin` failed with exit {:?}: {}",
-                            status.code(),
-                            stderr_tail.join(" ")
+                            run.status.code(),
+                            run.stderr_tail.join(" ")
                         )
                     };
                     tracing::warn!(%detail, "`dsh plugin` failed");
@@ -1177,10 +1287,20 @@ impl DeepSeekHarness {
                             detail: Some(detail.clone()),
                         })
                         .await;
-                    Err(CoreError::InvalidState(detail))
+                    Err(CoreError::CommandFailed(detail))
                 }
             }
-            Ok(Err(err)) => {
+            Err(ChildRunFailure::Spawn(err)) => {
+                let detail = format!("failed to run `dsh plugin`: {err}");
+                let _ = tx
+                    .send(PluginOpEvent::Finished {
+                        ok: false,
+                        detail: Some(detail.clone()),
+                    })
+                    .await;
+                Err(CoreError::SpawnFailed(detail))
+            }
+            Err(ChildRunFailure::Wait(err)) => {
                 let detail = format!("failed to wait for `dsh plugin`: {err}");
                 let _ = tx
                     .send(PluginOpEvent::Finished {
@@ -1188,32 +1308,9 @@ impl DeepSeekHarness {
                         detail: Some(detail.clone()),
                     })
                     .await;
-                Err(CoreError::InvalidState(detail))
+                Err(CoreError::CommandFailed(detail))
             }
-            Err(_elapsed) => {
-                // Stop the stream drain tasks first (dropping their channel
-                // clones), then kill the child process group (dsh + any pnpm
-                // grandchild), then report a bounded failure so the UI can
-                // close. `kill(2)` is used directly because tokio's
-                // `Child::kill` did not reliably terminate a stuck child on
-                // macOS; a failed group kill still gets the child pid, so no
-                // leftover process is ever orphanned.
-                tracing::warn!(
-                    profile,
-                    target = %target,
-                    timeout_secs = timeout.as_secs(),
-                    "`dsh plugin` timed out; killing the process group"
-                );
-                stdout_task.abort();
-                stderr_task.abort();
-                let pid = child.id().unwrap_or_default();
-                #[cfg(unix)]
-                unsafe {
-                    libc::kill(-(pid as i32), libc::SIGKILL);
-                    libc::kill(pid as i32, libc::SIGKILL);
-                }
-                let _ = child.kill().await;
-                let _ = child.wait().await;
+            Err(ChildRunFailure::TimedOut) => {
                 let detail = format!(
                     "`dsh plugin` did not finish within {timeout:?} and was stopped. \
                      A leftover pnpm/dsh process may have been stuck; retry the operation."
@@ -1224,7 +1321,7 @@ impl DeepSeekHarness {
                         detail: Some(detail.clone()),
                     })
                     .await;
-                Err(CoreError::InvalidState(detail))
+                Err(CoreError::Timeout(detail))
             }
         }
     }
@@ -1270,9 +1367,9 @@ impl DeepSeekHarness {
                 "scenario {profile} is not a task scenario (missing @deepseek-ai/dsh-headless)"
             )));
         }
-        let cli = self.find_cli().ok_or_else(|| {
-            CoreError::InvalidState("harness CLI was not found on PATH".to_string())
-        })?;
+        let cli = self
+            .find_cli()
+            .ok_or_else(|| CoreError::NotFound("harness CLI was not found on PATH".to_string()))?;
         let _ = tx
             .send(PluginOpEvent::Started {
                 op: PluginOpKind::Task,
@@ -1281,63 +1378,14 @@ impl DeepSeekHarness {
             .await;
 
         let mut command = tokio::process::Command::new(&cli);
-        command
-            .arg("--profile")
-            .arg(profile)
-            .arg(prompt)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
-        #[cfg(unix)]
-        command.process_group(0);
-        let mut child = command
-            .spawn()
-            .map_err(|err| CoreError::InvalidState(format!("failed to run task: {err}")))?;
+        command.arg("--profile").arg(profile).arg(prompt);
 
-        let stdout = child.stdout.take().expect("stdout was piped");
-        let stderr = child.stderr.take().expect("stderr was piped");
-        let lines: std::sync::Arc<std::sync::Mutex<Vec<String>>> =
-            std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        let stdout_tx = tx.clone();
-        let collected = std::sync::Arc::clone(&lines);
-        let mut stdout_task = tokio::spawn(async move {
-            let mut reader = tokio::io::BufReader::new(stdout).lines();
-            while let Ok(Some(line)) = reader.next_line().await {
-                let trimmed = line.trim().to_string();
-                if !trimmed.is_empty() {
-                    collected.lock().unwrap().push(trimmed.clone());
-                    let _ = stdout_tx.send(PluginOpEvent::Line { text: trimmed }).await;
-                }
-            }
-        });
-        let stderr_tail: std::sync::Arc<std::sync::Mutex<Vec<String>>> =
-            std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-        let tail = std::sync::Arc::clone(&stderr_tail);
-        let mut stderr_task = tokio::spawn(async move {
-            let mut reader = tokio::io::BufReader::new(stderr).lines();
-            while let Ok(Some(line)) = reader.next_line().await {
-                let trimmed = line.trim().to_string();
-                if !trimmed.is_empty() {
-                    let mut tail = tail.lock().unwrap();
-                    if tail.len() >= STDERR_TAIL {
-                        tail.remove(0);
-                    }
-                    tail.push(trimmed);
-                }
-            }
-        });
         let timeout = plugin_op_timeout();
         tracing::debug!(profile, timeout_secs = timeout.as_secs(), "running task");
-        let outcome = tokio::time::timeout(timeout, async {
-            let _ = (&mut stdout_task).await;
-            let _ = (&mut stderr_task).await;
-            child.wait().await
-        })
-        .await;
-        let stderr_tail = stderr_tail.lock().unwrap().clone();
-        let stdout_lines = lines.lock().unwrap().clone();
+        let run = run_streamed_child(&mut command, &tx, timeout).await;
 
-        match outcome {
-            Ok(Ok(status)) if status.success() => {
+        match run {
+            Ok(run) if run.status.success() => {
                 // Persist the answer so a task result outlives the run.
                 if let Some(dir) = self.data_dir.as_ref() {
                     let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
@@ -1345,7 +1393,7 @@ impl DeepSeekHarness {
                     if let Some(parent) = log.parent() {
                         let _ = std::fs::create_dir_all(parent);
                     }
-                    let _ = std::fs::write(&log, stdout_lines.join("\n"));
+                    let _ = std::fs::write(&log, run.stdout_lines.join("\n"));
                     tracing::info!(profile, path = %log.display(), "task log written");
                 }
                 let _ = tx
@@ -1356,14 +1404,14 @@ impl DeepSeekHarness {
                     .await;
                 Ok(())
             }
-            Ok(Ok(status)) => {
-                let detail = if stderr_tail.is_empty() {
-                    format!("task failed with exit {:?}", status.code())
+            Ok(run) => {
+                let detail = if run.stderr_tail.is_empty() {
+                    format!("task failed with exit {:?}", run.status.code())
                 } else {
                     format!(
                         "task failed with exit {:?}: {}",
-                        status.code(),
-                        stderr_tail.join(" ")
+                        run.status.code(),
+                        run.stderr_tail.join(" ")
                     )
                 };
                 tracing::warn!(%detail, "task failed");
@@ -1373,9 +1421,19 @@ impl DeepSeekHarness {
                         detail: Some(detail.clone()),
                     })
                     .await;
-                Err(CoreError::InvalidState(detail))
+                Err(CoreError::CommandFailed(detail))
             }
-            Ok(Err(err)) => {
+            Err(ChildRunFailure::Spawn(err)) => {
+                let detail = format!("failed to run task: {err}");
+                let _ = tx
+                    .send(PluginOpEvent::Finished {
+                        ok: false,
+                        detail: Some(detail.clone()),
+                    })
+                    .await;
+                Err(CoreError::SpawnFailed(detail))
+            }
+            Err(ChildRunFailure::Wait(err)) => {
                 let detail = format!("failed to wait for the task: {err}");
                 let _ = tx
                     .send(PluginOpEvent::Finished {
@@ -1383,19 +1441,9 @@ impl DeepSeekHarness {
                         detail: Some(detail.clone()),
                     })
                     .await;
-                Err(CoreError::InvalidState(detail))
+                Err(CoreError::CommandFailed(detail))
             }
-            Err(_elapsed) => {
-                #[cfg(unix)]
-                {
-                    // Signal the whole process group; a failed group kill
-                    // still gets the child pid.
-                    let pid = child.id().unwrap_or_default();
-                    unsafe {
-                        libc::kill(-(pid as i32), libc::SIGKILL);
-                    }
-                }
-                let _ = child.kill().await;
+            Err(ChildRunFailure::TimedOut) => {
                 let detail = format!("task timed out after {timeout:?}");
                 tracing::warn!(%detail, profile);
                 let _ = tx
@@ -1404,7 +1452,7 @@ impl DeepSeekHarness {
                         detail: Some(detail.clone()),
                     })
                     .await;
-                Err(CoreError::InvalidState(detail))
+                Err(CoreError::Timeout(detail))
             }
         }
     }
@@ -1830,7 +1878,7 @@ impl DeepSeekHarness {
             let provider = model
                 .provider
                 .clone()
-                .ok_or_else(|| CoreError::InvalidState("model has no provider".to_string()))?;
+                .ok_or_else(|| CoreError::NotFound("model has no provider".to_string()))?;
             self.upsert_model(&provider, model.clone()).await?;
             report.models += 1;
         }
@@ -1888,20 +1936,20 @@ pub(crate) mod tests {
         }
     }
 
-    #[test]
-    fn read_pid_falls_back_to_the_process_owning_the_ui_port() {
+    #[tokio::test]
+    async fn read_pid_falls_back_to_the_process_owning_the_ui_port() {
         let dir =
             std::env::temp_dir().join(format!("deepmate-pid-fallback-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let harness = DeepSeekHarness::new(Arc::new(ListenerPlatform(4242)))
             .with_data_dir(dir.clone())
             .with_ui_url("http://127.0.0.1:3080");
-        assert_eq!(harness.read_pid("web"), Some(4242));
+        assert_eq!(harness.read_pid_async("web").await, Some(4242));
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    #[test]
-    fn read_pid_prefers_the_pid_file_over_the_port_listener() {
+    #[tokio::test]
+    async fn read_pid_prefers_the_pid_file_over_the_port_listener() {
         let dir =
             std::env::temp_dir().join(format!("deepmate-pid-file-test-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("state")).unwrap();
@@ -1909,7 +1957,7 @@ pub(crate) mod tests {
         let harness = DeepSeekHarness::new(Arc::new(ListenerPlatform(4242)))
             .with_data_dir(dir.clone())
             .with_ui_url("http://127.0.0.1:3080");
-        assert_eq!(harness.read_pid("web"), Some(9999));
+        assert_eq!(harness.read_pid_async("web").await, Some(9999));
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -2291,7 +2339,8 @@ pub(crate) mod tests {
 
         // The fake launcher never binds the assigned port, so start reports
         // the boot failure — but only after forwarding the right args and
-        // recording the pid.
+        // recording the pid. The failed instance is then killed and its pid
+        // file cleared so no half-started scenario looks running.
         let err = harness.start_scenario("coding", None).await.unwrap_err();
         assert!(err.to_string().contains("did not come up"), "{err}");
         assert_eq!(
@@ -2302,6 +2351,7 @@ pub(crate) mod tests {
             ["--profile", "coding", "--port", "3081"]
         );
         assert!(!work.join("state/run-web.pid").exists());
+        assert!(!work.join("state/run-coding.pid").exists());
         // The port assignment is sticky for the next instances() call.
         assert_eq!(
             harness.scenario_port("coding").unwrap(),

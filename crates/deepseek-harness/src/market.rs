@@ -120,9 +120,9 @@ impl Market {
             .get(url)
             .send()
             .await
-            .map_err(|err| CoreError::InvalidState(format!("compat request failed: {err}")))?;
+            .map_err(|err| CoreError::Network(format!("compat request failed: {err}")))?;
         if !response.status().is_success() {
-            return Err(CoreError::InvalidState(format!(
+            return Err(CoreError::Network(format!(
                 "registry returned HTTP {} for {name}",
                 response.status()
             )));
@@ -190,9 +190,9 @@ async fn search_npm(client: &reqwest::Client, query: &str) -> CoreResult<Vec<Mar
         .query(&[("text", query), ("size", size.as_str())])
         .send()
         .await
-        .map_err(|err| CoreError::InvalidState(format!("market request failed: {err}")))?;
+        .map_err(|err| CoreError::Network(format!("market request failed: {err}")))?;
     if !response.status().is_success() {
-        return Err(CoreError::InvalidState(format!(
+        return Err(CoreError::Network(format!(
             "market returned HTTP {}",
             response.status()
         )));
@@ -336,12 +336,13 @@ fn compat_from_packument(text: &str, harness_version: Option<&str>) -> CoreResul
 // MarketEntry records the npm search produces, so the rest of the pipeline
 // (compat checks, installation, trust display) is shared.
 async fn fetch_curated(client: &reqwest::Client, url: &str) -> CoreResult<Vec<MarketEntry>> {
-    let response =
-        client.get(url).send().await.map_err(|err| {
-            CoreError::InvalidState(format!("curated list request failed: {err}"))
-        })?;
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|err| CoreError::Network(format!("curated list request failed: {err}")))?;
     if !response.status().is_success() {
-        return Err(CoreError::InvalidState(format!(
+        return Err(CoreError::Network(format!(
             "curated list returned HTTP {}",
             response.status()
         )));

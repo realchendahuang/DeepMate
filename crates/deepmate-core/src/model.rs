@@ -2,9 +2,9 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 // A scenario's run surface: what the profile loads when started. The engine
-// decides this by the bundles a profile mounts — `dsh-web-app` serves the
-// browser console, `dsh-headless` runs one-shot tasks — so the surface is
-// derived from the installed bundle set, not stored anywhere.
+// decides this by the bundles a profile mounts — the browser console bundle
+// serves the web UI, the headless bundle runs one-shot tasks — so the surface
+// is derived from the installed bundle set, not stored anywhere.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum Surface {
