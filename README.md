@@ -180,24 +180,28 @@ app's frontend).
 cargo build --workspace
 
 # Try the CLI
-cargo run -- status
-cargo run -- doctor
+cargo run -p deepmate-cli -- status
+cargo run -p deepmate-cli -- doctor
 
 # Run the desktop shell (Tauri): installs frontend deps, then opens the app
 cd apps/desktop
 npm install
 npm run tauri dev
 
-# Full workspace gate (formatting, clippy, tests)
+# Rust workspace gate (formatting, clippy, tests)
 make ci
+
+# Everything a release must pass: Rust gate + frontend lint/typecheck/tests
+make verify
 
 # Prune the incremental build cache when target/debug grows too large
 make cache-clean
 ```
 
-Prebuilt binaries for Linux (x86_64), macOS (Apple Silicon and Intel) and
-Windows (x86_64) are published on
-[GitHub Releases](https://github.com/realchendahuang/DeepMate/releases).
+Prebuilt binaries are published on
+[GitHub Releases](https://github.com/realchendahuang/DeepMate/releases);
+currently these are macOS (Apple Silicon) builds, produced locally. On other
+platforms, build from source as described above.
 
 On macOS the desktop app ships as a `DeepMate.app` bundle inside a DMG
 (`deepmate-<version>-<target>.dmg`), with a `/Applications` shortcut for

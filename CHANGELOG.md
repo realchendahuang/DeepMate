@@ -128,8 +128,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     streamed command (`plugin_op_stream`): the harness CLI's output lines
     arrive over a Tauri channel and render in a live progress dialog, with
     the outcome (success or the failure detail) shown when the operation
-    ends. The blocking plugin commands remain for callers that only need the
-    outcome.
+    ends.
   - The core gained a `stream_plugin_op` adapter hook with a default
     implementation that wraps the blocking calls in Started/Finished events,
     so every adapter produces a well-formed stream; the DeepSeek Harness
@@ -141,6 +140,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Settings page gained an About section showing the app version, which
   is exported into the bindings as a constant (`appVersion`) from
   `CARGO_PKG_VERSION` instead of being hard-coded in the UI.
+
+### Fixed
+
+- Desktop: switching providers no longer carries the previous provider's
+  form values into the new selection. The detail pane remounts per provider
+  (it is keyed by provider id), so an unsaved edit can never be written onto
+  the wrong provider.
+- Desktop: the 10-second overview poll no longer disables every control in
+  the app. Read-only refreshes track themselves without blocking the UI, and
+  concurrent actions no longer clear each other's busy flag.
+- Desktop: a harness CLI installed after DeepMate launched is now detected
+  without restarting the app; only successful CLI lookups are cached.
+- Port assignment no longer hands out a `preferred` port that is already
+  owned by another scenario or currently listening, which previously let two
+  scenarios fight over one port and fail at the boot timeout.
+- English plural forms are correct at count = 1 across the overview, doctor
+  and scenario strings ("1 provider" instead of "1 providers"); the doctor
+  badge labels ("3/7 Passed") are localized instead of hard-coded.
+- Windows CI: the group-kill `pid` is unix-only now, fixing the
+  `unused variable` clippy failure that had kept `main` red.
+
+### Security
+
+- Replaced the archived, unsound `serde_yml` YAML parser with `noyalib`
+  (its `serde_yaml`-compatible shim), keeping the same API surface.
+
+### Changed
+
+- Build & CI:
+  - The CI check job installs the Tauri Linux system dependencies (the
+    desktop shell is a workspace member now), concurrent runs for a branch
+    cancel each other, clippy/test run with `--locked`, and the desktop job
+    runs the frontend `lint` + `typecheck` + `test` gate.
+  - `make verify` runs the Rust gate plus the frontend gate; `make
+    desktop-check` runs the frontend gate alone. `make cache-clean` prunes
+    Cargo's incremental-cache fingerprints, and `profile.dev.package."*"`
+    drops debuginfo for dependencies to keep `target/debug` small.
+  - The bindings generator writes to `src/shared/api/bindings.ts` (the one
+    path the frontend imports); the duplicated `src/bindings.ts` is gone.
+  - The app version has a single source of truth: every crate inherits
+    `version.workspace = true` and `tauri.conf.json` no longer pins its own
+    `version` (it falls back to the Cargo version), so a release bump is
+    3 files instead of 5.
+- Removed dead code: the unreferenced `plugin_remove`, `plugin_update`,
+  `plugin_forget` and `list_market_sources` commands (and their wrappers),
+  six unused plugin-store actions, unused Tauri `process`/`store` plugins,
+  the unused `next-themes` and Tauri JS plugin packages, and the stale
+  `scripts/` helpers.
 
 ## [0.7.0] - 2026-08-28
 

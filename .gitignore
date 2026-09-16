@@ -5,3 +5,4 @@ target/
 *.log
 .zcode/
 node_modules/
+release-notes.md

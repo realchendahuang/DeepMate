@@ -1,4 +1,4 @@
-.PHONY: build test run dev dev-release fmt fmt-check clippy check ci cache-clean
+.PHONY: build test run dev dev-release fmt fmt-check clippy check ci desktop-check verify cache-clean
 
 build:
 	cargo build --workspace
@@ -30,6 +30,13 @@ check:
 	cargo check --workspace
 
 ci: fmt-check clippy test
+
+# Frontend gate: eslint + tsc + vitest.
+desktop-check:
+	cd apps/desktop && npm run check
+
+# Everything a release must pass: the Rust workspace gate plus the frontend.
+verify: ci desktop-check
 
 # Cargo never prunes stale incremental-cache fingerprints on its own; run this
 # when target/debug grows into the multiple-GB range.
