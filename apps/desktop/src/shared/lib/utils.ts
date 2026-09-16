@@ -18,6 +18,7 @@ const twMerge = extendTailwindMerge({
         "text-body",
         "text-small",
         "text-caption",
+        "text-micro",
         "text-brand",
       ],
     },

@@ -168,6 +168,8 @@
   --text-caption: 11px;
   --text-caption--line-height: 1.4;
   --text-caption--font-weight: 600;
+  --text-micro: 10px;
+  --text-micro--line-height: 1.4;
   --text-brand: 15px;
   --text-brand--line-height: 1.2;
   --text-brand--font-weight: 700;

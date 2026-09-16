@@ -72,6 +72,7 @@ only the display label.
 | `text-body` | 13 | regular/medium | default reading, control labels |
 | `text-small` | 12 | regular | secondary lines, details |
 | `text-caption` | 11 | semibold | badges, table column headers, meta |
+| `text-micro` | 10 | (set per use) | tiny mono chips, rail badge counters |
 | `text-brand` | 15 | bold | sidebar wordmark only |
 
 ### Metrics — `@theme` in `src/styles.css`
@@ -148,17 +149,19 @@ column. No per-page top bars and no page-to-page jumps.
 
 ```
 [ Rail 72px ] [ Sidebar 240px ] [ Content ]
-  ⌗ home        scene name        overview (runtime)
-  scenes        概览              providers / plugins
-  +             提供商与模型       or system settings
-  ⚙ settings    插件
+  scenes        scene name        overview (runtime)
+  +             概览              providers / plugins
+  ⚙ settings    提供商与模型       or system settings
+                插件
 ```
 
 - **Scenario rail (`w-rail` 72px, `bg-rail`):** Discord-style workspace
-  switcher. A grid button at the top opens all-scenarios (the product logo
-  is a rounded-square asset and does **not** live in the circular rail).
-  One 48px avatar per scenario (letter, morphs from circle to rounded-square
-  when active, running-status dot, left pill). `+` creates a scenario. The
+  switcher, and the only chrome that lists scenarios — there is no separate
+  all-scenarios page; the app always lives inside a scenario. One 48px
+  avatar per scenario (letter, morphs from circle to rounded-square when
+  active, running-status dot, left pill). `+` creates a scenario. Right-click
+  on an avatar manages it (description / rename / delete) via a context
+  menu; the same dialogs also live on the scenario's overview hero. The
   **gear at the bottom is global settings**. The scene list scrolls with the
   scrollbar hidden so an empty rail never shows a stray thumb above the gear.
 - **Tenant sidebar (`w-sidebar` 240px, `bg-sidebar`):** headed by the

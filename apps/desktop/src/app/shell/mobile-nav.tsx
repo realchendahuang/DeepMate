@@ -14,12 +14,10 @@ export function MobileNav({ open, onClose }: { open: boolean; onClose: () => voi
   const scenarios = useScenarioStore((s) => s.profiles);
 
   const title =
-    route.kind === "scenarios"
-      ? t("settings.scenarios")
-      : route.kind === "settings"
-        ? t("settings.title")
-        : (scenarios.find((profile) => profile.id === selectedScenario)?.name ??
-          t("settings.title"));
+    route.kind === "settings"
+      ? t("settings.title")
+      : (scenarios.find((profile) => profile.id === selectedScenario)?.name ??
+        t("settings.newScenarioTitle"));
 
   return (
     <Sheet open={open} onOpenChange={(next) => !next && onClose()}>

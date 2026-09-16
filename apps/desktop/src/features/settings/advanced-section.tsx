@@ -9,6 +9,8 @@ import { useTranslation } from "react-i18next";
 import { FileCode2, FileText, SlidersHorizontal } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/shared/api/api";
+import { DEFAULT_SCENARIO_ID } from "@/shared/lib/scenario";
+import { errorMessage } from "@/shared/lib/errors";
 import { useScenarioStore } from "@/app/store/scenarios";
 import { useBusyStore } from "@/app/store/busy";
 import { Card } from "@/shared/ui/card";
@@ -46,7 +48,7 @@ export function AdvancedSection() {
   const busy = useBusyStore((s) => s.busyAction) !== null;
 
   // The scenario the scene files are scoped to; defaults to the focused one.
-  const [scene, setScene] = useState(selectedScenario || "web");
+  const [scene, setScene] = useState(selectedScenario || DEFAULT_SCENARIO_ID);
   const [file, setFile] = useState<AdvancedFile | null>(null);
 
   const sceneFiles: AdvancedFile[] = [
@@ -181,7 +183,7 @@ function AdvancedFileDialog({
       .catch((error: unknown) => {
         if (alive) {
           setLoadFailed(true);
-          toast.error(String(error));
+          toast.error(errorMessage(error));
         }
       });
     return () => {
@@ -196,7 +198,7 @@ function AdvancedFileDialog({
       toast.success(t("settings.advancedSaved"));
       onClose();
     } catch (error) {
-      toast.error(String(error));
+      toast.error(errorMessage(error));
     }
   };
 

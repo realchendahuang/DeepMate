@@ -2,6 +2,15 @@
 
 import type { Profile, Surface } from "@/shared/api/api";
 
+// The default scenario the harness ships with. It is the fixed `web` profile:
+// the runtime protects it from rename/remove, it keeps the legacy URL and it
+// answers "web" when its surface has never been probed.
+export const DEFAULT_SCENARIO_ID = "web";
+
+export function isDefaultScenario(profile: Pick<Profile, "id">): boolean {
+  return profile.id === DEFAULT_SCENARIO_ID;
+}
+
 // The harness falls back to `bundles: a, b, c` when a profile has no
 // description. Split that into chips; any other string is a real blurb.
 export function scenarioLayers(description: string | null): {
@@ -35,7 +44,7 @@ export function scenarioInitial(name: string): string {
 // declared bundles (headless → task, web-app/web-ui → web).
 export function inferSurface(profile: Profile, surface: Surface): Surface {
   if (surface !== "undetermined") return surface;
-  if (profile.id === "web") return "web";
+  if (isDefaultScenario(profile)) return "web";
   const { bundles } = scenarioLayers(profile.description);
   if (bundles.some((id) => id.includes("headless"))) return "task";
   if (bundles.some((id) => id.includes("web-app") || id.includes("web-ui"))) return "web";

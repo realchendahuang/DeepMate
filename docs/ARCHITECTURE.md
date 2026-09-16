@@ -98,6 +98,12 @@ The bridge also uses:
 
 - **typed error envelopes** — commands return `{ status: "ok" | "error" }`
   which `api.ts` unwraps back into plain promises
+- **classified core errors** — core failures serialize to the frontend as a
+  JSON envelope `{"code":"<stable code>","message":"..."}` (the desktop's
+  `command_error` helper + `CoreError::code`), so `shared/lib/errors.ts`
+  maps exact codes to localized toasts instead of pattern-matching prose;
+  non-core errors (update plumbing) stay plain strings and fall back to
+  pattern matching
 - **semantic types** — `chrono::DateTime` maps to a real `Date` in the
   generated bindings (e.g. `MarketEntry.updated`), with the conversion code
   generated into `bindings.ts`
@@ -619,10 +625,12 @@ layers keep that model explicit:
   matrix; `runBusy` wraps every command with busy tracking and error toasts.
   Per-scenario data (providers/models) is keyed by scenario id, where presence
   in the map doubles as the "loaded" flag.
-- **Router** (`app/router.ts`) — the single navigation state: a route is the
-  all-scenarios inventory, a section of the selected scenario, or a settings
-  section. Chrome components read the router store directly instead of
-  threading callbacks.
+- **Router** (`app/router.ts`) — the single navigation state: a route is a
+  section of the selected scenario or a settings section. There is no
+  all-scenarios route — the rail is the inventory, and the app always lives
+  inside a scenario (with zero scenarios the scenario creator takes over).
+  Chrome components read the router store directly instead of threading
+  callbacks.
 - **Features** (`features/`) — one folder per user-facing feature; pages read
   stores and shared UI only.
 - **Shared** (`shared/`) — design-system components, the generated command
@@ -720,8 +728,9 @@ opening into a detail view that manages its plugin set visually.
 ### Scenarios as the top-level unit (v0.8.0)
 
 Scenarios are the app's first entry point. A Discord-style rail switches
-tenants (product mark = all-scenarios, avatars = scenes, gear = global
-settings). Opening a scenario lands on its overview; the tenant sidebar
+tenants (avatars = scenes, `+` = create, gear = global settings; right-click
+on an avatar manages it). The app always lives inside a scenario — there is
+no separate all-scenarios page. Opening a scenario lands on its overview; the tenant sidebar
 then holds run / providers / plugins. Global diagnostics, snapshots,
 preferences and about never mix with scene configuration.
 

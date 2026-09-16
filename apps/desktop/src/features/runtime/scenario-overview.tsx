@@ -22,18 +22,20 @@ import { useRouterStore } from "@/app/router";
 import { useRuntimeStore } from "@/app/store/runtime";
 import { useProviderStore } from "@/app/store/providers";
 import { usePluginStore } from "@/app/store/plugins";
-import { useBusyStore } from "@/app/store/busy";
 import type { Profile } from "@/shared/api/api";
 import { cn } from "@/shared/lib/utils";
-import { inferSurface, scenarioInitial, scenarioLayers } from "@/shared/lib/scenario";
+import {
+  inferSurface,
+  isDefaultScenario,
+  scenarioInitial,
+  scenarioLayers,
+} from "@/shared/lib/scenario";
 import { Card, CardContent } from "@/shared/ui/card";
 import { Button } from "@/shared/ui/button";
 import { Badge } from "@/shared/ui/badge";
 import { PageBody } from "@/shared/ui/page";
 import { SurfaceBadge } from "@/features/scenarios/surface-badge";
-import { ScenarioRenameDialog } from "@/features/scenarios/scenario-rename-dialog";
-import { ScenarioDeleteDialog } from "@/features/scenarios/scenario-delete-dialog";
-import { ScenarioDescriptionDialog } from "@/features/scenarios/scenario-description-dialog";
+import { ScenarioManageDialogs, useScenarioManage } from "@/features/scenarios/scenario-manage";
 import { WebRuntimeControls } from "./runtime-controls";
 import { TaskRunner } from "./task-runner";
 import { EngineMissingBanner } from "./engine-banner";
@@ -52,11 +54,9 @@ export function ScenarioOverview({ profile }: { profile: Profile }) {
   const models = useProviderStore((s) => s.models[profile.id]) ?? [];
   const plugins = usePluginStore((s) => s.plugins);
   const loadPlugins = usePluginStore((s) => s.loadPlugins);
-  const busy = useBusyStore((s) => s.busyAction) !== null;
+  const manage = useScenarioManage();
+  const busy = manage.busy;
 
-  const [renaming, setRenaming] = useState(false);
-  const [removing, setRemoving] = useState(false);
-  const [describing, setDescribing] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
 
   useEffect(() => {
@@ -69,7 +69,7 @@ export function ScenarioOverview({ profile }: { profile: Profile }) {
   const instance = instances.find((item) => item.profile === profile.id);
   const surface = inferSurface(profile, instance?.surface ?? "undetermined");
   const running = instance?.status === "running";
-  const isDefault = profile.id === "web";
+  const isDefault = isDefaultScenario(profile);
   const { blurb } = scenarioLayers(profile.description);
 
   const scenarioPlugins = plugins.filter((p) => p.profile === profile.id);
@@ -116,7 +116,7 @@ export function ScenarioOverview({ profile }: { profile: Profile }) {
                       {t("scene.default")}
                     </Badge>
                   )}
-                  {surface !== "undetermined" && <SurfaceBadge surface={surface} />}
+                  <SurfaceBadge surface={surface} />
                   <Badge variant={running ? "pass" : "neutral"}>
                     {running ? t("settings.runningBadge") : t("settings.scenarioStopped")}
                   </Badge>
@@ -141,7 +141,7 @@ export function ScenarioOverview({ profile }: { profile: Profile }) {
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => setDescribing(true)}
+                onClick={() => manage.open("description", profile)}
                 title={t("settings.editDescription")}
                 aria-label={t("settings.editDescription")}
               >
@@ -150,7 +150,7 @@ export function ScenarioOverview({ profile }: { profile: Profile }) {
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => setRenaming(true)}
+                onClick={() => manage.open("rename", profile)}
                 disabled={isDefault || busy}
                 title={isDefault ? t("settings.protectedProfile") : t("settings.rename")}
                 aria-label={t("settings.rename")}
@@ -160,7 +160,7 @@ export function ScenarioOverview({ profile }: { profile: Profile }) {
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => setRemoving(true)}
+                onClick={() => manage.open("delete", profile)}
                 disabled={isDefault || busy}
                 title={isDefault ? t("settings.protectedProfile") : t("settings.remove")}
                 aria-label={t("settings.remove")}
@@ -344,15 +344,7 @@ export function ScenarioOverview({ profile }: { profile: Profile }) {
 
       {surface === "task" && <TaskRunner profileId={profile.id} />}
 
-      <ScenarioRenameDialog profile={profile} open={renaming} onOpenChange={setRenaming} />
-
-      <ScenarioDeleteDialog profile={profile} open={removing} onOpenChange={setRemoving} />
-
-      <ScenarioDescriptionDialog
-        profile={profile}
-        open={describing}
-        onOpenChange={setDescribing}
-      />
+      <ScenarioManageDialogs manage={manage} />
     </PageBody>
   );
 }

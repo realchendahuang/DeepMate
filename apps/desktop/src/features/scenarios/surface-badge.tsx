@@ -1,5 +1,6 @@
 // Surface identity chip: web scenarios open a browser console, task scenarios
-// answer one-shot task runs.
+// answer one-shot task runs. An undetermined surface renders nothing — the
+// internal inference state is never user-facing jargon.
 import { useTranslation } from "react-i18next";
 import { Globe, TerminalSquare } from "lucide-react";
 import { Badge } from "@/shared/ui/badge";
@@ -23,9 +24,5 @@ export function SurfaceBadge({ surface }: { surface: Surface }) {
       </Badge>
     );
   }
-  return (
-    <Badge variant="skip" dot={false}>
-      {t("settings.surfaceUndetermined")}
-    </Badge>
-  );
+  return null;
 }

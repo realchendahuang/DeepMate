@@ -1,13 +1,11 @@
-// The section sidebar: either the selected scenario's sections or the system
-// settings list — never a mix. On the all-scenarios view it lists the
-// scenarios themselves.
+// The section sidebar: the selected scenario's sections or the system
+// settings list — never a mix.
 
 import { useTranslation } from "react-i18next";
 import {
   ArrowLeft,
   Cloud,
   FileCode2,
-  Globe,
   Info,
   LayoutDashboard,
   Layers,
@@ -15,7 +13,6 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Store,
-  TerminalSquare,
   type LucideIcon,
 } from "lucide-react";
 import { useRouterStore, type ScenarioSection, type SettingSection } from "../router";
@@ -60,58 +57,15 @@ function NavList({ children }: { children: React.ReactNode }) {
 
 // The sidebar's nav body, shared with the mobile drawer.
 export function SidebarNav({ pillId }: { pillId: string }) {
-  const { t } = useTranslation();
   const route = useRouterStore((s) => s.route);
   const navigate = useRouterStore((s) => s.navigate);
-  const openScenario = useRouterStore((s) => s.openScenario);
-  const scenarios = useScenarioStore((s) => s.profiles);
   const selectedScenario = useScenarioStore((s) => s.selectedScenario);
-  const instances = useRuntimeStore((s) => s.instances);
   const plugins = usePluginStore((s) => s.plugins);
   const models = useProviderStore((s) => s.models[selectedScenario]);
 
   const scenarioPlugins = plugins.filter((p) => p.profile === selectedScenario);
   const hasOutdated = scenarioPlugins.some((p) => p.outdated);
   const modelCount = models?.length ?? 0;
-
-  if (route.kind === "scenarios") {
-    return (
-      <nav
-        aria-label={t("nav.menu")}
-        className="flex-1 space-y-1 overflow-y-auto px-2 py-3"
-      >
-        {scenarios.map((profile) => {
-          const instance = instances.find((item) => item.profile === profile.id);
-          const running = instance?.status === "running";
-          const active = selectedScenario === profile.id;
-          return (
-            <button
-              key={profile.id}
-              type="button"
-              onClick={() => openScenario(profile.id)}
-              className={cn(
-                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body transition-colors",
-                active ? "bg-hover font-semibold text-text" : "text-text-dim hover:bg-hover/60",
-              )}
-            >
-              <span
-                className={cn("h-2 w-2 shrink-0 rounded-full", running ? "bg-pass" : "bg-neutral")}
-              />
-              <span className="min-w-0 flex-1 truncate text-left">{profile.name}</span>
-              {instance?.surface === "task" ? (
-                <TerminalSquare className="h-3.5 w-3.5 shrink-0 text-text-faint" />
-              ) : instance?.surface === "web" ? (
-                <Globe className="h-3.5 w-3.5 shrink-0 text-text-faint" />
-              ) : null}
-            </button>
-          );
-        })}
-        {scenarios.length === 0 && (
-          <div className="px-2 text-caption text-text-faint">{t("overview.noScenarios")}</div>
-        )}
-      </nav>
-    );
-  }
 
   if (route.kind === "settings") {
     return (
@@ -140,14 +94,14 @@ export function SidebarNav({ pillId }: { pillId: string }) {
               {hasOutdated && (
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-warn" />
               )}
-              <span className="rounded-full bg-panel-2 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-text-dim">
+              <span className="rounded-full bg-panel-2 px-1.5 py-0.5 font-mono text-micro font-semibold text-text-dim">
                 {scenarioPlugins.length}
               </span>
             </span>
           );
         } else if (item.view === "providers" && modelCount > 0) {
           badge = (
-            <span className="rounded-full bg-panel-2 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-text-dim">
+            <span className="rounded-full bg-panel-2 px-1.5 py-0.5 font-mono text-micro font-semibold text-text-dim">
               {modelCount}
             </span>
           );
@@ -202,15 +156,13 @@ function SidebarHeader() {
     );
   }
 
-  let title = t("settings.title");
-  let scenario = false;
-  if (route.kind === "scenarios") {
-    title = t("settings.scenarios");
-  } else if (route.kind === "scenario") {
-    title = scenarios.find((profile) => profile.id === selectedScenario)?.name ?? selectedScenario;
-    scenario = true;
-  }
+  const scenario = route.kind === "scenario";
+  const title = scenario
+    ? (scenarios.find((profile) => profile.id === selectedScenario)?.name ?? selectedScenario) ||
+      t("settings.newScenarioTitle")
+    : t("settings.title");
   const running =
+    scenario &&
     instances.find((item) => item.profile === selectedScenario)?.status === "running";
 
   return (
@@ -219,7 +171,7 @@ function SidebarHeader() {
         <>
           <div
             className={cn(
-              "flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[11px] font-bold",
+              "flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-caption font-bold",
               running ? "bg-accent text-on-accent shadow-sm" : "bg-panel-2 text-text-dim",
             )}
           >

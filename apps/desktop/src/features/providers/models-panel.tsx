@@ -95,7 +95,7 @@ function ProviderRow({
       {modelCount !== undefined && modelCount > 0 && (
         <span
           className={cn(
-            "rounded-full px-1.5 py-0.5 font-mono text-[10px] font-semibold tabular-nums",
+            "rounded-full px-1.5 py-0.5 font-mono text-micro font-semibold tabular-nums",
             active ? "bg-accent/15 text-accent" : "bg-panel text-text-faint",
           )}
         >

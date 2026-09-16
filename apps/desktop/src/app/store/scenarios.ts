@@ -7,6 +7,7 @@
 import { create } from "zustand";
 import type { Profile, Surface } from "@/shared/api/api";
 import { api } from "@/shared/api/api";
+import { DEFAULT_SCENARIO_ID } from "@/shared/lib/scenario";
 import { runBusy } from "./busy";
 import { useRuntimeStore } from "./runtime";
 
@@ -25,7 +26,7 @@ interface ScenarioState {
 export const useScenarioStore = create<ScenarioState>((set, get) => ({
   profiles: [],
   profilesLoaded: false,
-  selectedScenario: "web",
+  selectedScenario: DEFAULT_SCENARIO_ID,
   setSelectedScenario: (profile: string) => {
     set({ selectedScenario: profile });
   },
