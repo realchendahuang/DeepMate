@@ -2820,6 +2820,7 @@ pub(crate) mod tests {
     // DeepMate state directory, so these tests share the env lock with the
     // dsh module tests. `dsh::tests` is pub(crate) under cfg(test) and its
     // ENV_LOCK serializes every env-var test in this crate.
+    #[cfg(unix)]
     fn write_disabled_fixture(home: &std::path::Path, profile: &str) {
         let dir = home.join("profiles").join(profile);
         std::fs::create_dir_all(&dir).unwrap();
@@ -2844,6 +2845,7 @@ pub(crate) mod tests {
     // disable strip the leftover declaration, enable reinstalls the entry.
 
     // A web-surface scenario under a custom name (base + web-app installed).
+    #[cfg(unix)]
     fn write_scenario_fixture(home: &std::path::Path, name: &str) {
         let dir = home.join("profiles").join(name);
         std::fs::create_dir_all(&dir).unwrap();
@@ -2932,6 +2934,7 @@ pub(crate) mod tests {
         }
     }
 
+    #[cfg(unix)]
     fn write_bundle_and_dep_fixture(home: &std::path::Path, profile: &str) {
         let dir = home.join("profiles").join(profile);
         std::fs::create_dir_all(&dir).unwrap();
@@ -2948,6 +2951,7 @@ pub(crate) mod tests {
         .unwrap();
     }
 
+    #[cfg(unix)]
     fn write_bundle_only_fixture(home: &std::path::Path, profile: &str) {
         let dir = home.join("profiles").join(profile);
         std::fs::create_dir_all(&dir).unwrap();
@@ -2964,6 +2968,7 @@ pub(crate) mod tests {
         .unwrap();
     }
 
+    #[cfg(unix)]
     fn manifest_bundles(home: &std::path::Path, profile: &str) -> Vec<String> {
         let text =
             std::fs::read_to_string(home.join("profiles").join(profile).join("package.json"))
@@ -3617,6 +3622,7 @@ pub(crate) mod tests {
 
     // ---- snapshot capture / apply ----
 
+    #[cfg(unix)]
     fn snapshot_test_home(tag: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
             "deepmate-snapshot-harness-test-{tag}-{}",
@@ -3837,6 +3843,7 @@ llm-pi-ai:
         (addr, handle)
     }
 
+    #[cfg(unix)]
     fn write_local_bundle_fixture(home: &std::path::Path) {
         let dir = home.join("profiles/web");
         std::fs::create_dir_all(&dir).unwrap();

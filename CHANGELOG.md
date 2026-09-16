@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Windows and Linux clippy: the desktop crate's `RunEvent` handler, the
+  `RunEvent` import, the test env-lock re-export, three harness tests that
+  call the unix-only `probe_server` helper, and the seven private test
+  fixtures those tests reach are now gated to the platforms that use them
+  (ungated, they compile as dead code off macOS). These only reproduced
+  outside macOS, so the release push was the first time CI saw them.
+
 ## [0.8.0] - 2026-09-17
 
 ### Added
