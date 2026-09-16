@@ -17,15 +17,13 @@ export const MOTION_EASE: Record<"out" | "in", [number, number, number, number]>
   in: [0.5, 0, 0.75, 0],
 };
 
-/** Delay between children of a staggered container. */
-export const STAGGER = 0.035;
-
 export const enterTransition: Transition = {
   duration: MOTION_DURATION.base,
   ease: MOTION_EASE.out,
 };
 
-export const exitTransition: Transition = {
+// Exits only ever run as part of `pageVariants`; nothing else needs them.
+const exitTransition: Transition = {
   duration: MOTION_DURATION.fast,
   ease: MOTION_EASE.in,
 };
@@ -36,16 +34,4 @@ export const pageVariants: Variants = {
   enter: (direction: number) => ({ opacity: 0, x: direction * 24 }),
   center: { opacity: 1, x: 0, transition: enterTransition },
   exit: (direction: number) => ({ opacity: 0, x: direction * -16, transition: exitTransition }),
-};
-
-// One block fading up, used inside a `staggerContainer`.
-export const fadeUp: Variants = {
-  hidden: { opacity: 0, y: 8 },
-  show: { opacity: 1, y: 0, transition: enterTransition },
-};
-
-/** Parent that staggers its `fadeUp` children. */
-export const staggerContainer: Variants = {
-  hidden: {},
-  show: { transition: { staggerChildren: STAGGER } },
 };

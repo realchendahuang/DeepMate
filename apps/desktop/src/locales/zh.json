@@ -4,8 +4,7 @@
     "plugins": "插件",
     "menu": "菜单",
     "providers": "提供商与模型",
-    "backToScenario": "返回场景",
-    "allScenarios": "所有场景"
+    "backToScenario": "返回场景"
   },
   "scene": {
     "default": "默认",
@@ -36,13 +35,9 @@
     "copiedUrl": "已复制链接",
     "openConsole": "打开控制台",
     "engineReady": "引擎就绪",
-    "modelsCount": "{{count}} 个模型",
     "providersCount": "{{count}} 个提供商",
     "pluginsActive": "{{count}} 个已启用",
     "pluginsOutdatedAlert": "{{count}} 个插件有更新",
-    "portLabel": "端口",
-    "pidLabel": "PID",
-    "urlLabel": "服务地址",
     "taskClearLogs": "清空日志",
     "taskCopyLogs": "复制日志",
     "taskLogsCopied": "日志已复制"
@@ -106,7 +101,6 @@
     "tabMarket": "插件市场",
     "filterSearchPlaceholder": "过滤已安装插件…",
     "noInstalledMatches": "未找到匹配的已安装插件",
-    "updateAll": "全部更新",
     "exploreMarket": "浏览插件市场",
     "browseMarketHint": "发现并安装官方与社区插件，扩展你的场景能力。",
     "clearSearch": "清空搜索",
@@ -217,7 +211,6 @@
     "deleteProfileConfirmTitle": "删除场景？",
     "deleteProfileConfirmBody": "将删除 \"{{name}}\" 及其配置。此操作无法撤销。",
     "noPluginsInScenario": "这个场景还没有插件。",
-    "addPlugin": "添加插件",
     "searchPluginPlaceholder": "搜索插件市场",
     "installToScenario": "安装到此场景",
     "noProviders": "还没有提供商。",
@@ -274,13 +267,8 @@
     "modelIdCopied": "模型 ID 已复制",
     "unsavedChanges": "有未保存的修改",
     "discard": "放弃修改",
-    "totalScenarios": "总计 {{count}} 个场景",
-    "runningCount": "{{count}} 个运行中",
-    "webCount": "{{count}} 个 Web 界面",
-    "taskCount": "{{count}} 个任务场景",
     "healthAllGood": "所有检查项均已通过",
-    "healthHasIssues": "发现 {{count}} 项需要注意的问题",
-    "healthSummary": "系统健康体检"
+    "healthHasIssues": "发现 {{count}} 项需要注意的问题"
   },
   "common": {
     "close": "关闭",

@@ -30,6 +30,7 @@
   --fail: 0 70% 68%;
   --skip: 222 10% 47%;
   --neutral: 222 10% 55%;
+  --overlay: 222 25% 2% / 0.5;
   --shadow: 222 25% 2% / 0.32;
 
   /* shadcn/ui variable surface, mapped onto the DeepMate tokens above.
@@ -88,6 +89,7 @@
   --fail: 0 70% 54%;
   --skip: 220 10% 65%;
   --neutral: 220 10% 45%;
+  --overlay: 220 50% 8% / 0.28;
   --shadow: 220 50% 8% / 0.06;
 }
 
@@ -118,6 +120,7 @@
   --color-fail: hsl(var(--fail));
   --color-skip: hsl(var(--skip));
   --color-neutral: hsl(var(--neutral));
+  --color-overlay: hsl(var(--overlay));
 
   /* shadcn/ui aliases, resolved through the same variables. */
   --color-background: hsl(var(--background));

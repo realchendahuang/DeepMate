@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inferSurface, layerLabel, scenarioInitial, scenarioLayers } from "./scenario";
+import { inferSurface, scenarioInitial, scenarioLayers } from "./scenario";
 import type { Profile } from "@/shared/api/api";
 
 const profile = (id: string, description: string | null): Profile => ({
@@ -23,13 +23,6 @@ describe("scenarioLayers", () => {
 
   it("treats any other string as a real blurb", () => {
     expect(scenarioLayers("日常打字")).toEqual({ bundles: [], blurb: "日常打字" });
-  });
-});
-
-describe("layerLabel", () => {
-  it("keeps the last path segment", () => {
-    expect(layerLabel("@deepseek-ai/dsh-base")).toBe("dsh-base");
-    expect(layerLabel("dsh-web-access")).toBe("dsh-web-access");
   });
 });
 

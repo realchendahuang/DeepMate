@@ -28,11 +28,6 @@ export function scenarioLayers(description: string | null): {
   return { bundles, blurb: null };
 }
 
-export function layerLabel(id: string): string {
-  const parts = id.split("/");
-  return parts[parts.length - 1] || id;
-}
-
 export function scenarioInitial(name: string): string {
   const trimmed = name.trim();
   if (!trimmed) return "?";
