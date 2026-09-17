@@ -45,9 +45,10 @@ purity:
 # file's hash before and after a regeneration instead of diffing against git,
 # so the gate works on a dirty working tree too (which is where it matters).
 bindings-check:
-	@before=$$(shasum -a 256 apps/desktop/src/shared/api/bindings.ts | cut -d' ' -f1); \
+	@hash() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$$1"; else shasum -a 256 "$$1"; fi | cut -d' ' -f1; }; \
+	before=$$(hash apps/desktop/src/shared/api/bindings.ts); \
 	cargo test -p deepmate-desktop --lib export_bindings_headless --locked >/dev/null 2>&1; \
-	after=$$(shasum -a 256 apps/desktop/src/shared/api/bindings.ts | cut -d' ' -f1); \
+	after=$$(hash apps/desktop/src/shared/api/bindings.ts); \
 	if [ "$$before" != "$$after" ]; then \
 		echo "error: bindings.ts did not match the command surface; it has been regenerated — commit the result"; \
 		exit 1; \

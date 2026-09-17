@@ -58,11 +58,17 @@ jobs:
 
       # Architectural gate: the control core stays a pure data layer.
       # Harness-specific names live in crates/deepseek-harness, never in the core.
-      # The same check runs in `make ci`; both are case-insensitive so
-      # `DeepSeek`/`DSH` cannot slip past the pattern.
+      # Inlined rather than delegated to `make purity` so the Windows runner
+      # does not need make on PATH; `make ci` runs the same check locally.
+      # Case-insensitive so `DeepSeek`/`DSH` cannot slip past the pattern.
       - name: Core purity gate
         shell: bash
-        run: make purity
+        run: |
+          if grep -rEIi 'deepseek|dsh' crates/deepmate-core/src crates/deepmate-core/Cargo.toml; then
+            echo "::error::deepmate-core must not reference harness-specific names (deepseek/dsh)"
+            exit 1
+          fi
+          echo "core is free of harness-specific names"
 
       # The generated TypeScript bindings must match the Rust command surface.
       - name: Bindings freshness
@@ -111,4 +117,4 @@ jobs:
         working-directory: apps/desktop
 
       - name: Check Tauri Rust
-        run: cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml
+        run: cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml --locked

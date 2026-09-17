@@ -46,10 +46,20 @@ fn status_command_supports_json_output() {
 
 #[test]
 fn doctor_command_reports_checks() {
-    // Doctor always succeeds; the runtime check may pass or fail depending on
-    // whether the harness CLI is installed on the test machine.
-    let stdout = deepmate_ok(&["doctor", "--json"]);
-    assert!(stdout.contains("runtime.installed"));
+    // The report always prints, but the exit code is a status: whether the
+    // harness CLI is installed decides between 0 and EXIT_DOCTOR_UNHEALTHY.
+    let output = deepmate_in(&test_data_dir(), &["doctor", "--json"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("runtime.installed"), "stdout: {stdout}");
+    match output.status.code() {
+        Some(0) => {}
+        // No engine on the test machine: a failing check must surface as 3.
+        Some(3) => assert!(
+            stdout.contains("\"fail\""),
+            "exit 3 without a failing check: {stdout}"
+        ),
+        other => panic!("unexpected doctor exit code {other:?}: {stdout}"),
+    }
 }
 
 #[test]
@@ -561,6 +571,8 @@ fn a_json_failure_carries_a_machine_readable_code() {
     assert!(parsed["message"].is_string(), "stdout: {stdout}");
 }
 
+// Pins the code path for a known-unhealthy setup: PATH and the CLI override
+// both point at nothing, so the runtime check must fail.
 #[test]
 fn doctor_reports_unhealthy_via_the_exit_code() {
     let dir = test_data_dir();
