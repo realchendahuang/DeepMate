@@ -64,7 +64,7 @@ DeepMate is a **control plane** for **DeepSeek Harness**: a pure data-layer cont
 
 ### Core areas
 
-- **Runtime** — install, detect, start, stop, restart, update and inspect the harness runtime
+- **Runtime** — detect, start, stop, restart and inspect the harness runtime
 - **Providers** — configure DeepSeek, OpenAI, Anthropic and compatible/custom endpoints
 - **Models** — browse and manage model capabilities and defaults
 - **Profiles** — manage harness profiles, bundles and configuration layers
@@ -188,10 +188,10 @@ cd apps/desktop
 npm install
 npm run tauri dev
 
-# Rust workspace gate (formatting, clippy, tests)
+# Rust workspace gate (formatting, clippy, tests, core purity, bindings freshness)
 make ci
 
-# Everything a release must pass: Rust gate + frontend lint/typecheck/tests
+# Everything a release must pass: Rust gate + frontend lint/typecheck/tests/format/i18n
 make verify
 
 # Prune the incremental build cache when target/debug grows too large
@@ -222,11 +222,27 @@ deepmate detect                Detect the harness
 deepmate status                Show the active harness runtime status
 deepmate open                  Open the harness UI in the system browser
 deepmate doctor                Run environment diagnostics
-deepmate runtime start|stop|restart
-                                Control the harness runtime
+deepmate runtime start|stop|restart|list
+                                Control the harness runtime; `list` reports
+                                every scenario's state
+deepmate runtime task --scenario <name> "<prompt>"
+                                Run one task against a task scenario
 deepmate profile list          List harness profiles
-deepmate provider list         List configured providers
-deepmate model list            List available models
+deepmate profile create <name> [--surface web|task]
+                                Create a scenario
+deepmate profile remove <name> Remove a scenario (moved to profiles/.deepmate-trash)
+deepmate provider list [--scenario <name>]
+                                List configured providers
+deepmate provider set <id> [--scenario <name>] [--api <proto>] [--base-url <url>] [--api-key-env <var>] [--compat <json>]
+                                Create or update a provider
+deepmate provider remove <id> [--scenario <name>]
+                                Remove a provider
+deepmate model list [--scenario <name>]
+                                List available models
+deepmate model set <id> --provider <id> [--scenario <name>] [--name <name>] [--context-window <n>] [--max-tokens <n>] [--input text,image] [--reasoning-efforts <json>] [--compat <json>]
+                                Create or update a model
+deepmate model remove <id> --provider <id> [--scenario <name>]
+                                Remove a model
 deepmate plugin list [--check-updates]
                                 List installed plugins (optionally marking
                                 outdated ones from the market)
@@ -249,11 +265,15 @@ deepmate market list           List known market sources
 deepmate market search <query> Search the market for plugins
 deepmate snapshot export <name>
                                 Capture the current setup as a portable snapshot
-deepmate snapshot import <name>
-                                Apply a stored snapshot (merge-style)
+deepmate snapshot import <name> [--yes] [--dry-run]
+                                Apply a stored snapshot (merge-style). The
+                                current inventory is saved to a restore point
+                                first; a non-interactive run must pass --yes
 deepmate snapshot list          List stored snapshots
 deepmate config export <path>  Write DeepMate's own settings to a portable file
-deepmate config import <path>  Replace DeepMate's own settings from a portable file
+deepmate config import <path> [--yes]
+                                Replace DeepMate's own settings from a portable
+                                file (the replaced settings are saved first)
 deepmate update                Update the CLI: download the release archive,
                                verify its sha256 and self-replace
 ```
@@ -262,9 +282,13 @@ DeepMate controls DeepSeek Harness only: every command talks to the `dsh`
 CLI and the documented `$DSH_HOME` file contracts. There are no alternate
 backends or capability switches to configure.
 
-Append `--json` to any command for machine-readable output. Logs go to
-stderr and to `logs/deepmate.log` in the data directory, so JSON on stdout
-is never polluted.
+Append `--json` to any command for machine-readable output, including
+failures (a JSON object with `ok`, `code` and `message`). Logs go to stderr
+and to `logs/deepmate.log` in the data directory, so JSON on stdout is never
+polluted.
+
+Exit codes: `0` success, `1` failure, `2` timeout, `3` `doctor` ran and found
+a failing check (a script that only looks at `$?` sees an unhealthy setup).
 
 ## Data layout
 
@@ -275,20 +299,25 @@ DeepMate-owned data follows a simple file-based structure:
 │
 ├── config.toml
 ├── cache/
-│   ├── marketplace.json
-│   ├── curated.json
-│   └── plugin-metadata.json
+│   ├── marketplace.json      # npm search results, per query
+│   └── curated.json          # the curated plugin list
 ├── history/
-│   ├── actions.jsonl
-│   └── doctor.jsonl
+│   └── actions.jsonl         # rotated to actions.1.jsonl past 1 MiB
 ├── snapshots/
-│   └── *.json
+│   └── *.json                # portable harness inventories
 ├── state/
-│   └── harness.pid
+│   ├── ports.json            # per-scenario web ports
+│   ├── disabled-plugins.json # disabled plugins with their specs
+│   ├── run-<scenario>.pid    # the scenario DeepMate started
+│   └── pre-snapshot-import-*.json  # restore points written before an import
 └── logs/
     ├── deepmate.log
-    └── harness-web.log
+    ├── harness-<scenario>.log  # the scenario's own stdout/stderr
+    └── task-<scenario>-*.log   # one task run's answer
 ```
+
+A corrupt `config.toml` is moved aside as `config.toml.invalid-<stamp>`
+instead of being overwritten, and the app continues from defaults.
 
 The root follows the operating system's application-data convention and can
 be overridden with `DEEPMATE_DATA_DIR` or `--data-dir`.
@@ -337,8 +366,9 @@ Stage 4 plugin/marketplace support and Stage 5 snapshots:
 - `deepmate` CLI with `detect`, `status`, `open`, `doctor`, `runtime`,
   `profile`, `provider`, `model`, `plugin`, `market` and `snapshot`
   commands — `runtime start/stop/restart --scenario` manage any scenario,
-  `runtime list` shows every scenario's state, `runtime task <scenario>
-  "prompt"` runs one-shot tasks, and `provider`/`model` take `--scenario`
+  `runtime list` shows every scenario's state, `runtime task --scenario
+  <name> "prompt"` runs one-shot tasks, and `provider`/`model` take
+  `--scenario`
 - File-based data layer: OS-convention data directory, TOML config, JSONL
   action history and file logging
 - DeepSeek Harness service with real `dsh` integration: CLI detection, web
@@ -392,9 +422,9 @@ Stage 4 plugin/marketplace support and Stage 5 snapshots:
   UI and runs an on-demand release check
 - System notifications for a newer release — raised by the automatic startup
   check (opt-out preference) and by the tray's explicit check
-- Update checking against the GitHub releases API (on by default, fails
-  quiet when offline), surfaced as a banner on Overview and a check in
-  Settings Preferences
+- Update checking against the GitHub releases API, surfaced as a banner on
+  Overview and a check in Settings Preferences; a check that could not run
+  says so instead of claiming the app is current
 - Self-update loop: `deepmate update` downloads the release archive,
   verifies its sha256 and replaces the running binary; the desktop app
   downloads and checksum-verifies the release DMG and hands it to the OS
@@ -404,8 +434,9 @@ Stage 4 plugin/marketplace support and Stage 5 snapshots:
 - Releases are built and published locally (no CI publishing): the macOS
   host produces the `DeepMate.app` DMG plus a CLI tar.gz with sha256
   checksums, uploaded with `gh release create`
-- Cross-platform CI (fmt, clippy, tests) with a core purity gate and a
-  separate Tauri desktop build job
+- Cross-platform CI (fmt, clippy, tests, core purity, generated-bindings
+  freshness) with a separate Tauri desktop job that also runs the frontend
+  lint/typecheck/test/format/i18n gates
 
 The first goal is to build a solid, minimal foundation for DeepSeek Harness
 rather than rush into a large feature set.

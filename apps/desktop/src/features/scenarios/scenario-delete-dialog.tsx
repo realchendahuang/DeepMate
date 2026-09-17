@@ -25,9 +25,16 @@ export function ScenarioDeleteDialog({
       onOpenChange={onOpenChange}
       title={t("settings.deleteProfileConfirmTitle")}
       body={t("settings.deleteProfileConfirmBody", { name: profile?.name ?? "" })}
-      onConfirm={() => {
-        if (profile) removeScenario(profile.id);
-        onOpenChange(false);
+      confirmLabel={t("settings.deleteProfile")}
+      onConfirm={async () => {
+        if (!profile) return;
+        try {
+          await removeScenario(profile.id);
+          onOpenChange(false);
+        } catch {
+          // The failure is already surfaced; leaving the dialog open lets the
+          // user retry instead of wondering whether the delete happened.
+        }
       }}
     />
   );

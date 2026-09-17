@@ -5,7 +5,7 @@
 // configuration loading, logging setup and action history. It has no UI or
 // command-line knowledge of its own.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use deepmate_core::{ActionRecord, Config, DataLayout};
@@ -34,22 +34,46 @@ pub fn build_harness(layout: &DataLayout) -> DeepSeekHarness {
     harness.with_data_dir(layout.root().to_path_buf())
 }
 
+// Load the DeepMate configuration, recovering from a corrupt file.
+//
+// A missing config file is seeded with the defaults. A corrupt one is
+// quarantined next to the config (the old bytes are preserved as
+// `config.toml.invalid-<stamp>`) and replaced with defaults, so the app can
+// always start and every later `Config::load`/`save` succeeds. When that
+// happened, the returned path names the quarantined file so the caller can
+// tell the user.
+pub fn load_config_recovering(layout: &DataLayout) -> (Config, Option<PathBuf>) {
+    let path = layout.config_path();
+    // Seed a first run with the defaults so the file exists to be edited (and
+    // so an operator can see what the app is configured with).
+    if !path.exists() {
+        if let Err(err) = Config::default().save(&path) {
+            tracing::warn!(error = %err, "failed to write the default configuration");
+        }
+    }
+    match Config::load_recovering(&path) {
+        Ok(result) => result,
+        Err(err) => {
+            // Even recovery failed (unwritable directory, say). Report and run
+            // on defaults; the caller surfaces the warning.
+            tracing::error!(error = %err, "failed to load or recover configuration");
+            eprintln!("warning: {err}; using default configuration");
+            (Config::default(), None)
+        }
+    }
+}
+
 // Load the DeepMate configuration, falling back to defaults.
 //
 // An unreadable or invalid config file warns and yields defaults; a missing
 // config file is seeded with the defaults on a best-effort basis.
 pub fn load_config_or_default(layout: &DataLayout) -> Config {
-    let config = match Config::load(&layout.config_path()) {
-        Ok(config) => config,
-        Err(err) => {
-            eprintln!("warning: {err}; using default configuration");
-            Config::default()
-        }
-    };
-    if !layout.config_path().exists() {
-        if let Err(err) = config.save(&layout.config_path()) {
-            eprintln!("warning: failed to write default config: {err}");
-        }
+    let (config, quarantined) = load_config_recovering(layout);
+    if let Some(path) = quarantined {
+        eprintln!(
+            "warning: configuration file was invalid and has been reset (previous contents kept at {})",
+            path.display()
+        );
     }
     config
 }

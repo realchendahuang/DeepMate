@@ -3,7 +3,7 @@
 
 import { create } from "zustand";
 import i18n from "@/i18n";
-import type { UpdateInfo } from "@/shared/api/api";
+import type { UpdateInfo, UpdateProgressEvent } from "@/shared/api/api";
 import { api } from "@/shared/api/api";
 import { runBusy } from "./busy";
 
@@ -18,6 +18,11 @@ interface PreferencesState {
   marketRefreshIntervalSeconds: number;
   updateInfo: UpdateInfo | null;
   updateChecked: boolean;
+  // The outcome of the last check. Distinct from `updateInfo === null`:
+  // a failed check is not "you are up to date".
+  updateStatus: "idle" | "up_to_date" | "available" | "failed";
+  // Live progress of a running install (phase + byte counts), if any.
+  updateProgress: UpdateProgressEvent | null;
   setLanguage: (language: string) => Promise<void>;
   setTheme: (theme: string) => Promise<void>;
   setCloseToTray: (enabled: boolean) => Promise<void>;
@@ -50,6 +55,8 @@ export const usePreferencesStore = create<PreferencesState>((set, get) => ({
   marketRefreshIntervalSeconds: 3600,
   updateInfo: null,
   updateChecked: false,
+  updateStatus: "idle",
+  updateProgress: null,
   setLanguage: async (language: string) => {
     await runBusy("prefs", () => api.setLanguage(language));
     set({ language });
@@ -94,13 +101,21 @@ export const usePreferencesStore = create<PreferencesState>((set, get) => ({
     }
   },
   checkUpdate: async () => {
-    const updateInfo = await runBusy("refresh", () => api.checkUpdate());
-    set({ updateInfo, updateChecked: true });
+    const result = await runBusy("refresh", () => api.checkUpdate());
+    set({
+      updateInfo: result.info,
+      updateChecked: true,
+      updateStatus: result.status,
+    });
   },
   installUpdate: async () => {
-    const outcome = await runBusy("update-install", () => api.updateInstall());
+    set({ updateProgress: null });
+    const outcome = await runBusy("update-install", () =>
+      api.updateInstall((event) => set({ updateProgress: event })),
+    );
+    set({ updateProgress: null });
     if (outcome.status === "up_to_date") {
-      set({ updateInfo: null, updateChecked: true });
+      set({ updateInfo: null, updateChecked: true, updateStatus: "up_to_date" });
     }
   },
   dismissUpdate: () => {

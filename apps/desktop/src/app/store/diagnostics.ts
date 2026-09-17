@@ -21,8 +21,14 @@ interface DiagnosticsState {
 export const useDiagnosticsStore = create<DiagnosticsState>((set, get) => ({
   doctor: null,
   runDoctor: async () => {
-    const doctor = await runBusy("doctor", () => api.runDoctor());
-    set({ doctor });
+    try {
+      const doctor = await runBusy("doctor", () => api.runDoctor());
+      set({ doctor });
+    } catch {
+      // The page keeps the previous report; the failure was already toasted.
+      // Leaving the stale report visible is better than blanking the page,
+      // and the report's own timestamp tells the user how fresh it is.
+    }
   },
   fixDoctor: async (checkId: string, mode: string) => {
     const report = await runBusy("doctor-fix", () => api.doctorFix(checkId, mode));
@@ -32,7 +38,20 @@ export const useDiagnosticsStore = create<DiagnosticsState>((set, get) => ({
         : mode === "start"
           ? "doctor.fixStarted"
           : "doctor.fixReinstalled";
-    toast.success(i18n.t(key, { count: report.fixed }));
+    // A partial repair is a real outcome: saying "repaired 3" while two items
+    // are still broken sends the user away with a false sense of health.
+    if (report.failures.length > 0) {
+      toast.warning(
+        i18n.t("common.errors.doctorPartlyFixed", {
+          fixed: report.fixed,
+          failed: report.failures.length,
+        }),
+      );
+    } else {
+      toast.success(i18n.t(key, { count: report.fixed }));
+    }
+    // Re-run the report either way: the repair changed state, so the shown
+    // report must reflect it (including a repair that only partly worked).
     await get().runDoctor();
   },
 }));

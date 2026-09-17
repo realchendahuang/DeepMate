@@ -43,6 +43,10 @@ const MUTATING: ReadonlySet<BusyAction> = new Set([
   // A doctor fix mutates the profile (installs/removes/updates plugins or
   // starts the runtime), so it disables the controls too.
   "doctor-fix",
+  // Starting, stopping and restarting a scenario are slow (a boot wait, a
+  // stop that has to wait for the process to actually exit). Leaving them out
+  // let a user click Start repeatedly while one was already running.
+  "runtime",
 ]);
 
 export function isMutating(action: BusyAction): boolean {

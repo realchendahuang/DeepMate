@@ -58,13 +58,17 @@ jobs:
 
       # Architectural gate: the control core stays a pure data layer.
       # Harness-specific names live in crates/deepseek-harness, never in the core.
+      # The same check runs in `make ci`; both are case-insensitive so
+      # `DeepSeek`/`DSH` cannot slip past the pattern.
       - name: Core purity gate
         shell: bash
-        run: |
-          if grep -rEI 'deepseek|dsh' crates/deepmate-core/src crates/deepmate-core/Cargo.toml; then
-            echo "::error::deepmate-core must not reference harness-specific names (deepseek/dsh)"
-            exit 1
-          fi
+        run: make purity
+
+      # The generated TypeScript bindings must match the Rust command surface.
+      - name: Bindings freshness
+        if: runner.os != 'Windows'
+        shell: bash
+        run: make bindings-check
 
   desktop:
     name: desktop (Tauri)
@@ -92,8 +96,14 @@ jobs:
         run: npm ci
         working-directory: apps/desktop
 
-      - name: Lint and test frontend
+      - name: Lint, test and format-check frontend
         run: npm run check
+        working-directory: apps/desktop
+
+      # Both catalogs must carry the same keys; a missing one renders as a
+      # raw key path in the UI.
+      - name: Localization gate
+        run: npm run check:i18n
         working-directory: apps/desktop
 
       - name: Build frontend

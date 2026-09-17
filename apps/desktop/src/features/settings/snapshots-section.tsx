@@ -26,23 +26,41 @@ export function SnapshotsSection() {
   const [snapshotName, setSnapshotName] = useState("");
   // Which snapshot/import is pending confirmation.
   const [confirm, setConfirm] = useState<{ kind: "delete" | "import"; name: string } | null>(null);
+  const [confirmPending, setConfirmPending] = useState(false);
 
   useEffect(() => {
     void loadSnapshots();
   }, [loadSnapshots]);
 
-  const runExport = () => {
-    if (!snapshotName.trim()) return;
-    snapshotExport(snapshotName.trim());
-    setSnapshotName("");
+  const runExport = async () => {
+    const name = snapshotName.trim();
+    if (!name) return;
+    try {
+      await snapshotExport(name);
+      // Clear the field only on success: a failed export must leave the name
+      // in place so the user can retry without retyping it.
+      setSnapshotName("");
+    } catch {
+      // The store toasted it.
+    }
   };
 
-  const runConfirm = () => {
+  // The confirmation stays open (and its button disabled) while the
+  // operation runs, so a slow import cannot be double-fired and a failure
+  // does not silently close the dialog as if it had worked.
+  const runConfirm = async () => {
     if (!confirm) return;
     const { kind, name } = confirm;
-    setConfirm(null);
-    if (kind === "delete") snapshotDelete(name);
-    else snapshotImport(name);
+    setConfirmPending(true);
+    try {
+      if (kind === "delete") await snapshotDelete(name);
+      else await snapshotImport(name);
+      setConfirm(null);
+    } catch {
+      // The store already toasted the failure; keep the dialog for a retry.
+    } finally {
+      setConfirmPending(false);
+    }
   };
 
   return (
@@ -55,6 +73,8 @@ export function SnapshotsSection() {
             placeholder={t("settings.snapshotName")}
             className="flex-1"
             onKeyDown={(event) => {
+              // The Enter that confirms an IME candidate must not export.
+              if (event.nativeEvent.isComposing) return;
               if (event.key === "Enter" && snapshotName.trim()) runExport();
             }}
           />
@@ -118,6 +138,10 @@ export function SnapshotsSection() {
             ? t("settings.importSnapshotConfirmBody", { name: confirm.name })
             : t("settings.deleteSnapshotConfirmBody", { name: confirm?.name ?? "" })
         }
+        confirmLabel={
+          confirm?.kind === "import" ? t("settings.importSnapshot") : t("settings.deleteSnapshot")
+        }
+        pending={confirmPending}
         onConfirm={runConfirm}
       />
     </section>

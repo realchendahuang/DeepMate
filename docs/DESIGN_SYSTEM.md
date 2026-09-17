@@ -126,14 +126,12 @@ of shadcn's `--accent` role. `dark:` variants are stripped — theming is the
 | `Input` / `Textarea` | text entry | pass through to the native element |
 | `Label` | form field caption | Radix label |
 | `Select` | option picker | Radix select (replaces the old Segmented for preferences) |
-| `Tabs` | 2–3 option picker | Radix tabs, styled like the old Segmented (`compact`/`full` variants) |
 | `Switch` | boolean toggle | Radix switch, `checked`/`onCheckedChange` |
 | `Dialog` | modal editor shell | Radix dialog (focus trap, Esc, scroll lock) |
 | `AlertDialog` / `ConfirmDialog` | destructive confirmations | Radix alert dialog; `ConfirmDialog` wraps it with i18n labels |
-| `Table` | inventory tables | semantic table (replaces DataList) |
 | `Sheet` | mobile nav drawer | Radix dialog side sheet |
 | `Tooltip` | hover hints | Radix tooltip |
-| `Toaster` | toast host | sonner, themed by the CSS variables |
+| `Toaster` | toast host | sonner, themed by the DeepMate color tokens and following the app's own light/dark state |
 | `Skeleton` | loading placeholders | pulse block |
 | `EmptyState` | empty placeholders | `icon`, `children`, optional `action` CTA |
 | `PageBody` / `PageHeader` / `SectionHeader` | page scaffolding | `title`, `actions`; `PageBody` caps width at `max-w-content` |
@@ -171,15 +169,17 @@ column. No per-page top bars and no page-to-page jumps.
   Run page. Switching the rail keeps the current section so the sidebar
   follows the tenant.
 - **Settings sidebar:** clicking the rail gear replaces the tenant sidebar
-  with the system list (Diagnostics, Snapshots, Preferences, About). Scene
-  configuration never appears here.
+  with the system list (Diagnostics, Snapshots, Preferences, Market,
+  Advanced, About). Scene configuration never appears here.
 - **Mobile (<md):** a horizontal rail across the top of the content, plus a
   compact top bar (menu + wordmark). The menu opens a left drawer with the
   same sidebar items; it closes on selection, Escape, or a scrim click.
-- Navigation is local component state (`View = scenarios | overview | run |
-  providers | plugins | diagnostics | snapshots | preferences | market |
-  advanced | about`) — no router. `NavItem` is the 32px nav row (active =
-  `accent-soft` gray wash + accent text, idle = dim text + hover wash).
+- Navigation is one store (`src/app/router.ts`): a route is either a
+  scenario section (`overview | providers | plugins`) or a settings section
+  (`diagnostics | snapshots | preferences | market | advanced | about`), and
+  the store also carries the slide direction for page transitions. `NavItem`
+  is the 30px nav row (active = `accent-soft` gray wash + accent text, idle
+  = dim text + hover wash).
 
 ### What is scene-owned vs global
 
@@ -191,7 +191,6 @@ column. No per-page top bars and no page-to-page jumps.
 | Rename / delete / description | Market (default source, refresh interval) |
 | | Advanced (raw settings.yaml / cordis.patch.yml editor, backed up per write) |
 | | About |
-| | All-scenarios inventory (grid / home) |
 
 ## Pages
 
@@ -230,32 +229,33 @@ keeps the column centered instead of pinning it to the left edge.
 <PageBody className="space-y-5">
   <PageHeader title={t("…")} actions={<Button … />} />
   <Card><CardContent>{/* hero / controls */}</CardContent></Card>
-  <Tabs value={tab} onValueChange={setTab}>
-    <TabsList><TabsTrigger value="a">…</TabsTrigger></TabsList>
-  </Tabs>
   <SectionHeader title={t("…")} actions={<Button … />} />
   <Card className="overflow-hidden">
-    <Table>
-      <TableHeader><TableRow><TableHead>…</TableHead></TableRow></TableHeader>
-      <TableBody>{items.map((item) => <TableRow key={item.id}>…</TableRow>)}</TableBody>
-    </Table>
+    {/* rows or the feature's own list markup */}
   </Card>
   <EmptyState icon={<Icon />}>{t("…")}</EmptyState>
 </PageBody>
 ```
 
-Inventory tables are a `Table` with caption-bold column labels and body rows
-(fixed leading columns, one flexible column, empty values render "—", hover
-wash). The three inventory lists — Profiles, Providers, Models — reuse the
-same components; the page only supplies column labels, widths and row data.
-Below `lg` the detail column folds under the primary column.
+Pages stay shallow: `PageBody` + `PageHeader` and cards, no tabs and no
+sub-navigation. Below `lg` a detail column folds under its primary column.
 
-**Feedback.** Mutating actions confirm through `ConfirmDialog` (delete,
-import); every command failure surfaces as a toast with a friendly message
-(`lib/errors.ts` maps known failure patterns); successful mutations toast
-their outcome. The `busyAction` store field tracks the running operation —
+**Async state.** Every view that waits on a command renders one of three
+states: a skeleton while loading, an `EmptyState` with a retry action when
+the load failed, and the content otherwise. Loading state lives in the domain
+store per scenario (`providers[id] !== undefined` means loaded), never in the
+component.
+
+**Feedback.** Mutating actions confirm through `ConfirmDialog`, which
+requires an explicit `confirmLabel` naming the action ("导入", not a generic
+"删除") and disables itself while the action runs. Every command failure
+surfaces as a toast with a friendly message (`lib/errors.ts` maps each core
+error code to its own line); successful mutations toast their outcome. A
+rejection nobody awaited is caught by the global handler in `main.tsx` and
+toasted too. The busy store tracks in-flight actions per action name —
 read-only operations (loads, search, doctor) never block the rest of the UI,
-mutating operations block each other.
+mutating operations (including runtime start/stop/restart) disable controls
+while they run.
 
 ## Iconography
 
@@ -271,7 +271,7 @@ logic:
 | Tier | Breakpoint | Behavior |
 |---|---|---|
 | ≥ `md` (768px) | rail + sidebar appear | the 72px scenario rail and 240px tenant sidebar replace the mobile top bar and drawer |
-| ≥ `lg` (1024px) | full data lists | the DataList detail column appears; scene overview stats reflow to 4 columns |
+| ≥ `lg` (1024px) | full data lists | provider detail column appears beside its list; scene overview stats reflow to 4 columns |
 
 Config tables never scroll horizontally — below `lg` the third (detail)
 column folds under the primary column and the first column stretches to fill.

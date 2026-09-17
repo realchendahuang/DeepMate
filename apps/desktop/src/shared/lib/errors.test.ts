@@ -11,11 +11,19 @@ describe("mapError", () => {
     expect(mapError("checksum verification failed")).toBe("checksum");
   });
 
-  it("maps the JSON envelope codes from the Rust side exactly", () => {
+  it("gives every core error code its own wording", () => {
+    // Every classification the core can produce maps to a distinct key.
+    // Collapsing them into one "something went wrong" line threw away the
+    // diagnosis the backend had already made.
     const envelope = (code: string, message: string) => JSON.stringify({ code, message });
     expect(mapError(envelope("not_found", "harness CLI was not found on PATH"))).toBe("notFound");
     expect(mapError(envelope("timeout", "task timed out after 2m"))).toBe("timeout");
-    expect(mapError(envelope("invalid_state", "scenario X is not running"))).toBe("generic");
+    expect(mapError(envelope("network", "connection refused"))).toBe("network");
+    expect(mapError(envelope("io", "permission denied"))).toBe("io");
+    expect(mapError(envelope("spawn_failed", "could not spawn dsh"))).toBe("spawnFailed");
+    expect(mapError(envelope("command_failed", "exit 1"))).toBe("commandFailed");
+    expect(mapError(envelope("invalid_state", "scenario X is not running"))).toBe("invalidState");
+    expect(mapError(envelope("unsupported", "no opener on this platform"))).toBe("unsupported");
     // A code without a mapping falls through to pattern matching.
     expect(mapError(envelope("mystery", "profile already exists"))).toBe("alreadyExists");
   });

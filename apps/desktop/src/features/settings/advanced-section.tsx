@@ -10,9 +10,10 @@ import { FileCode2, FileText, SlidersHorizontal } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/shared/api/api";
 import { DEFAULT_SCENARIO_ID } from "@/shared/lib/scenario";
-import { errorMessage } from "@/shared/lib/errors";
+import i18n from "@/i18n";
+import { mapError } from "@/shared/lib/errors";
 import { useScenarioStore } from "@/app/store/scenarios";
-import { useBlocking } from "@/app/store/busy";
+import { runBusy, useBlocking } from "@/app/store/busy";
 import { Card } from "@/shared/ui/card";
 import { Button } from "@/shared/ui/button";
 import { Badge } from "@/shared/ui/badge";
@@ -35,8 +36,13 @@ export function AdvancedSection() {
   const selectedScenario = useScenarioStore((s) => s.selectedScenario);
   const busy = useBlocking();
 
-  // The scenario the scene files are scoped to; defaults to the focused one.
-  const [scene, setScene] = useState(selectedScenario || DEFAULT_SCENARIO_ID);
+  // The scenario the scene files are scoped to. It follows the focused
+  // scenario by default and a manual pick in the dropdown takes over. The
+  // follow is derived rather than synced in an effect: `picked` records only
+  // what the user chose, so a scenario switch outside this page cannot leave
+  // a stale selection behind.
+  const [picked, setPicked] = useState<string | null>(null);
+  const scene = picked ?? selectedScenario ?? DEFAULT_SCENARIO_ID;
   const [file, setFile] = useState<AdvancedFile | null>(null);
 
   const sceneFiles: AdvancedFile[] = [
@@ -94,7 +100,7 @@ export function AdvancedSection() {
               </span>
               <Select
                 value={scene}
-                onValueChange={setScene}
+                onValueChange={(value) => setPicked(value)}
                 disabled={busy}
                 aria-label={t("settings.advancedSceneFiles")}
               >
@@ -166,7 +172,10 @@ function AdvancedFileDialog({ file, onClose }: { file: AdvancedFile; onClose: ()
       .catch((error: unknown) => {
         if (alive) {
           setLoadFailed(true);
-          toast.error(errorMessage(error));
+          // i18n is consulted through its instance rather than the `t`
+          // binding: including `t` in the dependency list would re-run this
+          // read on every language change and discard the user's draft.
+          toast.error(i18n.t(`common.errors.${mapError(error)}`));
         }
       });
     return () => {
@@ -177,11 +186,14 @@ function AdvancedFileDialog({ file, onClose }: { file: AdvancedFile; onClose: ()
   const save = async () => {
     if (draft === null) return;
     try {
-      await api.advancedFileSave(file.scope, file.name, draft);
+      // Going through runBusy keeps this dialog consistent with every other
+      // write in the app: controls disable while it runs, failures are
+      // translated through the shared error mapping.
+      await runBusy("save", () => api.advancedFileSave(file.scope, file.name, draft));
       toast.success(t("settings.advancedSaved"));
       onClose();
-    } catch (error) {
-      toast.error(errorMessage(error));
+    } catch {
+      // runBusy already surfaced it.
     }
   };
 

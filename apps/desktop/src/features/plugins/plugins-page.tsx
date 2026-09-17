@@ -11,7 +11,9 @@ import {
   Loader2,
   Package,
   RefreshCw,
+  RotateCw,
   Search,
+  TriangleAlert,
   Store,
   Trash2,
   X,
@@ -115,6 +117,8 @@ export function PluginsPage({ profile }: { profile: Profile }) {
   const disabledPlugins = usePluginStore((s) => s.disabledPlugins);
   const pluginsLoaded = usePluginStore((s) => s.pluginsLoaded);
   const marketEntries = usePluginStore((s) => s.marketEntries);
+  const marketSearching = usePluginStore((s) => s.marketSearching);
+  const marketError = usePluginStore((s) => s.marketError);
   const opLog = usePluginStore((s) => s.opLog);
   const opActive = usePluginStore((s) => s.opActive);
   const loadPlugins = usePluginStore((s) => s.loadPlugins);
@@ -525,6 +529,8 @@ export function PluginsPage({ profile }: { profile: Profile }) {
                 placeholder={t("settings.searchPluginPlaceholder")}
                 className="pl-9 pr-8"
                 onKeyDown={(event) => {
+                  // The Enter that confirms an IME candidate must not search.
+                  if (event.nativeEvent.isComposing) return;
                   if (event.key === "Enter" && query.trim()) searchMarket(query.trim());
                 }}
               />
@@ -552,8 +558,28 @@ export function PluginsPage({ profile }: { profile: Profile }) {
             </Button>
           </div>
 
-          {!pluginsLoaded ? (
+          {/* The market has its own three states. `pluginsLoaded` only
+              reflects the installed-plugin list, so using it as the market's
+              loading gate meant a failed search looked exactly like an empty
+              one. */}
+          {marketSearching ? (
             <Skeleton className="h-24 w-full" />
+          ) : marketError ? (
+            <EmptyState
+              icon={<TriangleAlert className="h-8 w-8 text-text-faint" />}
+              action={
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void searchMarket(query.trim())}
+                >
+                  <RotateCw className="h-4 w-4" />
+                  {t("common.retry")}
+                </Button>
+              }
+            >
+              {t("plugins.marketSearchFailed")}
+            </EmptyState>
           ) : marketEntries.length === 0 ? (
             <EmptyState icon={<Package className="h-8 w-8 text-text-faint" />}>
               {query
@@ -673,7 +699,9 @@ export function PluginsPage({ profile }: { profile: Profile }) {
         onOpenChange={(open) => !open && setRemoving(null)}
         title={t("plugins.removeConfirmTitle")}
         body={t("plugins.removeConfirmBody", { name: removing?.name ?? "" })}
-        onConfirm={doRemove}
+        confirmLabel={t("plugins.remove")}
+        pending={opActive}
+        onConfirm={() => void doRemove()}
       />
     </div>
   );

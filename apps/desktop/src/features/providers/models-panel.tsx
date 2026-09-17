@@ -315,6 +315,20 @@ function ProviderDetail({
     );
   }, [providerModels, modelSearch]);
 
+  // Commit an inline rename from the keyboard: Enter means "save this", so
+  // the draft is persisted right away rather than waiting for the Save
+  // button. Escape (handled below) restores the original name.
+  const commitName = () => {
+    setEditingName(false);
+    if (name.trim() && name !== selected.name) {
+      void saveProvider().catch(() => {
+        // The failure is surfaced by the store; put the original back so the
+        // field does not keep a name that was never saved.
+        setName(selected.name);
+      });
+    }
+  };
+
   const saveProvider = async () => {
     if (!name.trim()) return;
     await upsertProvider(profile, {
@@ -336,9 +350,11 @@ function ProviderDetail({
           <Input
             value={name}
             onChange={(event) => setName(event.target.value)}
-            onBlur={() => setEditingName(false)}
+            onBlur={commitName}
             onKeyDown={(event) => {
-              if (event.key === "Enter") setEditingName(false);
+              if (event.nativeEvent.isComposing) return;
+              // Enter commits the inline rename, Escape restores it.
+              if (event.key === "Enter") commitName();
               if (event.key === "Escape") {
                 setName(selected.name);
                 setEditingName(false);

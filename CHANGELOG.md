@@ -5,6 +5,108 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+A quality-hardening pass: every "placeholder" behaviour found in an audit of
+the runtime lifecycle, the data layer and the UI feedback paths. Nothing here
+is a redesign — these are cases where the code claimed more than it did.
+
+### Added
+
+- Update install streams its download over a progress channel and shows the
+  percentage, instead of holding the whole bundle in memory with a frozen
+  button. The DMG is also assessed for its code signature before it is
+  opened.
+- Snapshot and settings imports write a restore point first
+  (`state/pre-snapshot-import-*.json`, `state/pre-config-import-*.json`), so a
+  mistaken import is recoverable. The CLI asks for confirmation and offers
+  `--dry-run`; a non-interactive run must pass `--yes`.
+- `deepmate doctor` exits `3` when a check fails, timeouts exit `2`, and
+  `--json` failures print a `{"ok":false,"code","message"}` envelope, so
+  scripts can branch on the outcome instead of parsing prose.
+- `deepmate runtime task` honours `--json` (one object per event) instead of
+  silently dropping the flag.
+- Removing a scenario moves its directory to `profiles/.deepmate-trash`
+  instead of deleting it outright.
+- The desktop app declares a capability set and a strict CSP, so the webview
+  can only call the commands the UI actually uses.
+- A global handler turns unawaited command rejections into toasts instead of
+  console output.
+- Per-scenario load failures render a retry state on the providers and market
+  views instead of an eternal skeleton.
+- Tasks log their partial output even when they time out or fail;
+  scenario logs are attached to boot failures.
+
+### Changed
+
+- Plugin operations and task runs each go through the bounded, streamed child
+  runner, so a stuck pnpm or a hung task can no longer spin forever; tasks
+  get their own timeout budget (10 minutes, `DEEPMATE_TASK_TIMEOUT_SECS`)
+  instead of sharing the plugin-operation one (2 minutes).
+- `stop` waits for the process to actually exit (escalating to SIGKILL),
+  then confirms the port is released, so `restart` cannot report success
+  while the old instance still serves.
+- The web-UI readiness probe is paired with pid identity: a foreign process
+  on the scenario port is reported as such instead of "running", and
+  recorded pids are verified before being signalled or displayed.
+- The market keeps the last result for every query (not just the most recent)
+  and serves stale caches when the network fails, so an offline user sees the
+  curated list rather than "no plugins".
+- A curated entry claiming `official` without the vendor's npm scope is
+  downgraded to vetted.
+- Ports that are occupied when a scenario restarts are reassigned; an
+  explicitly requested port that is taken is refused with a clear error
+  instead of being silently swapped.
+- The update check distinguishes "up to date" from "could not check", in the
+  settings page and the tray.
+- `doctor fix` reports partial repairs (`fixed` plus the failed items)
+  instead of rounding a partial failure up to success.
+- Every core error code has its own localized line; the five that were
+  collapsed into "something went wrong" now say what happened.
+- Confirmations name their action ("导入" for an import, not "删除"), and the
+  dialog stays open, disabled, until the action finishes.
+- Inline provider rename commits on Enter and on blur, and restores the
+  original name when the write fails.
+- Scenario selection on the Advanced page follows the focused scenario.
+
+### Fixed
+
+- Toast styling: the host passed raw HSL triplets to sonner where colors were
+  expected, so toasts rendered with no background, and the theme followed the
+  OS rather than the app's own light/dark state.
+- `settings.modality.*` had no translations at all, so the model dialog
+  showed the raw key path.
+- Enter in a text field no longer submits while an IME composition is active
+  (a Chinese IME confirms candidates with Enter — that keystroke used to run
+  a task).
+- Market searches are sequenced, so a slow response for an earlier query or
+  source can no longer overwrite the current list.
+- Provider/model loading failures, market search failures and doctor runs no
+  longer leave the page in a stale or misleading state.
+- Configuration writes are atomic, and an unreadable `config.toml` is
+  quarantined as `config.toml.invalid-<stamp>` with a fresh defaults file
+  written in its place, instead of failing every later read and write.
+- Snapshot names are validated (no separators or traversal) at the store and
+  command layers; snapshot and backup documents are checked against the
+  format version this build understands.
+- Port and disabled-plugin registries are written atomically, and a corrupt
+  one is quarantined and rebuilt instead of disabling the feature forever.
+- Backup files are refused when the backup itself cannot be written, rather
+  than overwriting the only copy.
+- Scene settings resolution refuses paths that escape the harness home.
+- `cordis.patch.yml` edits are validated (with `!!js` expressions neutralized
+  for the check), so a syntax error is refused instead of breaking the next
+  boot.
+- Action history survives a damaged line (skipped and reported) and rotates
+  past 1 MiB.
+- Update checksums must name the artifact they verify; the Linux target triple
+  reports `musl` builds correctly.
+- The desktop app reports an unusable data directory in a native dialog
+  rather than panicking with no window.
+- `make ci` includes the core purity gate (case-insensitive), a generated-
+  bindings freshness check and `--locked`; `make verify` adds the frontend
+  format check and a localization gate that compares both catalogs.
+
 ## [0.8.1] - 2026-09-17
 
 ### Fixed

@@ -8,7 +8,14 @@
 
 import { commands } from "./bindings";
 import { Channel } from "@tauri-apps/api/core";
-import type { Model, PluginOpEvent, PluginOpKind, Provider, Surface } from "./bindings";
+import type {
+  Model,
+  PluginOpEvent,
+  PluginOpKind,
+  Provider,
+  Surface,
+  UpdateProgressEvent,
+} from "./bindings";
 
 // Unwrap the generated result envelope; a rejected command surfaces as a
 // thrown string, matching the previous hand-written invoke wrappers.
@@ -104,15 +111,21 @@ export const api = {
     unwrap(commands.advancedFileRead(scope, name)),
   advancedFileSave: (scope: string, name: string | null, content: string) =>
     unwrap(commands.advancedFileSave(scope, name, content)),
-  // Updates.
+  // Updates. The install streams its progress over a channel so a large
+  // download shows movement instead of a frozen button.
   checkUpdate: () => unwrap(commands.checkUpdate()),
-  updateInstall: () => unwrap(commands.updateInstall()),
+  updateInstall: (onProgress: (event: UpdateProgressEvent) => void = () => {}) => {
+    const channel = new Channel<UpdateProgressEvent>();
+    channel.onmessage = onProgress;
+    return unwrap(commands.updateInstall(channel));
+  },
   openUrl: (url: string) => unwrap(commands.openUrl(url)),
   getConfig: () => unwrap(commands.getConfig()),
 };
 
 export type {
   CheckStatus,
+  UpdateProgressEvent,
   CompatReport,
   DoctorCheck,
   DoctorReport,

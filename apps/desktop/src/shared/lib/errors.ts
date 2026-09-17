@@ -5,16 +5,19 @@
 // matching below. Anything unknown falls back to a generic line. The mapped
 // text is a stable key that callers translate via i18n (`common.errors.*`).
 
+// Every core error classification gets its own wording. Collapsing the
+// classifications into one "something went wrong" line threw away the
+// diagnosis the core had already made: "the engine could not start" and "the
+// scenario is not running" need different reactions from the user.
 const CODE_KEYS: Record<string, string> = {
   not_found: "notFound",
   timeout: "timeout",
   network: "network",
-  // These classifications have no friendlier wording than the generic line.
-  io: "generic",
-  spawn_failed: "generic",
-  command_failed: "generic",
-  invalid_state: "generic",
-  unsupported: "generic",
+  io: "io",
+  spawn_failed: "spawnFailed",
+  command_failed: "commandFailed",
+  invalid_state: "invalidState",
+  unsupported: "unsupported",
 };
 
 const KNOWN_PATTERNS: Array<{ pattern: RegExp; key: string }> = [

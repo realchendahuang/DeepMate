@@ -44,6 +44,7 @@ export function ScenarioRenameDialog({
           placeholder={t("settings.profileName")}
           autoFocus
           onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing) return;
             if (event.key === "Enter") doRename();
             if (event.key === "Escape") onOpenChange(false);
           }}

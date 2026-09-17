@@ -20,9 +20,9 @@ use std::time::Duration;
 
 use deepmate_core::error::{CoreError, CoreResult};
 use deepmate_core::model::{
-    CheckStatus, CompatReport, Detection, DisabledPlugin, DoctorCheck, DoctorReport, HarnessInfo,
-    MarketEntry, MarketSourceInfo, MarketTrust, Model, Plugin, PluginOpEvent, PluginOpKind,
-    Profile, Provider, RuntimeStatus, RuntimeStatusKind,
+    CheckStatus, CompatReport, Detection, DisabledPlugin, DoctorCheck, DoctorReport, FixReport,
+    HarnessInfo, MarketEntry, MarketSourceInfo, MarketTrust, Model, Plugin, PluginOpEvent,
+    PluginOpKind, Profile, Provider, RuntimeStatus, RuntimeStatusKind,
 };
 use deepmate_core::snapshot::{Snapshot, SnapshotReport, SNAPSHOT_FORMAT};
 use deepmate_platform::PlatformService;
@@ -61,6 +61,17 @@ const UI_PROBE_TIMEOUT: Duration = Duration::from_millis(500);
 // reports a bounded failure. Overridable for tests.
 const PLUGIN_OP_TIMEOUT: Duration = Duration::from_secs(120);
 const PLUGIN_OP_TIMEOUT_ENV: &str = "DEEPMATE_PLUGIN_OP_TIMEOUT_SECS";
+// A task run is an LLM turn, not a package installation: it legitimately
+// takes minutes where a pnpm verb takes seconds, so it gets its own budget
+// instead of sharing the plugin-op one. Overridable for tests.
+const TASK_TIMEOUT: Duration = Duration::from_secs(600);
+const TASK_TIMEOUT_ENV: &str = "DEEPMATE_TASK_TIMEOUT_SECS";
+// Stop discipline: how long `stop` waits for a SIGTERM'd scenario to exit
+// before escalating to SIGKILL, how long it waits for the process to
+// disappear afterwards, and how long it then waits for the port to be freed.
+const STOP_GRACE: Duration = Duration::from_secs(5);
+const STOP_KILL_GRACE: Duration = Duration::from_secs(5);
+const STOP_PORT_GRACE: Duration = Duration::from_secs(3);
 // How long `start` waits for the spawned web UI to answer before reporting
 // failure. Every caller reports state right after start returns (hero
 // status, doctor re-run), so returning at spawn time would make a healthy
@@ -71,19 +82,43 @@ const WEB_UI_BOOT_TIMEOUT_ENV: &str = "DEEPMATE_UI_BOOT_TIMEOUT_SECS";
 const STDERR_TAIL: usize = 8;
 
 fn plugin_op_timeout() -> Duration {
-    std::env::var(PLUGIN_OP_TIMEOUT_ENV)
-        .ok()
-        .and_then(|value| value.parse().ok())
-        .map(Duration::from_secs)
-        .unwrap_or(PLUGIN_OP_TIMEOUT)
+    duration_from_env(PLUGIN_OP_TIMEOUT_ENV).unwrap_or(PLUGIN_OP_TIMEOUT)
+}
+
+fn task_timeout() -> Duration {
+    duration_from_env(TASK_TIMEOUT_ENV).unwrap_or(TASK_TIMEOUT)
 }
 
 fn ui_boot_timeout() -> Duration {
-    std::env::var(WEB_UI_BOOT_TIMEOUT_ENV)
-        .ok()
-        .and_then(|value| value.parse().ok())
-        .map(Duration::from_secs)
-        .unwrap_or(WEB_UI_BOOT_TIMEOUT)
+    duration_from_env(WEB_UI_BOOT_TIMEOUT_ENV).unwrap_or(WEB_UI_BOOT_TIMEOUT)
+}
+
+// Seconds-valued environment override. An unparsable value is reported
+// instead of silently falling back, so a mistyped test knob is visible.
+fn duration_from_env(key: &str) -> Option<Duration> {
+    let raw = std::env::var(key).ok()?;
+    match raw.trim().parse::<u64>() {
+        Ok(seconds) => Some(Duration::from_secs(seconds)),
+        Err(_) => {
+            tracing::warn!(key, value = %raw, "ignoring unparsable duration override");
+            None
+        }
+    }
+}
+
+// Read the last `count` non-empty lines of a file. Best effort: an
+// unreadable file yields None so callers only omit the tail.
+fn tail_of_file(path: &Path, count: usize) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let lines: Vec<&str> = text
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    if lines.is_empty() {
+        return None;
+    }
+    let start = lines.len().saturating_sub(count);
+    Some(lines[start..].join(" | "))
 }
 
 // One completed streamed child run: the pieces a caller needs for its
@@ -102,6 +137,25 @@ enum ChildRunFailure {
     Spawn(std::io::Error),
     Wait(std::io::Error),
     TimedOut,
+}
+
+// Who appears to be serving a scenario's port.
+//
+// The distinction matters because a pid read from a file or a port is only a
+// number until it is checked: signalling (or reporting) the wrong process is
+// worse than reporting nothing, and a foreign squatter on the port must be
+// told apart from the harness so the UI can say "another program is using
+// this port" instead of "running".
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PidEvidence {
+    // A live process whose command line (or recorded pid) identifies it as
+    // the harness.
+    Harness { pid: u32, recorded: bool },
+    // A live process on the port that is identifiably something else.
+    Foreign { pid: u32, command: Option<String> },
+    // Nothing alive could be found: no harness, and no way to see the port
+    // owner (or nothing listening).
+    None,
 }
 
 // Run a piped child under the bounded, streamed discipline shared by plugin
@@ -268,17 +322,12 @@ impl DeepSeekHarness {
             .unwrap_or_else(|| DEFAULT_UI_URL.to_string())
     }
 
-    // True when the harness web UI answers HTTP. A real HTTP response (even a
-    // 404) means a web server is serving the endpoint; a refused connection or
-    // a probe timeout means nothing is actually there. This is stricter than a
-    // raw TCP connect, which would also succeed against a stray socket holding
-    // the port.
-    // True when the web UI at `url` answers HTTP. A real HTTP response (even
-    // a 404) means a web server is serving the endpoint; a refused connection
-    // or a probe timeout means nothing is actually there. This is stricter
-    // than a raw TCP connect, which would also succeed against a stray
-    // socket holding the port.
-    async fn ui_reachable_at(&self, url: &str) -> bool {
+    // True when something speaks HTTP at `url`.
+    //
+    // This is deliberately weak evidence: any server answers. Callers pair it
+    // with `runtime_pid_evidence` so that a squatter holding the port is not
+    // mistaken for the harness.
+    async fn ui_answers_at(&self, url: &str) -> bool {
         let Ok(url) = url.parse::<reqwest::Url>() else {
             return false;
         };
@@ -286,6 +335,24 @@ impl DeepSeekHarness {
         matches!(
             tokio::time::timeout(UI_PROBE_TIMEOUT, probe).await,
             Ok(Ok(_response))
+        )
+    }
+
+    // Whether the scenario's web UI is served by the harness.
+    //
+    // `ui_answers_at` alone would report "running" for whatever happens to
+    // hold the port, which then makes `open_ui` open a stranger's page and
+    // `start` return success without starting anything. The pid evidence
+    // decides: a harness-identified process (or no identifyable process at
+    // all, when the OS gives us nothing to check) is accepted; a foreign
+    // process on the port is not.
+    async fn ui_reachable_at(&self, url: &str) -> bool {
+        if !self.ui_answers_at(url).await {
+            return false;
+        }
+        !matches!(
+            self.listener_evidence(url).await,
+            PidEvidence::Foreign { .. }
         )
     }
 
@@ -436,17 +503,110 @@ impl DeepSeekHarness {
     // on a tokio worker thread; the pid-file checks are cheap file reads
     // and stay inline.
     async fn read_pid_async(&self, profile: &str) -> Option<u32> {
+        match self.runtime_pid_evidence(profile).await {
+            PidEvidence::Harness { pid, .. } => Some(pid),
+            _ => None,
+        }
+    }
+
+    // Who serves this scenario right now, with identity checks.
+    //
+    // A recorded pid is only trusted while the process is alive *and* its
+    // command line still looks like the harness: a pid file outlives a
+    // crashed harness, and the OS recycles pids, so an unverified number
+    // could name an unrelated program. A stale record is removed.
+    async fn runtime_pid_evidence(&self, profile: &str) -> PidEvidence {
+        for (pid, recorded) in self.recorded_pids(profile) {
+            if !self.process_alive_async(pid).await {
+                continue;
+            }
+            match self.process_command(pid).await {
+                Some(command) if !self.command_looks_like_harness(&command) => {
+                    tracing::warn!(
+                        profile,
+                        pid,
+                        command,
+                        "recorded harness pid now belongs to another process; treating it as stale"
+                    );
+                    let _ = self.clear_pid(profile);
+                }
+                // Either the command vouches for the pid, or the OS would not
+                // tell us what it is — in which case the recording itself is
+                // the only evidence available and is accepted.
+                _ => return PidEvidence::Harness { pid, recorded },
+            }
+        }
+        let Ok(url) = self.scenario_url(profile) else {
+            return PidEvidence::None;
+        };
+        self.listener_evidence(&url).await
+    }
+
+    // Who owns the port `url` points at, checked against harness identity.
+    async fn listener_evidence(&self, url: &str) -> PidEvidence {
+        let Some(port) = url
+            .parse::<reqwest::Url>()
+            .ok()
+            .and_then(|url| url.port_or_known_default())
+        else {
+            return PidEvidence::None;
+        };
+        let Some(pid) = self.find_listener_pid(port).await else {
+            return PidEvidence::None;
+        };
+        match self.process_command(pid).await {
+            Some(command) if !self.command_looks_like_harness(&command) => PidEvidence::Foreign {
+                pid,
+                command: Some(command),
+            },
+            other => PidEvidence::Harness {
+                pid,
+                recorded: other.is_none(),
+            },
+        }
+    }
+
+    fn process_alive(&self, pid: u32) -> bool {
+        self.platform.process_alive(pid)
+    }
+
+    // The same check pushed off the async worker thread: the Windows
+    // implementation shells out to `tasklist`.
+    async fn process_alive_async(&self, pid: u32) -> bool {
+        let platform = Arc::clone(&self.platform);
+        tokio::task::spawn_blocking(move || platform.process_alive(pid))
+            .await
+            .unwrap_or(false)
+    }
+
+    // `PlatformService::process_command` shells out (`ps`/`wmic`), so it must
+    // not run on an async worker thread.
+    async fn process_command(&self, pid: u32) -> Option<String> {
+        let platform = Arc::clone(&self.platform);
+        tokio::task::spawn_blocking(move || platform.process_command(pid))
+            .await
+            .unwrap_or_default()
+    }
+    fn command_looks_like_harness(&self, command: &str) -> bool {
+        deepmate_platform::looks_like_harness(command)
+            || self
+                .cli_names
+                .iter()
+                .any(|name| command.contains(name.as_str()))
+    }
+
+    // Recorded pids for this scenario, most authoritative first.
+    fn recorded_pids(&self, profile: &str) -> Vec<(u32, bool)> {
+        let mut pids = Vec::new();
         if let Some(pid) = self.pid_file_pid(profile) {
-            return Some(pid);
+            pids.push((pid, true));
         }
         if profile == WEB_PROFILE {
             if let Some(pid) = self.legacy_pid_file_pid() {
-                return Some(pid);
+                pids.push((pid, true));
             }
         }
-        let url = self.scenario_url(profile).ok()?;
-        let port = url.parse::<reqwest::Url>().ok()?.port_or_known_default()?;
-        self.find_listener_pid(port).await
+        pids
     }
 
     // `PlatformService::find_listener_pid` off the async worker threads.
@@ -461,6 +621,15 @@ impl DeepSeekHarness {
     async fn kill_process(&self, pid: u32) -> CoreResult<()> {
         let platform = Arc::clone(&self.platform);
         tokio::task::spawn_blocking(move || platform.kill_process(pid))
+            .await
+            .map_err(|err| CoreError::InvalidState(format!("kill task failed: {err}")))?
+            .map_err(|err| CoreError::InvalidState(err.to_string()))
+    }
+
+    // `PlatformService::kill_process_force` off the async worker threads.
+    async fn kill_process_force(&self, pid: u32) -> CoreResult<()> {
+        let platform = Arc::clone(&self.platform);
+        tokio::task::spawn_blocking(move || platform.kill_process_force(pid))
             .await
             .map_err(|err| CoreError::InvalidState(format!("kill task failed: {err}")))?
             .map_err(|err| CoreError::InvalidState(err.to_string()))
@@ -535,30 +704,75 @@ impl DeepSeekHarness {
     // Commands are always run with an explicit forwarded pnpm verb (`add`,
     // `remove`, `update`); a bare `dsh plugin --profile <name>` would run a
     // full pnpm install, which is a side effect callers here never intend.
+    //
+    // The run goes through `run_streamed_child` for the same reason the
+    // streaming entry point does: a pnpm grandchild can keep the pipes open
+    // long after the work is done, so every plugin operation is bounded and
+    // its whole process group is killed on expiry. Callers that do not want
+    // progress events pass a channel whose receiver is dropped; the send
+    // failures are ignored by the relay loop.
     async fn run_plugin(&self, profile: &str, forwarded: &[&str]) -> CoreResult<()> {
         let cli = self
             .find_cli()
             .ok_or_else(|| CoreError::NotFound("harness CLI was not found on PATH".to_string()))?;
-        let output = tokio::process::Command::new(&cli)
+
+        let (tx, rx) = tokio::sync::mpsc::channel(64);
+        drop(rx);
+        let mut command = tokio::process::Command::new(&cli);
+        command
             .arg("plugin")
             .arg("--profile")
             .arg(profile)
-            .args(forwarded)
-            .output()
-            .await
-            .map_err(|err| CoreError::SpawnFailed(format!("failed to run `dsh plugin`: {err}")))?;
-        if !output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(CoreError::CommandFailed(format!(
-                "`dsh plugin` failed with exit {:?}: {} {}",
-                output.status.code(),
-                stdout.trim(),
-                stderr.trim()
-            )));
+            .args(forwarded);
+
+        let timeout = plugin_op_timeout();
+        tracing::debug!(
+            profile,
+            forwarded = ?forwarded,
+            timeout_secs = timeout.as_secs(),
+            "running `dsh plugin`"
+        );
+        match run_streamed_child(&mut command, &tx, timeout).await {
+            Ok(run) if run.status.success() => {
+                tracing::info!(cli = %cli, profile, forwarded = ?forwarded, "plugin command completed");
+                Ok(())
+            }
+            Ok(run) => {
+                // pnpm reports failures on stdout as often as on stderr, so
+                // the detail carries both.
+                let mut parts: Vec<String> = Vec::new();
+                if !run.stderr_tail.is_empty() {
+                    parts.push(run.stderr_tail.join(" "));
+                }
+                if !run.stdout_lines.is_empty() {
+                    let tail =
+                        &run.stdout_lines[run.stdout_lines.len().saturating_sub(STDERR_TAIL)..];
+                    parts.push(tail.join(" "));
+                }
+                let detail = format!(
+                    "`dsh plugin {}` failed with exit {:?}{}",
+                    forwarded.join(" "),
+                    run.status.code(),
+                    if parts.is_empty() {
+                        String::new()
+                    } else {
+                        format!(": {}", parts.join(" | "))
+                    }
+                );
+                Err(CoreError::CommandFailed(detail))
+            }
+            Err(ChildRunFailure::Spawn(err)) => Err(CoreError::SpawnFailed(format!(
+                "failed to run `dsh plugin`: {err}"
+            ))),
+            Err(ChildRunFailure::Wait(err)) => Err(CoreError::CommandFailed(format!(
+                "failed to wait for `dsh plugin`: {err}"
+            ))),
+            Err(ChildRunFailure::TimedOut) => Err(CoreError::Timeout(format!(
+                "`dsh plugin {}` did not finish within {timeout:?} and was stopped. \
+                 A leftover pnpm/dsh process may have been stuck; retry the operation.",
+                forwarded.join(" ")
+            ))),
         }
-        tracing::info!(cli = %cli, profile, forwarded = ?forwarded, "plugin command completed");
-        Ok(())
     }
 
     pub async fn detect(&self) -> CoreResult<Detection> {
@@ -608,12 +822,41 @@ impl DeepSeekHarness {
             Surface::Web => {}
         }
         if let Ok(url) = self.scenario_url(profile) {
-            if self.ui_reachable_at(&url).await {
-                return Ok(RuntimeStatus {
-                    kind: RuntimeStatusKind::Running,
-                    pid: self.read_pid_async(profile).await,
-                    message: Some(format!("scenario web UI is reachable at {url}")),
-                });
+            if self.ui_answers_at(&url).await {
+                match self.runtime_pid_evidence(profile).await {
+                    PidEvidence::Foreign { pid, command } => {
+                        // Someone else holds the port: reporting "running"
+                        // would make open/s stop act on a stranger.
+                        return Ok(RuntimeStatus {
+                            kind: RuntimeStatusKind::Error,
+                            pid: None,
+                            message: Some(format!(
+                                "port used by another program (pid {pid}{})",
+                                command
+                                    .map(|command| format!(": {command}"))
+                                    .unwrap_or_default()
+                            )),
+                        });
+                    }
+                    PidEvidence::Harness { pid, .. } => {
+                        return Ok(RuntimeStatus {
+                            kind: RuntimeStatusKind::Running,
+                            pid: Some(pid),
+                            message: Some(format!("scenario web UI is reachable at {url}")),
+                        });
+                    }
+                    PidEvidence::None => {
+                        // The URL answers but no pid could be resolved (for
+                        // example `lsof` is unavailable). The HTTP answer is
+                        // the only evidence left; report it as running
+                        // without claiming a pid.
+                        return Ok(RuntimeStatus {
+                            kind: RuntimeStatusKind::Running,
+                            pid: None,
+                            message: Some(format!("scenario web UI is reachable at {url}")),
+                        });
+                    }
+                }
             }
         }
         Ok(RuntimeStatus {
@@ -676,22 +919,26 @@ impl DeepSeekHarness {
         match self.log_path(profile) {
             Some(log_path) => {
                 if let Some(parent) = log_path.parent() {
-                    std::fs::create_dir_all(parent)?;
+                    std::fs::create_dir_all(parent).map_err(|err| CoreError::io_at(parent, err))?;
                 }
                 let file = std::fs::OpenOptions::new()
                     .create(true)
                     .append(true)
-                    .open(&log_path)?;
-                command.stdout(file.try_clone()?).stderr(file);
+                    .open(&log_path)
+                    .map_err(|err| CoreError::io_at(&log_path, err))?;
+                command.stdout(file.try_clone()?);
+                command.stderr(file);
             }
             None => {
                 command.stdout(std::process::Stdio::null());
                 command.stderr(std::process::Stdio::null());
             }
         }
-        // Spawn and drop the handle: the scenario keeps running independently
-        // of the DeepMate process.
-        let child = command
+        // The scenario keeps running independently of the DeepMate process,
+        // but the handle is kept while booting so the wait loop can notice a
+        // child that exited on its own instead of probing a dead pid for the
+        // whole boot budget.
+        let mut child = command
             .spawn()
             .map_err(|err| CoreError::SpawnFailed(format!("failed to start scenario: {err}")))?;
         self.write_pid(profile, child.id())?;
@@ -701,32 +948,75 @@ impl DeepSeekHarness {
         // reporting at spawn time would race the boot and show "not running".
         let timeout = ui_boot_timeout();
         let deadline = tokio::time::Instant::now() + timeout;
+        let mut exited: Option<std::process::ExitStatus> = None;
         loop {
             if self.ui_reachable_at(&url).await {
                 return Ok(());
+            }
+            match child.try_wait() {
+                // A launcher that exited *unsuccessfully* will not bring a UI
+                // up, so report now instead of probing a dead pid for the
+                // whole boot budget. A zero exit is ambiguous (some launchers
+                // hand the console to a detached child), so the wait
+                // continues in that case.
+                Ok(Some(status)) if !status.success() => {
+                    exited = Some(status);
+                    break;
+                }
+                Ok(Some(_status)) => {}
+                // Still running (or the OS will not say): keep waiting.
+                Ok(None) => {}
+                Err(err) => {
+                    tracing::warn!(profile, error = %err, "failed to poll the starting scenario");
+                }
             }
             if tokio::time::Instant::now() >= deadline {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(300)).await;
         }
-        // The UI never came up: kill the half-started instance and clear the
-        // pid file, otherwise a zombie keeps the scenario marked as running.
-        // The port assignment stays: it is the scenario's stable address,
-        // not a leak.
+        // The UI never came up: the child either exited on its own or is
+        // still half-started. Kill whatever is left (a no-op for the exited
+        // case), clear the pid file, and report what actually happened —
+        // including the tail of the scenario log, so the user is not sent
+        // hunting for it.
         let pid = child.id();
-        if let Err(err) = self.kill_process(pid).await {
-            tracing::warn!(profile, pid, error = %err, "failed to kill the scenario that missed its boot deadline");
+        if exited.is_none() {
+            if let Err(err) = self.kill_process_force(pid).await {
+                tracing::warn!(profile, pid, error = %err, "failed to kill the scenario that missed its boot deadline");
+            }
+            // Reap the child so a failed boot does not leave a zombie behind.
+            // `std::process::Child::wait` blocks, and the process was just
+            // SIGKILL'd, so it returns promptly; keep it off the async worker
+            // threads all the same.
+            let _ = tokio::task::spawn_blocking(move || child.wait()).await;
         }
         if let Err(err) = self.clear_pid(profile) {
             tracing::warn!(profile, error = %err, "failed to clear the scenario pid file");
         }
-        Err(CoreError::Timeout(format!(
-            "scenario web UI did not come up within {timeout:?}; check {}",
-            self.log_path(profile)
-                .map(|path| path.to_string_lossy().into_owned())
-                .unwrap_or_else(|| "the scenario web log".to_string()),
-        )))
+        let log_tail = self
+            .log_path(profile)
+            .and_then(|path| tail_of_file(&path, STDERR_TAIL));
+        let log_hint = self
+            .log_path(profile)
+            .map(|path| format!("; log: {}", path.display()))
+            .unwrap_or_default();
+        let detail = match exited {
+            Some(status) => format!(
+                "scenario exited during startup with {status}{}{}",
+                log_tail
+                    .as_deref()
+                    .map(|tail| format!(": {tail}"))
+                    .unwrap_or_default(),
+                log_hint
+            ),
+            None => format!("scenario web UI did not come up within {timeout:?}{log_hint}"),
+        };
+        if exited.is_some() {
+            Err(CoreError::CommandFailed(detail))
+        } else {
+            Err(CoreError::Timeout(detail))
+        }
     }
 
     // Resolve the URL a scenario starts on, assigning a new port when
@@ -765,23 +1055,90 @@ impl DeepSeekHarness {
     }
 
     pub async fn stop_scenario(&self, profile: &str) -> CoreResult<()> {
-        let Some(pid) = self.read_pid_async(profile).await else {
+        let evidence = self.runtime_pid_evidence(profile).await;
+        let pid = match evidence {
+            PidEvidence::Harness { pid, .. } => pid,
+            PidEvidence::Foreign { pid, command } => {
+                return Err(CoreError::InvalidState(format!(
+                    "scenario {profile} is served by another program (pid {pid}{}), not by the harness; refusing to stop it",
+                    command
+                        .map(|command| format!(": {command}"))
+                        .unwrap_or_default()
+                )));
+            }
+            PidEvidence::None => {
+                tracing::warn!(
+                    profile,
+                    "no harness pid recorded; the scenario may have been started manually"
+                );
+                return Ok(());
+            }
+        };
+
+        self.kill_process(pid).await?;
+        // A stop that returns before the process is gone lies to the caller:
+        // `restart` would then find the old instance still holding the port
+        // and report success without booting anything (the start probe sees a
+        // reachable UI and returns early), and the UI keeps showing a runtime
+        // that is on its way out. Wait for the process to exit, escalate to
+        // SIGKILL when it ignores the request, then confirm the port is free.
+        if !self.wait_for_exit(pid, STOP_GRACE).await {
             tracing::warn!(
                 profile,
-                "no harness pid recorded; the scenario may have been started manually"
+                pid,
+                "scenario ignored the stop request; killing it"
             );
-            return Ok(());
-        };
-        self.platform
-            .kill_process(pid)
-            .map_err(|err| CoreError::InvalidState(err.to_string()))?;
+            self.kill_process_force(pid).await?;
+            if !self.wait_for_exit(pid, STOP_KILL_GRACE).await {
+                return Err(CoreError::InvalidState(format!(
+                    "scenario {profile} (pid {pid}) could not be stopped"
+                )));
+            }
+        }
         self.clear_pid(profile)?;
+        // The port is the scenario's address; a lingering listener means a
+        // grandchild survived. Report it instead of pretending the stop
+        // succeeded.
+        if let Ok(url) = self.scenario_url(profile) {
+            if let Some(port) = url
+                .parse::<reqwest::Url>()
+                .ok()
+                .and_then(|url| url.port_or_known_default())
+            {
+                let deadline = tokio::time::Instant::now() + STOP_PORT_GRACE;
+                loop {
+                    if self.find_listener_pid(port).await.is_none() {
+                        break;
+                    }
+                    if tokio::time::Instant::now() >= deadline {
+                        return Err(CoreError::InvalidState(format!(
+                            "scenario {profile} stopped, but port {port} is still in use"
+                        )));
+                    }
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                }
+            }
+        }
         // Free the port only for non-default scenarios: the `web` scenario's
         // port is fixed.
         if profile != WEB_PROFILE {
             let _ = PortRegistry::new(self.data_dir.clone()).release(profile);
         }
         Ok(())
+    }
+
+    // Poll until the pid disappears, up to `budget`.
+    async fn wait_for_exit(&self, pid: u32, budget: Duration) -> bool {
+        let deadline = tokio::time::Instant::now() + budget;
+        loop {
+            if !self.process_alive(pid) {
+                return true;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
     }
 
     // The legacy single-instance restart: the `web` scenario.
@@ -1348,13 +1705,18 @@ impl DeepSeekHarness {
 
     pub async fn market_sources(&self) -> CoreResult<Vec<MarketSourceInfo>> {
         Ok(market::market_sources())
-    } // Run one task against a task-surface scenario (the `dsh-headless`
-      // bundle): `dsh --profile <name> "<prompt>"` boots the profile, answers
-      // exactly once, prints the final text on stdout and exits. Output is
-      // streamed as `Line` events (mirroring plugin operations) and, on
-      // success, persisted to `logs/task-<profile>-<timestamp>.log`. The run
-      // is always bounded: the same timeout-and-kill discipline as plugin
-      // operations applies.
+    }
+
+    // Run one task against a task-surface scenario (the `dsh-headless`
+    // bundle): `dsh --profile <name> "<prompt>"` boots the profile, answers
+    // exactly once, prints the final text on stdout and exits. Output is
+    // streamed as `Line` events (mirroring plugin operations) and persisted
+    // to `logs/task-<profile>-<timestamp>.log` whenever the run printed
+    // anything — including a run that hit its deadline or failed, so a long
+    // answer is never silently dropped. The run is bounded by its own budget
+    // (`DEEPMATE_TASK_TIMEOUT_SECS`), deliberately separate from the
+    // plugin-operation budget: an LLM turn is minutes of work, not a package
+    // install.
     pub async fn run_task(
         &self,
         profile: &str,
@@ -1379,32 +1741,18 @@ impl DeepSeekHarness {
         let mut command = tokio::process::Command::new(&cli);
         command.arg("--profile").arg(profile).arg(prompt);
 
-        let timeout = plugin_op_timeout();
+        let timeout = task_timeout();
         tracing::debug!(profile, timeout_secs = timeout.as_secs(), "running task");
         let run = run_streamed_child(&mut command, &tx, timeout).await;
 
+        // Persist whatever the run printed before reporting the outcome: a
+        // failed or timed-out run's partial answer is still the user's work.
+        if let Ok(run) = &run {
+            self.persist_task_log(profile, run);
+        }
+
         match run {
             Ok(run) if run.status.success() => {
-                // Persist the answer so a task result outlives the run.
-                if let Some(dir) = self.data_dir.as_ref() {
-                    let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
-                    let log = dir.join("logs").join(format!("task-{profile}-{stamp}.log"));
-                    // The run itself succeeded; a failed log write is worth a
-                    // warning, not a task failure.
-                    let written = std::fs::create_dir_all(log.parent().unwrap_or(dir))
-                        .and_then(|()| std::fs::write(&log, run.stdout_lines.join("\n")));
-                    match written {
-                        Ok(()) => {
-                            tracing::info!(profile, path = %log.display(), "task log written")
-                        }
-                        Err(err) => tracing::warn!(
-                            profile,
-                            path = %log.display(),
-                            error = %err,
-                            "failed to write the task log"
-                        ),
-                    }
-                }
                 let _ = tx
                     .send(PluginOpEvent::Finished {
                         ok: true,
@@ -1463,6 +1811,32 @@ impl DeepSeekHarness {
                     .await;
                 Err(CoreError::Timeout(detail))
             }
+        }
+    }
+
+    // Persist a finished task run's stdout to `logs/task-<profile>-<stamp>.log`
+    // so the answer outlives the run. A failed log write is worth a warning,
+    // never a task failure; a run that printed nothing writes nothing.
+    fn persist_task_log(&self, profile: &str, run: &ChildRun) {
+        let Some(dir) = self.data_dir.as_ref() else {
+            return;
+        };
+        if run.stdout_lines.is_empty() {
+            return;
+        }
+        let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+        let log = dir.join("logs").join(format!("task-{profile}-{stamp}.log"));
+        let written = std::fs::create_dir_all(log.parent().unwrap_or(dir))
+            .map_err(|err| CoreError::io_at(log.parent().unwrap_or(dir), err))
+            .and_then(|()| deepmate_core::write_atomic_string(&log, &run.stdout_lines.join("\n")));
+        match written {
+            Ok(()) => tracing::info!(profile, path = %log.display(), "task log written"),
+            Err(err) => tracing::warn!(
+                profile,
+                path = %log.display(),
+                error = %err,
+                "failed to write the task log"
+            ),
         }
     }
 
@@ -1779,10 +2153,10 @@ impl DeepSeekHarness {
     //   ui.reachable           + "start"     — boot the harness web UI.
     //
     // Batch repairs never abort on the first failure: every item is
-    // attempted and counted, failures are collected. Returns the number of
-    // repaired items; a repair that fixed nothing but hit failures returns
-    // an Err carrying them.
-    pub async fn fix_check(&self, check_id: &str, mode: &str) -> CoreResult<u32> {
+    // attempted and counted, and the returned report names the failures.
+    // Returning the count alone would let the UI say "repaired 3 items"
+    // while two of them are still broken.
+    pub async fn fix_check(&self, check_id: &str, mode: &str) -> CoreResult<FixReport> {
         let mut fixed = 0u32;
         let mut failures = Vec::new();
         match (check_id, mode) {
@@ -1835,7 +2209,7 @@ impl DeepSeekHarness {
         if fixed == 0 && !failures.is_empty() {
             return Err(CoreError::InvalidState(failures.join("; ")));
         }
-        Ok(fixed)
+        Ok(FixReport { fixed, failures })
     }
 
     // Capture the current harness inventory into a portable snapshot.
@@ -1896,11 +2270,49 @@ impl DeepSeekHarness {
             if plugin.profile.is_empty() {
                 continue;
             }
-            self.install_plugin(&plugin.profile, &plugin.id).await?;
+            // Carry the exported version: installing the bare id would resolve
+            // whatever the registry's latest happens to be, so a snapshot
+            // would silently restore different versions than it captured.
+            let spec = match plugin.version.as_deref().map(str::trim) {
+                Some(version) if !version.is_empty() => format!("{}@{version}", plugin.id),
+                _ => plugin.id.clone(),
+            };
+            self.install_plugin(&plugin.profile, &spec).await?;
             report.plugins += 1;
         }
 
         Ok(report)
+    }
+
+    // A pre-import safety snapshot of the whole inventory, so a destructive
+    // import can be undone. Stored under `state/` next to the other runtime
+    // state and named for the import that replaced it.
+    pub fn write_restore_point(&self, reason: &str) -> CoreResult<Option<PathBuf>> {
+        let Some(dir) = self.data_dir.as_ref() else {
+            return Ok(None);
+        };
+        let snapshot = self.capture_snapshot_now()?;
+        let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+        let path = dir.join("state").join(format!("pre-{reason}-{stamp}.json"));
+        let text = serde_json::to_string_pretty(&snapshot).map_err(|err| {
+            CoreError::InvalidState(format!("failed to serialize restore point: {err}"))
+        })?;
+        deepmate_core::write_atomic_string(&path, &text)?;
+        Ok(Some(path))
+    }
+
+    // Capture without the async market lookups: the restore point only needs
+    // what the harness locally knows, and it must never fail on a slow
+    // network.
+    fn capture_snapshot_now(&self) -> CoreResult<Snapshot> {
+        Ok(Snapshot {
+            format: SNAPSHOT_FORMAT.to_string(),
+            created: chrono::Utc::now().to_rfc3339(),
+            profiles: discover_profiles()?,
+            providers: list_providers(WEB_PROFILE)?,
+            models: list_models(WEB_PROFILE)?,
+            plugins: list_all_plugins()?,
+        })
     }
 }
 
@@ -1944,6 +2356,18 @@ pub(crate) mod tests {
         }
         fn find_listener_pid(&self, _port: u16) -> Option<u32> {
             Some(self.0)
+        }
+        fn kill_process_force(&self, _pid: u32) -> deepmate_platform::PlatformResult<()> {
+            Ok(())
+        }
+        fn process_alive(&self, _pid: u32) -> bool {
+            true
+        }
+        fn process_command(&self, _pid: u32) -> Option<String> {
+            // No command line is available, so a recorded pid is accepted on
+            // the strength of the recording alone — the same position a real
+            // platform is in when `ps` cannot answer.
+            None
         }
     }
 
@@ -2057,9 +2481,15 @@ pub(crate) mod tests {
                    printf '%s\\n' \"$@\" > \"{}\"\n\
                    exit {}\n\
                  fi\n\
-                 exit 1\n",
+                 # Any other invocation stands in for a launcher that keeps\n\
+                 # serving in the foreground (`dsh web`); it records the\n\
+                 # arguments and stays alive until the caller stops it.\n\
+                 printf '%s\\n' \"$@\" > \"{}\"\n\
+                 sleep 5\n\
+                 exit 0\n",
                 recorded.display(),
-                exit_code
+                exit_code,
+                recorded.display(),
             ),
         )
         .unwrap();
@@ -4047,7 +4477,7 @@ llm-pi-ai:
             .with_data_dir(work.clone());
 
         let fixed = harness.fix_check("plugins.bundles", "clear").await.unwrap();
-        assert_eq!(fixed, 2);
+        assert_eq!(fixed.fixed, 2);
         // Stripping a stale declaration never needs the launcher.
         assert!(!recorded.exists());
         assert!(manifest_bundles(&home, "web").is_empty());
@@ -4079,7 +4509,7 @@ llm-pi-ai:
             .fix_check("plugins.bundles", "reinstall")
             .await
             .unwrap();
-        assert_eq!(fixed, 2);
+        assert_eq!(fixed.fixed, 2);
         // The fake CLI overwrites its record per invocation, so the file
         // holds the last forwarded add (sorted order: base first, mnemon
         // last); the count proves both ran.
@@ -4120,7 +4550,7 @@ llm-pi-ai:
             .fix_check("plugins.bundles.load", "reinstall")
             .await
             .unwrap();
-        assert_eq!(fixed, 1);
+        assert_eq!(fixed.fixed, 1);
         assert_eq!(
             std::fs::read_to_string(&recorded)
                 .unwrap()
@@ -4164,7 +4594,7 @@ llm-pi-ai:
             .with_ui_url(format!("http://{addr}"));
 
         let fixed = harness.fix_check("ui.reachable", "start").await.unwrap();
-        assert_eq!(fixed, 1);
+        assert_eq!(fixed.fixed, 1);
         assert!(work.join("state/run-web.pid").is_file());
 
         stop_probe_server(addr);
@@ -4233,7 +4663,7 @@ llm-pi-ai:
         assert!(err.to_string().contains("unsupported"));
         // Everything healthy: a clear fixes nothing and stays Ok.
         let fixed = harness.fix_check("plugins.bundles", "clear").await.unwrap();
-        assert_eq!(fixed, 0);
+        assert_eq!(fixed.fixed, 0);
 
         std::fs::remove_dir_all(&home).ok();
         std::fs::remove_dir_all(&work).ok();

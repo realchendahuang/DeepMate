@@ -42,7 +42,15 @@ pub fn target_triple() -> String {
     let arch = std::env::consts::ARCH;
     match std::env::consts::OS {
         "macos" => format!("{arch}-apple-darwin"),
-        "linux" => format!("{arch}-unknown-linux-gnu"),
+        // Linux releases are built against glibc; a musl-linked build (Alpine
+        // and friends) must not be told a gnu artifact is its own.
+        "linux" => {
+            if cfg!(target_env = "musl") {
+                format!("{arch}-unknown-linux-musl")
+            } else {
+                format!("{arch}-unknown-linux-gnu")
+            }
+        }
         "windows" => format!("{arch}-pc-windows-msvc"),
         os => format!("{arch}-unknown-{os}"),
     }
@@ -109,6 +117,30 @@ pub fn parse_checksum_file(text: &str) -> Option<String> {
         Some(hex)
     } else {
         None
+    }
+}
+
+// The digest a `.sha256` sidecar declares *for `asset_name`*.
+//
+// The published sidecars carry `<hash>  <filename>`; a sidecar whose filename
+// does not match the asset being verified is refused, so a swapped or stale
+// checksum file cannot vouch for a different artifact.
+pub fn parse_checksum_for(text: &str, asset_name: &str) -> Option<String> {
+    let digest = parse_checksum_file(text)?;
+    let declared = text.split_whitespace().nth(1);
+    match declared {
+        // `shasum` prefixes the name with `*` for binary mode.
+        Some(name) => {
+            let name = name.trim_start_matches('*');
+            if name == asset_name {
+                Some(digest)
+            } else {
+                None
+            }
+        }
+        // A bare digest is accepted: the release workflow always writes the
+        // filename, but a hand-made file is better verified than rejected.
+        None => Some(digest),
     }
 }
 
@@ -251,6 +283,26 @@ mod tests {
         );
         assert_eq!(parse_checksum_file("not-a-hash"), None);
         assert_eq!(parse_checksum_file(""), None);
+    }
+
+    #[test]
+    fn checksum_must_name_the_asset_it_verifies() {
+        let digest = "76d118ccbe166092fece8d8b6b65837a5ab54bb44bf88fd294e21e8f25fff44e";
+        let asset = "deepmate-0.7.0-aarch64-apple-darwin.dmg";
+        assert_eq!(
+            super::parse_checksum_for(&format!("{digest}  {asset}\n"), asset),
+            Some(digest.to_string())
+        );
+        // A sidecar naming a different artifact proves nothing about this one.
+        assert_eq!(
+            super::parse_checksum_for(&format!("{digest}  other-file.dmg\n"), asset),
+            None
+        );
+        // Binary-mode marker used by some `shasum` invocations.
+        assert_eq!(
+            super::parse_checksum_for(&format!("{digest} *{asset}\n"), asset),
+            Some(digest.to_string())
+        );
     }
 
     #[test]

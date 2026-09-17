@@ -21,6 +21,13 @@ interface PluginState {
   disabledPlugins: DisabledPlugin[];
   pluginsLoaded: boolean;
   marketEntries: MarketEntry[];
+  // Search state: a monotonic request id so a slow answer cannot overwrite a
+  // newer one (switching source or query while a search is in flight), and
+  // the failure of the last search so the page can distinguish "no results"
+  // from "the search did not run".
+  marketSeq: number;
+  marketSearching: boolean;
+  marketError: string | null;
   // Live plugin operation (install / remove / update): the event log the
   // progress strip renders, and whether an operation is in flight.
   opLog: PluginOpEvent[];
@@ -50,6 +57,9 @@ export const usePluginStore = create<PluginState>((set, get) => ({
   disabledPlugins: [],
   pluginsLoaded: false,
   marketEntries: [],
+  marketSeq: 0,
+  marketSearching: false,
+  marketError: null,
   opLog: [],
   opActive: false,
   loadPlugins: async () => {
@@ -72,11 +82,31 @@ export const usePluginStore = create<PluginState>((set, get) => ({
     await Promise.all([get().loadPlugins(), get().loadDisabledPlugins()]);
   },
   searchMarket: async (query: string) => {
-    const marketEntries = await runBusy("search", () => api.marketSearch(query));
-    set({ marketEntries });
+    // Only the newest search may write its result: without this, a slow
+    // response for a previous query (or the previous market source) landed
+    // after the user had moved on and replaced the visible list with data
+    // that did not match the current view.
+    const seq = get().marketSeq + 1;
+    set({ marketSeq: seq, marketSearching: true, marketError: null });
+    try {
+      const marketEntries = await runBusy("search", () => api.marketSearch(query));
+      if (get().marketSeq !== seq) return;
+      set({ marketEntries, marketSearching: false });
+    } catch (error) {
+      if (get().marketSeq !== seq) return;
+      set({ marketSearching: false, marketError: String(error) });
+      throw error;
+    }
   },
   resetMarket: () => {
-    set({ marketEntries: [] });
+    // Bumping the sequence also invalidates any in-flight search, so its
+    // result cannot repopulate a list the user just cleared.
+    set((s) => ({
+      marketEntries: [],
+      marketError: null,
+      marketSearching: false,
+      marketSeq: s.marketSeq + 1,
+    }));
   },
   marketInstall: async (profile: string, spec: string) => {
     await runBusy("install", async () => {

@@ -69,6 +69,7 @@ function ScenarioCreator() {
                 placeholder={t("settings.profileName")}
                 autoFocus
                 onKeyDown={(event) => {
+                  if (event.nativeEvent.isComposing) return;
                   if (event.key === "Enter") create();
                 }}
               />

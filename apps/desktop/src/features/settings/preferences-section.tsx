@@ -32,7 +32,8 @@ export function PreferencesSection() {
   const notifyUpdates = usePreferencesStore((s) => s.notifyUpdates);
   const autostart = usePreferencesStore((s) => s.autostart);
   const updateInfo = usePreferencesStore((s) => s.updateInfo);
-  const updateChecked = usePreferencesStore((s) => s.updateChecked);
+  const updateStatus = usePreferencesStore((s) => s.updateStatus);
+  const updateProgress = usePreferencesStore((s) => s.updateProgress);
   const busy = useBlocking();
 
   const [configImportPending, setConfigImportPending] = useState(false);
@@ -136,8 +137,27 @@ export function PreferencesSection() {
                   </Button>
                 </>
               )}
-              {updateChecked && !updateInfo && (
+              {/* The three outcomes are shown as three different things:
+                  claiming "up to date" after a failed check is worse than
+                  saying nothing. */}
+              {updateStatus === "up_to_date" && (
                 <span className="text-small text-text-dim">{t("settings.upToDate")}</span>
+              )}
+              {updateStatus === "failed" && (
+                <span className="text-small text-text-faint">
+                  {t("common.errors.updateCheckFailed")}
+                </span>
+              )}
+              {updateProgress && (
+                <span className="text-small text-text-dim" aria-live="polite">
+                  {t("settings.updateInstalling")}
+                  {updateProgress.total
+                    ? ` ${Math.min(
+                        100,
+                        Math.round((updateProgress.received / updateProgress.total) * 100),
+                      )}%`
+                    : ""}
+                </span>
               )}
             </div>
           </div>
@@ -169,9 +189,13 @@ export function PreferencesSection() {
         onOpenChange={setConfigImportPending}
         title={t("settings.importConfigConfirmTitle")}
         body={t("settings.importConfigConfirmBody")}
-        onConfirm={() => {
-          setConfigImportPending(false);
-          configImport();
+        confirmLabel={t("settings.importSettingsAction")}
+        onConfirm={async () => {
+          try {
+            await configImport();
+          } finally {
+            setConfigImportPending(false);
+          }
         }}
       />
     </section>

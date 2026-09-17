@@ -65,7 +65,7 @@ impl DataLayout {
             self.state_dir(),
             self.logs_dir(),
         ] {
-            fs::create_dir_all(&dir)?;
+            fs::create_dir_all(&dir).map_err(|err| CoreError::io_at(&dir, err))?;
         }
         Ok(())
     }
@@ -151,19 +151,36 @@ impl Config {
                 CoreError::InvalidState(format!("invalid config {}: {err}", path.display()))
             }),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(Config::default()),
-            Err(err) => Err(err.into()),
+            Err(err) => Err(CoreError::io_at(path, err)),
+        }
+    }
+
+    // Load configuration, recovering from a corrupt file.
+    //
+    // A config that fails to parse must never leave the app in a permanent
+    // error state, and must never be silently destroyed: the bad file is
+    // quarantined next to the config (see `fsutil::quarantine`) and the
+    // caller learns where it went, while a fresh defaults file is written so
+    // subsequent loads and saves succeed.
+    pub fn load_recovering(path: &Path) -> CoreResult<(Config, Option<PathBuf>)> {
+        match Self::load(path) {
+            Ok(config) => Ok((config, None)),
+            Err(err) if err.code() == "invalid_state" => {
+                let quarantined = crate::fsutil::quarantine(path).ok();
+                let config = Config::default();
+                config.save(path)?;
+                Ok((config, quarantined))
+            }
+            Err(err) => Err(err),
         }
     }
 
     // Write configuration as TOML, creating parent directories as needed.
+    // The write is atomic: a crash can never leave a half-written file.
     pub fn save(&self, path: &Path) -> CoreResult<()> {
         let text = toml::to_string_pretty(self)
             .map_err(|err| CoreError::InvalidState(format!("failed to serialize config: {err}")))?;
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::write(path, text)?;
-        Ok(())
+        crate::fsutil::write_atomic_string(path, &text)
     }
 }
 
@@ -192,10 +209,16 @@ impl ActionRecord {
 }
 
 // Append-oriented JSONL history of DeepMate actions.
+//
+// The file is capped so it cannot grow without bound: once it exceeds
+// `MAX_HISTORY_BYTES` it is rotated to a single `actions.1.jsonl` generation.
 #[derive(Debug, Clone)]
 pub struct History {
     path: PathBuf,
 }
+
+// Rotate the history file once it grows past this size.
+const MAX_HISTORY_BYTES: u64 = 1 << 20;
 
 impl History {
     pub fn new(path: impl Into<PathBuf>) -> Self {
@@ -209,8 +232,9 @@ impl History {
     // Append one record, creating the file and parent directory as needed.
     pub fn record(&self, record: &ActionRecord) -> CoreResult<()> {
         if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent)?;
+            fs::create_dir_all(parent).map_err(|err| CoreError::io_at(parent, err))?;
         }
+        self.rotate_if_needed()?;
         let mut line = serde_json::to_string(record).map_err(|err| {
             CoreError::InvalidState(format!("failed to serialize history record: {err}"))
         })?;
@@ -218,26 +242,53 @@ impl History {
         let mut file = fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open(&self.path)?;
-        file.write_all(line.as_bytes())?;
+            .open(&self.path)
+            .map_err(|err| CoreError::io_at(&self.path, err))?;
+        file.write_all(line.as_bytes())
+            .map_err(|err| CoreError::io_at(&self.path, err))?;
         Ok(())
     }
 
-    // Read all records, for inspection, tests and diagnostics.
+    // Move the history aside when it outgrows its cap. Only one old
+    // generation is kept; the previous one is replaced.
+    fn rotate_if_needed(&self) -> CoreResult<()> {
+        let size = match fs::metadata(&self.path) {
+            Ok(meta) => meta.len(),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(err) => return Err(CoreError::io_at(&self.path, err)),
+        };
+        if size < MAX_HISTORY_BYTES {
+            return Ok(());
+        }
+        let rotated = self.path.with_file_name("actions.1.jsonl");
+        let _ = fs::remove_file(&rotated);
+        fs::rename(&self.path, &rotated).map_err(|err| CoreError::io_at(&self.path, err))
+    }
+
+    // Read all records for inspection and diagnostics.
+    //
+    // A damaged line (a truncated append after a crash, a hand edit) is
+    // skipped instead of failing the whole file; the number of skipped lines
+    // is reported alongside the records.
     pub fn read(&self) -> CoreResult<Vec<ActionRecord>> {
+        Ok(self.read_lenient()?.0)
+    }
+
+    pub fn read_lenient(&self) -> CoreResult<(Vec<ActionRecord>, usize)> {
         let text = match fs::read_to_string(&self.path) {
             Ok(text) => text,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(err) => return Err(err.into()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok((Vec::new(), 0)),
+            Err(err) => return Err(CoreError::io_at(&self.path, err)),
         };
-        text.lines()
-            .filter(|line| !line.trim().is_empty())
-            .map(|line| {
-                serde_json::from_str(line).map_err(|err| {
-                    CoreError::InvalidState(format!("invalid history record: {err}"))
-                })
-            })
-            .collect()
+        let mut records = Vec::new();
+        let mut skipped = 0usize;
+        for line in text.lines().filter(|line| !line.trim().is_empty()) {
+            match serde_json::from_str(line) {
+                Ok(record) => records.push(record),
+                Err(_) => skipped += 1,
+            }
+        }
+        Ok((records, skipped))
     }
 }
 
@@ -313,5 +364,64 @@ mod tests {
         let dir = temp_dir();
         let history = History::new(dir.join("history").join("actions.jsonl"));
         assert!(history.read().unwrap().is_empty());
+    }
+
+    #[test]
+    fn config_recovering_quarantines_a_corrupt_file() {
+        let dir = temp_dir();
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        fs::write(&path, "not [valid toml").unwrap();
+
+        let (config, quarantined) = Config::load_recovering(&path).unwrap();
+        assert_eq!(config, Config::default());
+
+        let quarantined = quarantined.expect("corrupt file is quarantined");
+        assert_eq!(fs::read_to_string(&quarantined).unwrap(), "not [valid toml");
+        // The config path holds a usable defaults file again.
+        assert_eq!(Config::load(&path).unwrap(), Config::default());
+    }
+
+    #[test]
+    fn history_skips_damaged_lines_instead_of_failing() {
+        let dir = temp_dir();
+        let layout = DataLayout::new(&dir);
+        layout.ensure().unwrap();
+        let history = layout.history();
+        history.record(&ActionRecord::new("test.one")).unwrap();
+        {
+            use std::io::Write as _;
+            let mut file = fs::OpenOptions::new()
+                .append(true)
+                .open(history.path())
+                .unwrap();
+            // A truncated append after a crash.
+            file.write_all(b"{\"time\":\"2026-01-01T00:00:00Z\"")
+                .unwrap();
+            file.write_all(b"\n").unwrap();
+        }
+        history.record(&ActionRecord::new("test.two")).unwrap();
+
+        let (records, skipped) = history.read_lenient().unwrap();
+        assert_eq!(skipped, 1);
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[1].action, "test.two");
+    }
+
+    #[test]
+    fn history_rotates_past_the_size_cap() {
+        let dir = temp_dir();
+        fs::create_dir_all(&dir).unwrap();
+        let history = History::new(dir.join("actions.jsonl"));
+        // Pre-seed an oversized file and verify the next append rotates it.
+        fs::write(history.path(), "x".repeat((1 << 20) as usize)).unwrap();
+        history
+            .record(&ActionRecord::new("after.rotation"))
+            .unwrap();
+
+        assert!(dir.join("actions.1.jsonl").exists());
+        let records = history.read().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].action, "after.rotation");
     }
 }

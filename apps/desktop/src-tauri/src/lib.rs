@@ -26,12 +26,23 @@ pub fn run() {
     let platform = SystemPlatform;
     let data_dir = match &cli.data_dir {
         Some(dir) => dir.clone(),
-        None => platform.data_dir().expect("failed to resolve data dir"),
+        None => match platform.data_dir() {
+            Ok(dir) => dir,
+            Err(err) => {
+                return fatal_startup(
+                    "Cannot determine the DeepMate data folder",
+                    &err.to_string(),
+                )
+            }
+        },
     };
     let layout = deepmate_core::data::DataLayout::new(data_dir);
-    layout
-        .ensure()
-        .expect("failed to initialize the DeepMate data directory");
+    if let Err(err) = layout.ensure() {
+        return fatal_startup(
+            "Cannot create the DeepMate data folder",
+            &format!("{err}\n\nData folder: {}", layout.root().display()),
+        );
+    }
 
     let config = load_config_or_default(&layout);
     let _guard = init_tracing(&layout.logs_dir());
@@ -100,6 +111,9 @@ pub fn run() {
                 });
             }
             setup_tray(app, &language)?;
+            if check_updates_on_start {
+                request_notification_permission(&app.handle().clone());
+            }
 
             // Announce a newer release when the automatic check is on, so a
             // resident (tray-hidden) DeepMate still surfaces it. The webview
@@ -108,7 +122,10 @@ pub fn run() {
                 let handle = app.handle().clone();
                 let language = language.clone();
                 tauri::async_runtime::spawn(async move {
-                    if let Some(info) = commands::latest_release().await {
+                    // The automatic check speaks only when a release
+                    // exists: errors stay in the log, and "up to date" needs
+                    // no announcement.
+                    if let Ok(Some(info)) = commands::latest_release().await {
                         let zh = language == "zh";
                         let title = format!("DeepMate v{}", info.latest_version);
                         let body = if zh {
@@ -182,11 +199,13 @@ fn setup_tray(app: &tauri::App, language: &str) -> tauri::Result<()> {
                     let handle = app.clone();
                     tauri::async_runtime::spawn(async move {
                         // An explicit tray check always reports its outcome,
-                        // regardless of the notification preference.
+                        // regardless of the notification preference — and it
+                        // says "could not check" when that is what happened,
+                        // instead of claiming the app is up to date.
+                        let zh = language == "zh";
                         match commands::latest_release().await {
-                            Some(info) => {
+                            Ok(Some(info)) => {
                                 show_main_window(&handle);
-                                let zh = language == "zh";
                                 let title = format!("DeepMate v{}", info.latest_version);
                                 let body = if zh {
                                     "新版本已发布。".to_string()
@@ -195,15 +214,21 @@ fn setup_tray(app: &tauri::App, language: &str) -> tauri::Result<()> {
                                 };
                                 notify(&handle, &title, &body);
                             }
-                            None => {
-                                let zh = language == "zh";
-                                let title = "DeepMate";
+                            Ok(None) => {
                                 let body = if zh {
                                     "已是最新版本。".to_string()
                                 } else {
                                     "You're on the latest version.".to_string()
                                 };
-                                notify(&handle, title, &body);
+                                notify(&handle, "DeepMate", &body);
+                            }
+                            Err(message) => {
+                                let body = if zh {
+                                    format!("检查更新失败：{message}")
+                                } else {
+                                    format!("Update check failed: {message}")
+                                };
+                                notify(&handle, "DeepMate", &body);
                             }
                         }
                     });
@@ -224,12 +249,85 @@ fn setup_tray(app: &tauri::App, language: &str) -> tauri::Result<()> {
 }
 
 // Best-effort system notification; a missing permission or unsupported
-// platform must never take the app down.
+// platform must never take the app down. The permission is requested once at
+// startup, so by the time anything is shown the grant (or the refusal) is
+// already settled.
 fn notify(app: &tauri::AppHandle, title: &str, body: &str) {
     use tauri_plugin_notification::NotificationExt;
     if let Err(err) = app.notification().builder().title(title).body(body).show() {
         tracing::warn!(error = %err, "failed to show a notification");
     }
+}
+
+// Ask for the notification permission up front, so a later update
+// notification is not silently dropped. A refusal is recorded and the user
+// keeps a working app.
+fn request_notification_permission(app: &tauri::AppHandle) {
+    use tauri_plugin_notification::NotificationExt;
+    match app.notification().request_permission() {
+        Ok(tauri_plugin_notification::PermissionState::Granted) => {}
+        Ok(state) => tracing::info!(?state, "notification permission not granted"),
+        Err(err) => tracing::warn!(error = %err, "failed to request the notification permission"),
+    }
+}
+
+// An unrecoverable startup problem (no data directory, unwritable disk) is
+// reported in a native dialog before the app exits.
+//
+// This runs before the Tauri application exists (there is no window to host a
+// dialog yet), so the message goes through the OS: `osascript` on macOS,
+// `zenity`/`kdialog` on Linux, a message box on Windows. A panic here would
+// make the window flash and vanish, which reads as "the app is broken" with
+// no explanation at all.
+fn fatal_startup(title: &str, detail: &str) {
+    let message = format!("{title}\n\n{detail}");
+    #[cfg(target_os = "macos")]
+    {
+        let script = format!(
+            "display dialog {} with title {} buttons {{\"OK\"}} default button 1 with icon stop",
+            applescript_quote(&message),
+            applescript_quote("DeepMate"),
+        );
+        let _ = std::process::Command::new("osascript")
+            .args(["-e", &script])
+            .status();
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let script = format!(
+            "[System.Reflection.Assembly]::LoadWithPartialName('PresentationFramework') | Out-Null; [System.Windows.MessageBox]::Show({}, 'DeepMate')",
+            powershell_quote(&message),
+        );
+        let _ = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", &script])
+            .status();
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        if std::process::Command::new("zenity")
+            .args(["--error", "--title", "DeepMate", "--text", &message])
+            .status()
+            .is_err()
+        {
+            let _ = std::process::Command::new("kdialog")
+                .args(["--error", &message, "--title", "DeepMate"])
+                .status();
+        }
+    }
+    eprintln!("{title}: {detail}");
+    std::process::exit(1);
+}
+
+// Escape a string for embedding in an AppleScript literal.
+#[cfg(target_os = "macos")]
+fn applescript_quote(text: &str) -> String {
+    format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+// Escape a string for embedding in a PowerShell single-quoted literal.
+#[cfg(target_os = "windows")]
+fn powershell_quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "''"))
 }
 
 fn show_main_window<R: tauri::Runtime>(app: &impl tauri::Manager<R>) {
@@ -269,7 +367,6 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
             commands::remove_provider,
             commands::upsert_model,
             commands::remove_model,
-            commands::create_profile,
             commands::create_scenario,
             commands::remove_profile,
             commands::rename_profile,
@@ -341,4 +438,72 @@ fn export_bindings() {
 #[test]
 fn export_bindings_headless() {
     export_bindings();
+}
+
+// The capability grant and the command surface must agree.
+//
+// Declaring an app ACL manifest turns on enforcement: from then on a command
+// the webview invokes is rejected unless a capability grants it. A name that
+// drifts (a rename on one side, a forgotten entry on the other) would show up
+// as a runtime "command not allowed" in the UI, so it is checked here
+// instead.
+#[test]
+fn capability_grants_every_registered_command() {
+    use std::collections::BTreeSet;
+
+    // The commands the invoke handler registers, taken from the same source
+    // the builder uses.
+    let registered = registered_command_names();
+    assert!(!registered.is_empty());
+
+    let permissions = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/permissions/deepmate.toml"
+    ))
+    .expect("permissions/deepmate.toml must exist");
+
+    let granted: BTreeSet<String> = permissions
+        .lines()
+        .skip_while(|line| !line.starts_with("commands.allow"))
+        .skip(1)
+        .take_while(|line| !line.trim_start().starts_with(']'))
+        .filter_map(|line| {
+            let name = line.trim().trim_end_matches(',').trim_matches('"');
+            (!name.is_empty()).then(|| name.to_string())
+        })
+        .collect();
+    assert!(
+        !granted.is_empty(),
+        "no commands are granted by the capability"
+    );
+
+    let missing: Vec<&String> = registered.difference(&granted).collect();
+    assert!(
+        missing.is_empty(),
+        "these commands are registered but not granted by permissions/deepmate.toml: {missing:?}"
+    );
+
+    let stale: Vec<&String> = granted.difference(&registered).collect();
+    assert!(
+        stale.is_empty(),
+        "these commands are granted but no longer registered: {stale:?}"
+    );
+}
+
+// The registered command names, read from this file's own `collect_commands!`
+// invocation so the list cannot drift from the real registration.
+#[cfg(test)]
+fn registered_command_names() -> std::collections::BTreeSet<String> {
+    let source = include_str!("lib.rs");
+    let body = source
+        .split("tauri_specta::collect_commands![")
+        .nth(1)
+        .and_then(|rest| rest.split("])").next())
+        .expect("the command list must exist");
+    body.split(',')
+        .filter_map(|entry| entry.trim().split("::").last())
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .collect()
 }

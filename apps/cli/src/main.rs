@@ -1,3 +1,4 @@
+use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -6,7 +7,7 @@ use clap::{Parser, Subcommand};
 use deepmate_app::{build_harness, init_tracing, load_config_or_default, record_action};
 use deepmate_core::model::{
     is_outdated, CompatStatus, MarketEntry, MarketSourceInfo, Model, Plugin, PluginOpEvent,
-    Profile, Provider, RuntimeStatusKind, Surface,
+    PluginOpKind, Profile, Provider, RuntimeStatusKind, Surface,
 };
 use deepmate_core::DataLayout;
 use deepmate_platform::{PlatformService, SystemPlatform};
@@ -315,10 +316,19 @@ enum SnapshotAction {
         /// Snapshot name (stored as `snapshots/<name>.json`).
         name: String,
     },
-    /// Apply a stored snapshot (merge-style).
+    /// Apply a stored snapshot (merge-style). Overwrites the current setup,
+    /// so the current inventory is saved to `state/pre-snapshot-import-*.json`
+    /// first and the command asks for confirmation unless `--yes` is given.
     Import {
         /// Snapshot name to import.
         name: String,
+        /// Skip the confirmation prompt (required when stdin is not a
+        /// terminal).
+        #[arg(long)]
+        yes: bool,
+        /// Show what would be applied without changing anything.
+        #[arg(long)]
+        dry_run: bool,
     },
     /// List stored snapshots.
     List,
@@ -331,17 +341,69 @@ enum ConfigAction {
         /// Destination path for the backup document.
         path: PathBuf,
     },
-    /// Replace DeepMate's own settings from a portable JSON file.
+    /// Replace DeepMate's own settings from a portable JSON file. The
+    /// current settings are saved to `state/pre-config-import-*.json` first.
     Import {
         /// Path of the backup document to apply.
         path: PathBuf,
+        /// Skip the confirmation prompt (required when stdin is not a
+        /// terminal).
+        #[arg(long)]
+        yes: bool,
     },
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let cli = Cli::parse();
+// Exit codes the CLI contract promises. Anything unmapped still exits 1, but
+// scripts can branch on the classifications that have a defined meaning.
+const EXIT_FAILURE: i32 = 1;
+const EXIT_TIMEOUT: i32 = 2;
+const EXIT_DOCTOR_UNHEALTHY: i32 = 3;
 
+#[tokio::main]
+async fn main() {
+    let cli = Cli::parse();
+    match dispatch(cli).await {
+        Ok(code) => std::process::exit(code),
+        Err(err) => {
+            // The failure contract follows `--json`: a script that asked for
+            // machine output gets a machine-readable error, not a prose line
+            // on stderr it has to parse.
+            let core = err.downcast_ref::<deepmate_core::CoreError>();
+            if json_requested() {
+                let payload = match core {
+                    Some(core) => serde_json::json!({
+                        "ok": false,
+                        "code": core.code(),
+                        "message": core.to_string(),
+                    }),
+                    None => serde_json::json!({
+                        "ok": false,
+                        "code": "error",
+                        "message": format!("{err:#}"),
+                    }),
+                };
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&payload).unwrap_or_default()
+                );
+            } else {
+                eprintln!("error: {err:#}");
+            }
+            std::process::exit(match core {
+                Some(deepmate_core::CoreError::Timeout(_)) => EXIT_TIMEOUT,
+                _ => EXIT_FAILURE,
+            });
+        }
+    }
+}
+
+// Whether `--json` appeared on the command line (parsed before clap so the
+// error path can consult it without a successfully built `Cli`).
+fn json_requested() -> bool {
+    std::env::args().any(|arg| arg == "--json")
+}
+
+async fn dispatch(cli: Cli) -> anyhow::Result<i32> {
     let platform = Arc::new(SystemPlatform);
     let data_dir = match &cli.data_dir {
         Some(dir) => dir.clone(),
@@ -363,22 +425,31 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let harness = build_harness(&layout);
-    let action = run(&cli, &harness, &layout).await?;
+    let (action, exit_code) = run(&cli, &harness, &layout).await?;
 
     // History recording is best-effort: a read-only data directory must not
     // break the command itself.
     record_action(&layout, action);
-    Ok(())
+    Ok(exit_code)
 }
 
-// Dispatch the command and return the history action name on success.
-async fn run(cli: &Cli, harness: &DeepSeekHarness, layout: &DataLayout) -> anyhow::Result<String> {
+// Dispatch the command, returning the history action name and the process
+// exit code. `doctor` is the one command whose result *is* a status: a failing
+// check must be visible to a script that only looks at `$?`, which previously
+// always saw 0.
+async fn run(
+    cli: &Cli,
+    harness: &DeepSeekHarness,
+    layout: &DataLayout,
+) -> anyhow::Result<(String, i32)> {
+    // Set by commands whose result doubles as a status (doctor today).
+    let mut exit_code = 0i32;
     // DeepMate's own settings are harness-independent, so the backup commands
     // run before the harness is consulted. The self-update is the same: it
     // replaces the running binary and has nothing to do with a harness.
     if matches!(cli.command, Command::Update) {
         update_self(cli.json).await?;
-        return Ok("cli.update".to_string());
+        return Ok(("cli.update".to_string(), 0));
     }
 
     if let Command::Config { action } = &cli.command {
@@ -392,10 +463,31 @@ async fn run(cli: &Cli, harness: &DeepSeekHarness, layout: &DataLayout) -> anyho
                 } else {
                     println!("exported DeepMate settings to {}", path.display());
                 }
-                Ok("cli.config.export".to_string())
+                Ok(("cli.config.export".to_string(), 0))
             }
-            ConfigAction::Import { path } => {
+            ConfigAction::Import { path, yes } => {
                 let backup = deepmate_core::ConfigBackup::load(path)?;
+                confirm_destructive(
+                    *yes,
+                    cli.json,
+                    &format!(
+                        "importing {} replaces the current DeepMate settings",
+                        path.display()
+                    ),
+                )?;
+                // Keep the settings being replaced so the import is
+                // reversible with the same command pointed at the copy.
+                let current = deepmate_core::Config::load(&layout.config_path())?;
+                let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+                let saved = layout
+                    .state_dir()
+                    .join(format!("pre-config-import-{stamp}.json"));
+                deepmate_core::ConfigBackup::capture(&current)
+                    .save(&saved)
+                    .with_context(|| format!("failed to save {}", saved.display()))?;
+                if !cli.json {
+                    println!("saved the previous settings to {}", saved.display());
+                }
                 backup
                     .config
                     .save(&layout.config_path())
@@ -408,7 +500,7 @@ async fn run(cli: &Cli, harness: &DeepSeekHarness, layout: &DataLayout) -> anyho
                         "note: re-open the desktop app (or re-run commands) for the new settings to take effect"
                     );
                 }
-                Ok("cli.config.import".to_string())
+                Ok(("cli.config.import".to_string(), 0))
             }
         };
     }
@@ -436,6 +528,7 @@ async fn run(cli: &Cli, harness: &DeepSeekHarness, layout: &DataLayout) -> anyho
         }
         Command::Status { scenario } => {
             let profile = scenario.as_deref().unwrap_or("web");
+            require_scenario(harness, profile).await?;
             let status = harness.status_scenario(profile).await?;
             if cli.json {
                 println!("{}", serde_json::to_string_pretty(&status)?);
@@ -453,6 +546,7 @@ async fn run(cli: &Cli, harness: &DeepSeekHarness, layout: &DataLayout) -> anyho
         }
         Command::Open { scenario } => {
             let profile = scenario.as_deref().unwrap_or("web");
+            require_scenario(harness, profile).await?;
             harness.open_ui_scenario(profile).await?;
             if cli.json {
                 println!("{}", serde_json::json!({ "opened": true }));
@@ -463,6 +557,15 @@ async fn run(cli: &Cli, harness: &DeepSeekHarness, layout: &DataLayout) -> anyho
         }
         Command::Doctor => {
             let report = harness.doctor().await?;
+            // A failing check is a status a script must be able to see; the
+            // command still prints the full report either way.
+            if report
+                .checks
+                .iter()
+                .any(|check| check.status == deepmate_core::CheckStatus::Fail)
+            {
+                exit_code = EXIT_DOCTOR_UNHEALTHY;
+            }
             if cli.json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
@@ -483,6 +586,7 @@ async fn run(cli: &Cli, harness: &DeepSeekHarness, layout: &DataLayout) -> anyho
             let name = match action {
                 RuntimeAction::Start { scenario, port } => {
                     let profile = scenario.clone().unwrap_or_else(|| "web".to_string());
+                    require_scenario(harness, &profile).await?;
                     harness.start_scenario(&profile, *port).await?;
                     "start"
                 }
@@ -495,12 +599,14 @@ async fn run(cli: &Cli, harness: &DeepSeekHarness, layout: &DataLayout) -> anyho
                         }
                     } else {
                         let profile = scenario.clone().unwrap_or_else(|| "web".to_string());
+                        require_scenario(harness, &profile).await?;
                         harness.stop_scenario(&profile).await?;
                     }
                     "stop"
                 }
                 RuntimeAction::Restart { scenario } => {
                     let profile = scenario.clone().unwrap_or_else(|| "web".to_string());
+                    require_scenario(harness, &profile).await?;
                     harness.restart_scenario(&profile).await?;
                     "restart"
                 }
@@ -540,22 +646,58 @@ async fn run(cli: &Cli, harness: &DeepSeekHarness, layout: &DataLayout) -> anyho
                     let (tx, mut rx) = tokio::sync::mpsc::channel(64);
                     let stream = harness.run_task(&profile, &prompt, tx);
                     tokio::pin!(stream);
+                    let mut finished: Option<(bool, Option<String>)> = None;
                     loop {
                         tokio::select! {
                             event = rx.recv() => {
                                 if let Some(event) = event {
                                     match event {
-                                        PluginOpEvent::Line { text } => println!("{text}"),
-                                        PluginOpEvent::Finished {
-                                            ok: false,
-                                            detail: Some(detail),
-                                        } => eprintln!("{detail}"),
+                                        PluginOpEvent::Line { text } => {
+                                            if cli.json {
+                                                println!(
+                                                    "{}",
+                                                    serde_json::json!({"event": "line", "text": text})
+                                                );
+                                            } else {
+                                                println!("{text}");
+                                            }
+                                        }
+                                        PluginOpEvent::Finished { ok, detail } => {
+                                            if cli.json {
+                                                println!(
+                                                    "{}",
+                                                    serde_json::json!({
+                                                        "event": "finished",
+                                                        "ok": ok,
+                                                        "detail": detail,
+                                                    })
+                                                );
+                                            } else if !ok {
+                                                if let Some(detail) = &detail {
+                                                    eprintln!("{detail}");
+                                                }
+                                            }
+                                            finished = Some((ok, detail));
+                                        }
                                         _ => {}
                                     }
                                 }
                             }
                             result = &mut stream => {
-                                result?;
+                                // The stream's own result is authoritative: a
+                                // task may end without a Finished event when
+                                // it fails before the child starts.
+                                match result {
+                                    Ok(()) => {
+                                        if let Some((false, detail)) = finished {
+                                            return Err(anyhow!(
+                                                "{}",
+                                                detail.unwrap_or_else(|| "task failed".to_string())
+                                            ));
+                                        }
+                                    }
+                                    Err(err) => return Err(err.into()),
+                                }
                                 break;
                             }
                         }
@@ -563,10 +705,11 @@ async fn run(cli: &Cli, harness: &DeepSeekHarness, layout: &DataLayout) -> anyho
                     "task"
                 }
             };
-            if cli.json && name != "list" && name != "task" {
-                println!("{}", serde_json::json!({ "ok": true }));
-            } else if !cli.json && name != "list" && name != "task" {
-                println!("runtime command completed");
+            match name {
+                // `list` and `task` print their own structured output.
+                "list" | "task" => {}
+                _ if cli.json => println!("{}", serde_json::json!({ "ok": true })),
+                _ => println!("runtime command completed"),
             }
             format!("cli.runtime.{name}")
         }
@@ -608,6 +751,7 @@ async fn run(cli: &Cli, harness: &DeepSeekHarness, layout: &DataLayout) -> anyho
             let action_name = match action {
                 ProviderAction::List { scenario } => {
                     let profile = scenario.clone().unwrap_or_else(|| "web".to_string());
+                    require_scenario(harness, &profile).await?;
                     print_list(
                         "providers",
                         harness.providers_scenario(&profile).await?,
@@ -625,6 +769,7 @@ async fn run(cli: &Cli, harness: &DeepSeekHarness, layout: &DataLayout) -> anyho
                     compat,
                 } => {
                     let profile = scenario.clone().unwrap_or_else(|| "web".to_string());
+                    require_scenario(harness, &profile).await?;
                     let provider = Provider {
                         id: id.clone(),
                         name: name.clone().unwrap_or_else(|| id.clone()),
@@ -648,6 +793,7 @@ async fn run(cli: &Cli, harness: &DeepSeekHarness, layout: &DataLayout) -> anyho
                 }
                 ProviderAction::Remove { scenario, id } => {
                     let profile = scenario.clone().unwrap_or_else(|| "web".to_string());
+                    require_scenario(harness, &profile).await?;
                     harness.remove_provider_scenario(&profile, id).await?;
                     if cli.json {
                         println!("{}", serde_json::json!({ "ok": true }));
@@ -663,6 +809,7 @@ async fn run(cli: &Cli, harness: &DeepSeekHarness, layout: &DataLayout) -> anyho
             let action_name = match action {
                 ModelAction::List { scenario } => {
                     let profile = scenario.clone().unwrap_or_else(|| "web".to_string());
+                    require_scenario(harness, &profile).await?;
                     print_list("models", harness.models_scenario(&profile).await?, cli.json)?;
                     "list"
                 }
@@ -696,6 +843,7 @@ async fn run(cli: &Cli, harness: &DeepSeekHarness, layout: &DataLayout) -> anyho
                         compat: compat.clone(),
                     };
                     let profile = scenario.clone().unwrap_or_else(|| "web".to_string());
+                    require_scenario(harness, &profile).await?;
                     harness
                         .upsert_model_scenario(&profile, provider, model)
                         .await?;
@@ -714,6 +862,7 @@ async fn run(cli: &Cli, harness: &DeepSeekHarness, layout: &DataLayout) -> anyho
                     id,
                 } => {
                     let profile = scenario.clone().unwrap_or_else(|| "web".to_string());
+                    require_scenario(harness, &profile).await?;
                     harness
                         .remove_model_scenario(&profile, provider, id)
                         .await?;
@@ -744,12 +893,10 @@ async fn run(cli: &Cli, harness: &DeepSeekHarness, layout: &DataLayout) -> anyho
                 force,
             } => {
                 preflight_compat(harness, spec, *force).await?;
-                harness.install_plugin(profile, spec).await?;
-                if cli.json {
-                    println!("{}", serde_json::json!({ "ok": true }));
-                } else {
-                    println!("installed {spec} into profile {profile}");
-                }
+                // Streamed, not silent: a pnpm install can take a minute and
+                // the child's progress lines are what tells the user it is
+                // working rather than hung.
+                stream_plugin_op(harness, profile, PluginOpKind::Install, spec, cli.json).await?;
                 "cli.plugin.install".to_string()
             }
             PluginAction::Check { spec } => {
@@ -766,42 +913,41 @@ async fn run(cli: &Cli, harness: &DeepSeekHarness, layout: &DataLayout) -> anyho
                 "cli.plugin.check".to_string()
             }
             PluginAction::Remove { id, profile } => {
-                harness.remove_plugin(profile, id).await?;
-                if cli.json {
-                    println!("{}", serde_json::json!({ "ok": true }));
-                } else {
-                    println!("removed {id} from profile {profile}");
-                }
+                stream_plugin_op(harness, profile, PluginOpKind::Remove, id, cli.json).await?;
                 "cli.plugin.remove".to_string()
             }
             PluginAction::Disable { id, profile } => {
+                // Uses the harness method rather than a bare `plugin remove`:
+                // disabling records the package spec so `enable` can restore
+                // the same version range.
                 harness.disable_plugin(profile, id).await?;
                 if cli.json {
-                    println!("{}", serde_json::json!({ "ok": true }));
+                    println!("{}", serde_json::json!({ "ok": true, "disabled": id }));
                 } else {
-                    println!("disabled {id} in profile {profile}");
+                    println!("disabled {id} in scenario {profile}");
                 }
                 "cli.plugin.disable".to_string()
             }
             PluginAction::Enable { id, profile } => {
                 harness.enable_plugin(profile, id).await?;
                 if cli.json {
-                    println!("{}", serde_json::json!({ "ok": true }));
+                    println!("{}", serde_json::json!({ "ok": true, "enabled": id }));
                 } else {
-                    println!("enabled {id} in profile {profile}");
+                    println!("enabled {id} in scenario {profile}");
                 }
                 "cli.plugin.enable".to_string()
             }
             PluginAction::Update { id, profile } => {
-                harness.update_plugin(profile, id.as_deref()).await?;
-                if cli.json {
-                    println!("{}", serde_json::json!({ "ok": true }));
-                } else {
-                    match id {
-                        Some(id) => println!("updated {id} in profile {profile}"),
-                        None => println!("updated all plugins in profile {profile}"),
-                    }
-                }
+                // Streamed, like install: `plugin update` can rewrite the
+                // whole dependency tree and takes minutes.
+                stream_plugin_op(
+                    harness,
+                    profile,
+                    PluginOpKind::Update,
+                    id.as_deref().unwrap_or(""),
+                    cli.json,
+                )
+                .await?;
                 "cli.plugin.update".to_string()
             }
         },
@@ -836,8 +982,41 @@ async fn run(cli: &Cli, harness: &DeepSeekHarness, layout: &DataLayout) -> anyho
                     }
                     "cli.snapshot.export".to_string()
                 }
-                SnapshotAction::Import { name } => {
+                SnapshotAction::Import { name, yes, dry_run } => {
                     let snapshot = store.load(name)?;
+                    if *dry_run {
+                        println!("{}", serde_json::to_string_pretty(&snapshot)?);
+                        if !cli.json {
+                            println!(
+                                "dry run: would apply {} profiles, {} providers, {} models, {} plugins (nothing changed)",
+                                snapshot.profiles.len(),
+                                snapshot.providers.len(),
+                                snapshot.models.len(),
+                                snapshot.plugins.len()
+                            );
+                        }
+                        return Ok(("cli.snapshot.import".to_string(), 0));
+                    }
+                    confirm_destructive(
+                        *yes,
+                        cli.json,
+                        &format!(
+                            "importing snapshot {name} overwrites the current scenarios, providers and models"
+                        ),
+                    )?;
+                    // A restore point is written first: importing is a
+                    // replacement, and there was previously no way back.
+                    match harness.write_restore_point("snapshot-import") {
+                        Ok(Some(path)) => {
+                            if !cli.json {
+                                println!("saved a restore point to {}", path.display());
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(err) => return Err(err).context(
+                            "refusing to import: the pre-import restore point could not be written",
+                        ),
+                    }
                     let report = harness.apply_snapshot(&snapshot).await?;
                     if cli.json {
                         println!("{}", serde_json::to_string_pretty(&report)?);
@@ -863,7 +1042,117 @@ async fn run(cli: &Cli, harness: &DeepSeekHarness, layout: &DataLayout) -> anyho
             }
         }
     };
-    Ok(action)
+    Ok((action, exit_code))
+}
+
+// Run a plugin operation with its output forwarded to the terminal. The
+// failure detail comes back through the event stream (the harness service
+// reports the same text the desktop shows).
+async fn stream_plugin_op(
+    harness: &DeepSeekHarness,
+    profile: &str,
+    kind: PluginOpKind,
+    target: &str,
+    json: bool,
+) -> anyhow::Result<()> {
+    let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+    let stream = harness.stream_plugin_op(profile, kind, Some(target), tx);
+    tokio::pin!(stream);
+    let mut failure: Option<String> = None;
+    loop {
+        tokio::select! {
+            event = rx.recv() => {
+                match event {
+                    Some(PluginOpEvent::Line { text }) => {
+                        if json {
+                            println!("{}", serde_json::json!({"event": "line", "text": text}));
+                        } else {
+                            println!("{text}");
+                        }
+                    }
+                    Some(PluginOpEvent::Finished { ok: false, detail }) => {
+                        failure = detail;
+                    }
+                    Some(_) => {}
+                    None => {}
+                }
+            }
+            result = &mut stream => {
+                match result {
+                    Ok(()) => {
+                        if json {
+                            println!("{}", serde_json::json!({"ok": true}));
+                        } else {
+                            println!("done: {} {}", kind_word(kind), target);
+                        }
+                        return Ok(());
+                    }
+                    Err(err) => {
+                        let message = failure.unwrap_or_else(|| err.to_string());
+                        return Err(anyhow!("{message}"));
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn kind_word(kind: PluginOpKind) -> &'static str {
+    match kind {
+        PluginOpKind::Install => "installed",
+        PluginOpKind::Remove => "removed",
+        PluginOpKind::Update => "updated",
+        PluginOpKind::Task => "ran",
+    }
+}
+
+// Reject a scenario name that does not exist.
+//
+// Status/open/provider commands used to answer "not running" (or create a
+// fresh profile directory) for a typo, so a mistyped name looked like a
+// working-but-idle scenario instead of a mistake.
+async fn require_scenario(harness: &DeepSeekHarness, profile: &str) -> anyhow::Result<()> {
+    let known = harness.profiles().await?;
+    if known.iter().any(|known| known.id == profile) {
+        return Ok(());
+    }
+    let mut available: Vec<&str> = known.iter().map(|known| known.id.as_str()).collect();
+    available.sort_unstable();
+    // The default scenario is always addressable even before it is
+    // scaffolded: `dsh web` is a built-in alias for it.
+    if profile == "web" || available.is_empty() {
+        return Ok(());
+    }
+    Err(anyhow!(
+        "no such scenario: {profile} (available: {})",
+        available.join(", ")
+    ))
+}
+
+// Ask before an irreversible replacement. A non-interactive stdin must pass
+// `--yes` explicitly: silently assuming consent is how a script wipes a
+// user's setup, and a prompt nobody can answer would hang instead.
+fn confirm_destructive(yes: bool, json: bool, what: &str) -> anyhow::Result<()> {
+    if yes {
+        return Ok(());
+    }
+    if !std::io::stdin().is_terminal() {
+        return Err(anyhow!(
+            "refusing to continue: {what}. Re-run with --yes to confirm"
+        ));
+    }
+    eprint!("{what}\ncontinue? [y/N] ");
+    let mut answer = String::new();
+    std::io::stdin()
+        .read_line(&mut answer)
+        .context("failed to read the confirmation")?;
+    let accepted = matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes");
+    if accepted {
+        Ok(())
+    } else {
+        let _ = json;
+        Err(anyhow!("cancelled"))
+    }
 }
 
 // Run the compatibility check before a plugin installation.

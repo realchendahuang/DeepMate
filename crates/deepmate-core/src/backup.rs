@@ -21,6 +21,9 @@ use crate::error::{CoreError, CoreResult};
 // The backup format version. Bumped when the document shape changes.
 const CONFIG_FORMAT: &str = "deepmate-config/1";
 
+// The prefix shared by every backup format generation.
+const CONFIG_FORMAT_PREFIX: &str = "deepmate-config";
+
 // A portable, self-describing copy of DeepMate's own configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConfigBackup {
@@ -45,27 +48,44 @@ impl ConfigBackup {
     pub fn save(&self, path: &Path) -> CoreResult<()> {
         let text = serde_json::to_string_pretty(self)
             .map_err(|err| CoreError::InvalidState(format!("failed to serialize backup: {err}")))?;
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent)?;
-            }
-        }
-        std::fs::write(path, text)?;
-        Ok(())
+        crate::fsutil::write_atomic_string(path, &text)
     }
 
     // Load a backup document from `path`.
+    //
+    // The document's `format` must be one this build understands; a
+    // further-generation file is refused instead of being applied with
+    // fields quietly dropped.
     pub fn load(path: &Path) -> CoreResult<Self> {
         let text = std::fs::read_to_string(path).map_err(|err| {
             if err.kind() == std::io::ErrorKind::NotFound {
                 CoreError::InvalidState(format!("backup not found: {}", path.display()))
             } else {
-                err.into()
+                CoreError::io_at(path, err)
             }
         })?;
-        serde_json::from_str(&text).map_err(|err| {
+        let backup: Self = serde_json::from_str(&text).map_err(|err| {
             CoreError::InvalidState(format!("invalid config backup {}: {err}", path.display()))
-        })
+        })?;
+        backup.check_format()?;
+        Ok(backup)
+    }
+
+    fn check_format(&self) -> CoreResult<()> {
+        let Some((prefix, major)) = self.format.split_once('/') else {
+            return Err(CoreError::InvalidState(format!(
+                "unrecognized backup format: {}",
+                self.format
+            )));
+        };
+        let expected_major = CONFIG_FORMAT.split_once('/').map(|(_, m)| m).unwrap_or("1");
+        if prefix != CONFIG_FORMAT_PREFIX || major != expected_major {
+            return Err(CoreError::InvalidState(format!(
+                "unsupported backup format {} (this build reads {CONFIG_FORMAT})",
+                self.format
+            )));
+        }
+        Ok(())
     }
 }
 
@@ -120,5 +140,17 @@ mod tests {
         let backup = ConfigBackup::capture(&Config::default());
         let text = serde_json::to_string_pretty(&backup).unwrap();
         assert!(text.contains("deepmate-config/1"));
+    }
+
+    #[test]
+    fn load_refuses_a_future_format() {
+        let dir = temp_dir();
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("future.json");
+        let mut backup = ConfigBackup::capture(&Config::default());
+        backup.format = "deepmate-config/7".to_string();
+        std::fs::write(&path, serde_json::to_string_pretty(&backup).unwrap()).unwrap();
+        let err = ConfigBackup::load(&path).unwrap_err();
+        assert!(err.to_string().contains("unsupported backup format"));
     }
 }

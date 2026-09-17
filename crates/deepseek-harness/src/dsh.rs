@@ -353,19 +353,22 @@ pub fn installed_in_profile(profile_id: &str, id: &str) -> CoreResult<bool> {
 const MANIFEST_BACKUP_SUFFIX: &str = ".deepmate.bak";
 
 // Copy `path` to `<path><suffix>` before it is rewritten. The backup is the
-// only way back from a destructive edit, so a failed copy is reported rather
-// than swallowed; the caller still proceeds, matching the previous behavior
-// while making the failure visible in the log.
-fn write_backup(path: &Path, suffix: &str) {
-    let backup = PathBuf::from(format!("{}{suffix}", path.display()));
-    match std::fs::copy(path, &backup) {
-        Ok(_) => {}
-        Err(err) => tracing::warn!(
-            path = %path.display(),
-            error = %err,
-            "failed to back up the file before rewriting it"
-        ),
+// only way back from a destructive edit, so a failed copy is refused: the
+// caller must not overwrite a file it could not preserve. A missing source
+// file is not a failure (there is nothing to lose yet).
+fn write_backup(path: &Path, suffix: &str) -> CoreResult<()> {
+    if !path.is_file() {
+        return Ok(());
     }
+    let backup = PathBuf::from(format!("{}{suffix}", path.display()));
+    std::fs::copy(path, &backup).map_err(|err| {
+        CoreError::InvalidState(format!(
+            "refusing to rewrite {} because its backup could not be written to {}: {err}",
+            path.display(),
+            backup.display()
+        ))
+    })?;
+    Ok(())
 }
 
 // Strip a plugin from a profile's `dsh.profile.bundles` list, rewriting the
@@ -408,7 +411,7 @@ pub fn remove_bundle(profile_id: &str, id: &str) -> CoreResult<bool> {
         return Ok(false);
     }
     if path.is_file() {
-        write_backup(&path, MANIFEST_BACKUP_SUFFIX);
+        write_backup(&path, MANIFEST_BACKUP_SUFFIX)?;
     }
     let text = serde_json::to_string_pretty(&doc).map_err(|err| {
         CoreError::InvalidState(format!("failed to serialize {}: {err}", path.display()))
@@ -511,7 +514,7 @@ pub fn add_bundle(profile_id: &str, id: &str) -> CoreResult<bool> {
     }
     bundles.push(serde_json::Value::from(id));
     if path.is_file() {
-        write_backup(&path, MANIFEST_BACKUP_SUFFIX);
+        write_backup(&path, MANIFEST_BACKUP_SUFFIX)?;
     }
     let text = serde_json::to_string_pretty(&doc).map_err(|err| {
         CoreError::InvalidState(format!("failed to serialize {}: {err}", path.display()))
@@ -572,7 +575,7 @@ pub fn rename_profile(old: &str, new: &str) -> CoreResult<()> {
     if let Some(name) = doc.get_mut("name") {
         *name = serde_json::Value::from(format!("dsh-profile-{new}"));
     }
-    write_backup(&manifest, MANIFEST_BACKUP_SUFFIX);
+    write_backup(&manifest, MANIFEST_BACKUP_SUFFIX)?;
     let text = serde_json::to_string_pretty(&doc).map_err(|err| {
         CoreError::InvalidState(format!("failed to serialize {}: {err}", manifest.display()))
     })?;
@@ -673,7 +676,10 @@ fn scene_settings_path(profile_id: &str) -> CoreResult<Option<PathBuf>> {
         if let Some(end) = rest.find("')") {
             let rel = &rest[..end];
             if !rel.is_empty() {
-                return Ok(Some(home.join(rel)));
+                // The path is read back out of a document the user can edit:
+                // `dshHomePath('../../etc/x')` must not be honoured, or the
+                // settings editor would read and write arbitrary files.
+                return Ok(Some(resolve_inside_home(&home, rel)?));
             }
         }
     }
@@ -686,18 +692,34 @@ fn scene_settings_path(profile_id: &str) -> CoreResult<Option<PathBuf>> {
                         .and_then(|config| config.get("path"))
                         .and_then(|path| path.as_str())
                     {
-                        let resolved = if Path::new(path).is_absolute() {
-                            PathBuf::from(path)
-                        } else {
-                            home.join(path)
-                        };
-                        return Ok(Some(resolved));
+                        return Ok(Some(resolve_inside_home(&home, path)?));
                     }
                 }
             }
         }
     }
     Ok(None)
+}
+
+// Resolve a `dshHomePath(...)` argument, refusing anything that leaves the
+// harness home. An absolute path or one containing a `..` component is a
+// misconfigured (or hostile) patch file, not a settings location.
+fn resolve_inside_home(home: &Path, raw: &str) -> CoreResult<PathBuf> {
+    let candidate = Path::new(raw);
+    if candidate.is_absolute() {
+        return Err(CoreError::InvalidState(format!(
+            "settings path must be relative to the harness home: {raw}"
+        )));
+    }
+    if candidate
+        .components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return Err(CoreError::InvalidState(format!(
+            "settings path must not escape the harness home: {raw}"
+        )));
+    }
+    Ok(home.join(candidate))
 }
 
 // Bootstrap a scenario's isolated settings document: append the settings-row
@@ -723,7 +745,7 @@ pub fn ensure_scene_settings(profile_id: &str) -> CoreResult<()> {
             }
             out.push_str(&SCENE_SETTINGS_PATCH.replace("__SCENE__", profile_id));
             if patch.is_file() {
-                write_backup(&patch, MANIFEST_BACKUP_SUFFIX);
+                write_backup(&patch, MANIFEST_BACKUP_SUFFIX)?;
             }
             if let Some(parent) = patch.parent() {
                 std::fs::create_dir_all(parent)?;
@@ -950,7 +972,7 @@ impl SettingsEditor {
             std::fs::create_dir_all(parent)?;
         }
         if path.is_file() {
-            write_backup(&path, SETTINGS_BACKUP_SUFFIX);
+            write_backup(&path, SETTINGS_BACKUP_SUFFIX)?;
         }
         let text = yaml::to_string(doc).map_err(|err| {
             CoreError::InvalidState(format!("failed to serialize settings: {err}"))
@@ -1152,14 +1174,34 @@ pub enum AdvancedFileScope {
     SceneCordis,
 }
 
-// Reject profile names that could escape the profiles directory.
-fn validate_profile_name(name: &str) -> CoreResult<()> {
+// Reject profile names that could escape the profiles directory or corrupt
+// the YAML a name is interpolated into.
+//
+// The name becomes a directory under `profiles/` and is spliced into the
+// `cordis.patch.yml` redirection block, so separators, traversal, quotes,
+// newlines and control characters are all refused. Only letters, digits,
+// ASCII `-`, `_` and the non-ASCII word characters that appear in real
+// scenario names are accepted.
+pub fn validate_profile_name(name: &str) -> CoreResult<()> {
     if name.is_empty() {
         return Err(CoreError::InvalidState(
             "profile name must not be empty".to_string(),
         ));
     }
-    if name == "node_modules" || name.contains('/') || name.contains('\\') {
+    if name.chars().count() > 64 {
+        return Err(CoreError::InvalidState(
+            "profile name is too long (max 64 characters)".to_string(),
+        ));
+    }
+    if name == "node_modules" || name == "." || name == ".." {
+        return Err(CoreError::InvalidState(format!(
+            "invalid profile name: {name:?}"
+        )));
+    }
+    let valid = name
+        .chars()
+        .all(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | ' '));
+    if !valid {
         return Err(CoreError::InvalidState(format!(
             "invalid profile name: {name:?}"
         )));
@@ -1207,28 +1249,53 @@ pub fn read_advanced_file(
 // Write one advanced document back, backing up the previous file first
 // (mirroring the settings editor's `.deepmate.bak` habit).
 //
-// settings.yaml documents are validated as YAML before the write, so a syntax
-// error refuses the save with a readable message; cordis.patch.yml is exempt
-// because its `!!js dshHomePath(...)` custom tag defeats the YAML parser.
+// Both documents are validated as YAML before the write, so a syntax error
+// refuses the save with a readable message instead of letting the harness
+// fail at its next boot. `cordis.patch.yml` needs one accommodation: it
+// carries `!!js dshHomePath(...)` expressions, so every `!!js` payload is
+// rewritten to a plain scalar for the duration of the check. That keeps the
+// structure (rows, ids, nesting) validated while tolerating the custom tag.
 pub fn save_advanced_file(
     scope: AdvancedFileScope,
     name: Option<&str>,
     content: &str,
 ) -> CoreResult<()> {
     let path = scope.resolve(name)?;
-    if scope != AdvancedFileScope::SceneCordis {
-        yaml::from_str::<Value>(content).map_err(|err| {
-            CoreError::InvalidState(format!("invalid settings {}: {err}", path.display()))
-        })?;
-    }
+    let to_validate = if scope == AdvancedFileScope::SceneCordis {
+        neutralize_js_tags(content)
+    } else {
+        content.to_string()
+    };
+    yaml::from_str::<Value>(&to_validate).map_err(|err| {
+        CoreError::InvalidState(format!("invalid settings {}: {err}", path.display()))
+    })?;
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+        std::fs::create_dir_all(parent).map_err(|err| CoreError::io_at(parent, err))?;
     }
     if path.is_file() {
-        write_backup(&path, SETTINGS_BACKUP_SUFFIX);
+        write_backup(&path, SETTINGS_BACKUP_SUFFIX)?;
     }
-    std::fs::write(&path, content)?;
+    deepmate_core::write_atomic_string(&path, content)?;
     Ok(())
+}
+
+// Replace every `!!js <expression>` payload with a quoted placeholder so the
+// rest of the document can be parsed by a YAML reader that has no handler for
+// the custom tag. The expression runs to the end of its line, which is how
+// the harness writes it.
+fn neutralize_js_tags(content: &str) -> String {
+    content
+        .lines()
+        .map(|line| match line.find("!!js") {
+            Some(index) => {
+                let mut replaced = line[..index].to_string();
+                replaced.push_str("deepmate-js-expression");
+                replaced
+            }
+            None => line.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 // Convert a raw JSON string back to a `yaml::Value`, validating it.
@@ -1325,11 +1392,7 @@ pub fn create_profile(name: &str) -> CoreResult<()> {
 // Remove a profile directory. Refuses to remove the launcher-maintained
 // `node_modules` fallback or any path that does not look like a profile.
 pub fn remove_profile(name: &str) -> CoreResult<()> {
-    if name.is_empty() || name == "node_modules" || name.contains('/') || name.contains('\\') {
-        return Err(CoreError::InvalidState(format!(
-            "invalid profile name: {name:?}"
-        )));
-    }
+    validate_profile_name(name)?;
     let Some(home) = dsh_home() else {
         return Err(CoreError::InvalidState(
             "could not resolve the harness home directory".to_string(),
@@ -1341,7 +1404,23 @@ pub fn remove_profile(name: &str) -> CoreResult<()> {
             "profile not found: {name}"
         )));
     }
-    std::fs::remove_dir_all(&dir)?;
+    // A profile holds settings, providers, models and its installed packages;
+    // deleting it is the most destructive thing DeepMate does to harness
+    // state. Move it into a timestamped trash directory under the harness
+    // home instead of unlinking it, so a mistaken delete is recoverable by
+    // hand and nothing is destroyed irreversibly.
+    let trash = home.join("profiles").join(".deepmate-trash");
+    std::fs::create_dir_all(&trash).map_err(|err| CoreError::io_at(&trash, err))?;
+    let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+    let target = trash.join(format!("{name}-{stamp}"));
+    std::fs::rename(&dir, &target).map_err(|err| {
+        CoreError::InvalidState(format!(
+            "failed to remove profile {name}: could not move {} to {}: {err}",
+            dir.display(),
+            target.display()
+        ))
+    })?;
+    let _ = stamp;
     Ok(())
 }
 
@@ -1380,7 +1459,7 @@ pub fn set_profile_description(name: &str, description: Option<String>) -> CoreR
             doc["description"] = serde_json::Value::from(text);
         }
     }
-    write_backup(&manifest, MANIFEST_BACKUP_SUFFIX);
+    write_backup(&manifest, MANIFEST_BACKUP_SUFFIX)?;
     let text = serde_json::to_string_pretty(&doc).map_err(|err| {
         CoreError::InvalidState(format!("failed to serialize {}: {err}", manifest.display()))
     })?;

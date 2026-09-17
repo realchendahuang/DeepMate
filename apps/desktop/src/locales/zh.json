@@ -148,7 +148,8 @@
       "installing": "正在安装…",
       "removing": "正在移除…",
       "updating": "正在更新…"
-    }
+    },
+    "marketSearchFailed": "搜索失败，请稍后重试"
   },
   "settings": {
     "title": "设置",
@@ -268,7 +269,17 @@
     "unsavedChanges": "有未保存的修改",
     "discard": "放弃修改",
     "healthAllGood": "所有检查项均已通过",
-    "healthHasIssues": "发现 {{count}} 项需要注意的问题"
+    "healthHasIssues": "发现 {{count}} 项需要注意的问题",
+    "modality": {
+      "text": "文本",
+      "image": "图像",
+      "video": "视频",
+      "pdf": "PDF"
+    },
+    "deleteProfile": "删除场景",
+    "importSettingsAction": "覆盖导入",
+    "updateInstalling": "正在下载安装包…",
+    "loadFailed": "加载失败，请重试"
   },
   "common": {
     "close": "关闭",
@@ -283,7 +294,15 @@
       "generic": "出错了，请重试。",
       "crash": "界面遇到了意外的错误。",
       "reload": "重新加载应用",
-      "details": "详细信息"
-    }
+      "details": "详细信息",
+      "io": "文件读写失败，请检查磁盘空间和文件夹权限",
+      "spawnFailed": "无法启动引擎进程",
+      "commandFailed": "引擎执行命令失败",
+      "invalidState": "当前状态不允许这个操作",
+      "unsupported": "当前系统不支持这个操作",
+      "updateCheckFailed": "检查更新失败，请稍后重试",
+      "doctorPartlyFixed": "已修复 {{fixed}} 项，{{failed}} 项失败"
+    },
+    "retry": "重试"
   }
 }

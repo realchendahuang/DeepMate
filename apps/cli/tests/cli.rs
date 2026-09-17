@@ -438,7 +438,7 @@ fn snapshot_export_list_import_roundtrip() {
     assert!(String::from_utf8_lossy(&list.stdout).contains("coding"));
 
     let import = Command::new(env!("CARGO_BIN_EXE_deepmate"))
-        .args(["snapshot", "import", "coding"])
+        .args(["snapshot", "import", "coding", "--yes"])
         .env("DEEPMATE_DATA_DIR", &dir)
         .env("DSH_HOME", &home)
         .output()
@@ -449,4 +449,138 @@ fn snapshot_export_list_import_roundtrip() {
         String::from_utf8_lossy(&import.stderr)
     );
     assert!(String::from_utf8_lossy(&import.stdout).contains("imported snapshot coding"));
+    // The import wrote a restore point first: the operation is reversible.
+    let restore_points: Vec<_> = std::fs::read_dir(dir.join("state"))
+        .unwrap()
+        .flatten()
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("pre-snapshot-import-")
+        })
+        .collect();
+    assert_eq!(restore_points.len(), 1, "expected one restore point");
+}
+
+#[test]
+fn importing_without_confirmation_is_refused_on_a_pipe() {
+    let dir = test_data_dir();
+    let home = test_data_dir();
+    std::fs::create_dir_all(&home).unwrap();
+    let export = Command::new(env!("CARGO_BIN_EXE_deepmate"))
+        .args(["snapshot", "export", "coding"])
+        .env("DEEPMATE_DATA_DIR", &dir)
+        .env("DSH_HOME", &home)
+        .output()
+        .expect("failed to run deepmate binary");
+    assert!(export.status.success());
+
+    // stdin is a pipe here, so the command must refuse rather than assume
+    // consent or block on a prompt nobody can answer.
+    let import = Command::new(env!("CARGO_BIN_EXE_deepmate"))
+        .args(["snapshot", "import", "coding"])
+        .env("DEEPMATE_DATA_DIR", &dir)
+        .env("DSH_HOME", &home)
+        .output()
+        .expect("failed to run deepmate binary");
+    assert!(!import.status.success());
+    assert_ne!(import.status.code(), Some(0));
+    let stderr = String::from_utf8_lossy(&import.stderr);
+    assert!(stderr.contains("--yes"), "stderr: {stderr}");
+}
+
+#[test]
+fn dry_run_import_changes_nothing() {
+    let dir = test_data_dir();
+    let home = test_data_dir();
+    std::fs::create_dir_all(&home).unwrap();
+    let export = Command::new(env!("CARGO_BIN_EXE_deepmate"))
+        .args(["snapshot", "export", "coding"])
+        .env("DEEPMATE_DATA_DIR", &dir)
+        .env("DSH_HOME", &home)
+        .output()
+        .expect("failed to run deepmate binary");
+    assert!(export.status.success());
+
+    let dry = Command::new(env!("CARGO_BIN_EXE_deepmate"))
+        .args(["snapshot", "import", "coding", "--dry-run"])
+        .env("DEEPMATE_DATA_DIR", &dir)
+        .env("DSH_HOME", &home)
+        .output()
+        .expect("failed to run deepmate binary");
+    assert!(
+        dry.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&dry.stderr)
+    );
+    // No restore point is written for a dry run: nothing was replaced.
+    let restore_points = std::fs::read_dir(dir.join("state"))
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter(|entry| {
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with("pre-snapshot-import-")
+                })
+                .count()
+        })
+        .unwrap_or(0);
+    assert_eq!(
+        restore_points, 0,
+        "a dry run must not write a restore point"
+    );
+}
+
+#[test]
+fn a_json_failure_carries_a_machine_readable_code() {
+    let dir = test_data_dir();
+    let home = test_data_dir();
+    std::fs::create_dir_all(&home).unwrap();
+    // No such snapshot: the failure must be a JSON envelope, not prose.
+    let output = Command::new(env!("CARGO_BIN_EXE_deepmate"))
+        .args([
+            "--json",
+            "snapshot",
+            "import",
+            "definitely-missing",
+            "--yes",
+        ])
+        .env("DEEPMATE_DATA_DIR", &dir)
+        .env("DSH_HOME", &home)
+        .output()
+        .expect("failed to run deepmate binary");
+    assert!(!output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).unwrap_or_else(|err| panic!("not JSON: {err}: {stdout}"));
+    assert_eq!(parsed["ok"], serde_json::Value::Bool(false));
+    assert!(parsed["code"].is_string(), "stdout: {stdout}");
+    assert!(parsed["message"].is_string(), "stdout: {stdout}");
+}
+
+#[test]
+fn doctor_reports_unhealthy_via_the_exit_code() {
+    let dir = test_data_dir();
+    // A bogus CLI name guarantees the engine is missing, so doctor fails a
+    // check and the exit code must say so (it used to always be 0).
+    let output = Command::new(env!("CARGO_BIN_EXE_deepmate"))
+        .args(["doctor"])
+        .env("DEEPMATE_DATA_DIR", &dir)
+        .env("DEEPMATE_DSH_BIN", "/nonexistent/deepmate-test-dsh")
+        .env("PATH", "/nonexistent")
+        .output()
+        .expect("failed to run deepmate binary");
+    let report = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        report.contains("[fail]"),
+        "expected a failing check: {report}"
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "doctor must exit 3 when unhealthy"
+    );
 }

@@ -11,8 +11,10 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "test": "vitest run",
-    "check": "npm run lint && tsc --noEmit && npm run test",
-    "coverage": "vitest run --coverage"
+    "check": "npm run lint && tsc --noEmit && npm run test && npm run format:check && npm run check:i18n",
+    "coverage": "vitest run --coverage",
+    "format:check": "prettier --check .",
+    "check:i18n": "node scripts/check-i18n.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",

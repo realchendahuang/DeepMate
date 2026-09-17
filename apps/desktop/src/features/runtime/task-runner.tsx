@@ -61,6 +61,9 @@ export function TaskRunner({ profileId }: { profileId: string }) {
             className="flex-1"
             disabled={task.running}
             onKeyDown={(event) => {
+              // A Chinese IME confirms candidates with Enter; running a task
+              // on that keystroke spends the user's quota by accident.
+              if (event.nativeEvent.isComposing) return;
               if (event.key === "Enter") run();
             }}
           />

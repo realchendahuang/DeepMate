@@ -4,7 +4,7 @@
 
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Download, Pencil } from "lucide-react";
+import { Download, Pencil, RotateCw, TriangleAlert } from "lucide-react";
 import { useProviderStore } from "@/app/store/providers";
 import type { Model, Profile } from "@/shared/api/api";
 import { Button } from "@/shared/ui/button";
@@ -24,6 +24,8 @@ export function ProvidersPage({ profile }: { profile: Profile }) {
   // Presence in the per-scenario maps doubles as the loaded flag.
   const providers = useProviderStore((s) => s.providers[profile.id]);
   const models = useProviderStore((s) => s.models[profile.id]);
+  const providersError = useProviderStore((s) => s.providersError[profile.id]);
+  const modelsError = useProviderStore((s) => s.modelsError[profile.id]);
 
   const [providerId, setProviderId] = useState<string | null>(null);
   const [modelDialog, setModelDialog] = useState<Model | "new" | null>(null);
@@ -36,6 +38,13 @@ export function ProvidersPage({ profile }: { profile: Profile }) {
   }, [loadProviders, loadModels, profile.id]);
 
   const loaded = providers !== undefined && models !== undefined;
+  // A failed load is a state the page can show; without this the skeleton
+  // below never gave way to anything, so a failure looked like a hang.
+  const loadError = providersError ?? modelsError;
+  const retry = () => {
+    void loadProviders(profile.id);
+    void loadModels(profile.id);
+  };
 
   const selected =
     (providers ?? []).find((provider) => provider.id === providerId) ??
@@ -45,7 +54,19 @@ export function ProvidersPage({ profile }: { profile: Profile }) {
   return (
     <PageBody full className="gap-4">
       <PageHeader title={t("nav.providers")} />
-      {!loaded ? (
+      {loadError && !loaded ? (
+        <EmptyState
+          icon={<TriangleAlert className="h-8 w-8 text-text-faint" />}
+          action={
+            <Button variant="secondary" size="sm" onClick={retry}>
+              <RotateCw className="h-4 w-4" />
+              {t("common.retry")}
+            </Button>
+          }
+        >
+          {t("settings.loadFailed")}
+        </EmptyState>
+      ) : !loaded ? (
         <Skeleton className="min-h-0 flex-1" />
       ) : (providers ?? []).length === 0 ? (
         <EmptyState

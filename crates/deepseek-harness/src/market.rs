@@ -78,13 +78,32 @@ impl Market {
         if let Some(entries) = self.cached(query) {
             return Ok(entries);
         }
-        let entries = search_npm(&self.client, query).await?;
-        if let Some(path) = &self.cache_path {
-            if let Err(err) = store_cache(path, query, &entries) {
-                tracing::warn!(error = %err, "failed to write market cache");
+        match search_npm(&self.client, query).await {
+            Ok(entries) => {
+                if let Some(path) = &self.cache_path {
+                    if let Err(err) = store_cache(path, query, &entries) {
+                        tracing::warn!(error = %err, "failed to write market cache");
+                    }
+                }
+                Ok(entries)
+            }
+            Err(err) => {
+                // The network is the reason the search failed; a previous
+                // answer for this exact query is still the best available
+                // result. Report it (stale) rather than an empty market.
+                match self.cached_entry(query, true) {
+                    Some((entries, _stale)) => {
+                        tracing::warn!(
+                            query,
+                            error = %err,
+                            "market search failed; serving the cached result"
+                        );
+                        Ok(entries)
+                    }
+                    None => Err(err),
+                }
             }
         }
-        Ok(entries)
     }
 
     // The curated plugin list, fetched from this repository and cached under
@@ -97,13 +116,31 @@ impl Market {
             return Ok(entries);
         }
         let url = std::env::var(CURATED_LIST_ENV).unwrap_or_else(|_| CURATED_LIST_URL.to_string());
-        let entries = fetch_curated(&self.client, &url).await?;
-        if let Some(path) = &self.curated_cache_path {
-            if let Err(err) = store_curated_cache(path, &entries) {
-                tracing::warn!(error = %err, "failed to write curated list cache");
+        match fetch_curated(&self.client, &url).await {
+            Ok(entries) => {
+                if let Some(path) = &self.curated_cache_path {
+                    if let Err(err) = store_curated_cache(path, &entries) {
+                        tracing::warn!(error = %err, "failed to write curated list cache");
+                    }
+                }
+                Ok(entries)
+            }
+            Err(err) => {
+                // A curated list fetched at any point in the past is still
+                // better than an empty storefront, which is what an offline
+                // (or proxied) network otherwise produces.
+                match self.any_cached_curated() {
+                    Some(entries) => {
+                        tracing::warn!(
+                            error = %err,
+                            "curated list fetch failed; serving the cached copy"
+                        );
+                        Ok(entries)
+                    }
+                    None => Err(err),
+                }
             }
         }
-        Ok(entries)
     }
 
     // Check a package's harness compatibility through its registry packument:
@@ -137,25 +174,46 @@ impl Market {
     // A cached result for this exact query, when fresh. A stale or missing
     // cache yields None and the caller goes to the network.
     fn cached(&self, query: &str) -> Option<Vec<MarketEntry>> {
+        self.cached_entry(query, false).map(|(entries, _)| entries)
+    }
+
+    // A cached search result: `allow_stale` returns the last known answer even
+    // past its TTL, which is what keeps the market usable offline. The bool
+    // reports whether the answer is stale.
+    fn cached_entry(&self, query: &str, allow_stale: bool) -> Option<(Vec<MarketEntry>, bool)> {
         let path = self.cache_path.as_ref()?;
         let text = std::fs::read_to_string(path).ok()?;
         let file: CacheFile = serde_json::from_str(&text).ok()?;
-        if file.query != query {
-            return None;
-        }
-        let updated = chrono::DateTime::parse_from_rfc3339(&file.updated).ok()?;
-        let age = (chrono::Utc::now() - updated.with_timezone(&chrono::Utc))
+        // Prefer the per-query map; fall back to the legacy single-slot fields
+        // so a cache written by an older build still works.
+        let (updated, entries) = match file.queries.get(query) {
+            Some(cached) => (cached.updated.clone(), cached.entries.clone()),
+            None if file.query == query => (file.updated.clone(), file.entries.clone()),
+            None => return None,
+        };
+        let stamp = chrono::DateTime::parse_from_rfc3339(&updated).ok()?;
+        let age = (chrono::Utc::now() - stamp.with_timezone(&chrono::Utc))
             .to_std()
             .ok()?;
-        if age > self.cache_ttl {
+        let stale = age > self.cache_ttl;
+        if stale && !allow_stale {
             return None;
         }
+        Some((entries, stale))
+    }
+
+    // The curated cache regardless of age; the offline fallback reads it
+    // directly.
+    fn any_cached_curated(&self) -> Option<Vec<MarketEntry>> {
+        let path = self.curated_cache_path.as_ref()?;
+        let text = std::fs::read_to_string(path).ok()?;
+        let file: CuratedCacheFile = serde_json::from_str(&text).ok()?;
         Some(file.entries)
     }
 
-    // The cached curated list, when fresh. Unlike the search cache, a stale
-    // copy is still served as a fallback by `curated()` when the network
-    // fetch fails, so the curated source keeps working offline.
+    // The cached curated list, when fresh. A stale copy is still served as a
+    // fallback by `curated()` when the network fetch fails, so the curated
+    // source keeps working offline.
     fn cached_curated(&self) -> Option<Vec<MarketEntry>> {
         let path = self.curated_cache_path.as_ref()?;
         let text = std::fs::read_to_string(path).ok()?;
@@ -369,24 +427,52 @@ fn curated_from_json(text: &str) -> CoreResult<Vec<MarketEntry>> {
     Ok(list
         .plugins
         .into_iter()
-        .map(|plugin| MarketEntry {
-            id: plugin.name.clone(),
-            name: plugin.name,
-            description: Some(plugin.description),
-            version: Some(plugin.version),
-            source: MarketSource::Curated,
-            // The curated list is vetted by definition; the `trust` field
-            // only elevates an entry to official. A missing field degrades
-            // to vetted, never to a less-trusted tier.
-            trust: plugin.trust.unwrap_or(MarketTrust::Vetted),
-            repository: plugin.repository,
-            publisher: plugin.publisher,
-            updated: parse_updated(&plugin.added),
-            category: plugin.category,
-            popularity: None,
-            quality: None,
+        .map(|plugin| {
+            let trust = curated_trust(&plugin.name, plugin.trust);
+            MarketEntry {
+                id: plugin.name.clone(),
+                name: plugin.name,
+                description: Some(plugin.description),
+                version: Some(plugin.version),
+                source: MarketSource::Curated,
+                // The curated list is vetted by definition; the `trust` field
+                // only elevates an entry to official. A missing field degrades
+                // to vetted, never to a less-trusted tier — and an `official`
+                // claim that the package name does not back up is downgraded
+                // too: the badge is a promise about provenance, so it must not
+                // be taken from the list's word alone.
+                trust,
+                repository: plugin.repository,
+                publisher: plugin.publisher,
+                updated: parse_updated(&plugin.added),
+                category: plugin.category,
+                popularity: None,
+                quality: None,
+            }
         })
         .collect())
+}
+
+// The official tier is reserved for packages published under the harness
+// vendor's npm scope. A curated entry that claims `official` without the
+// matching scope is downgraded to vetted: the badge tells the user where the
+// code comes from, and a data file alone cannot establish that.
+fn curated_trust(name: &str, declared: Option<MarketTrust>) -> MarketTrust {
+    match declared {
+        Some(MarketTrust::Official) => {
+            if name.starts_with("@deepseek-ai/") {
+                MarketTrust::Official
+            } else {
+                tracing::warn!(
+                    package = name,
+                    "curated entry claims official without the vendor scope; downgrading to vetted"
+                );
+                MarketTrust::Vetted
+            }
+        }
+        Some(other) => other,
+        None => MarketTrust::Vetted,
+    }
 }
 
 // The market sources the DeepSeek Harness adapter can discover from: the
@@ -505,7 +591,22 @@ struct CacheFile {
     updated: String,
     query: String,
     entries: Vec<MarketEntry>,
+    // Every other query seen recently, keyed by the exact query string, so an
+    // alternating search pattern does not evict itself (the single-entry
+    // format kept only the most recent query).
+    #[serde(default)]
+    queries: std::collections::BTreeMap<String, CachedQuery>,
 }
+
+// One remembered query: its result and when it was fetched.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct CachedQuery {
+    updated: String,
+    entries: Vec<MarketEntry>,
+}
+
+// How many distinct queries are remembered before the oldest is dropped.
+const CACHE_QUERY_LIMIT: usize = 32;
 
 // The on-disk curated list cache: the normalized entries plus a timestamp.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -515,19 +616,46 @@ struct CuratedCacheFile {
 }
 
 fn store_cache(path: &Path, query: &str, entries: &[MarketEntry]) -> CoreResult<()> {
-    let file = CacheFile {
-        updated: chrono::Utc::now().to_rfc3339(),
-        query: query.to_string(),
-        entries: entries.to_vec(),
-    };
+    // Merge into the existing cache so concurrent and alternating searches
+    // accumulate instead of overwriting each other.
+    let mut file: CacheFile = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_else(|| CacheFile {
+            updated: chrono::Utc::now().to_rfc3339(),
+            query: String::new(),
+            entries: Vec::new(),
+            queries: std::collections::BTreeMap::new(),
+        });
+    let now = chrono::Utc::now().to_rfc3339();
+    file.updated = now.clone();
+    file.query = query.to_string();
+    file.entries = entries.to_vec();
+    file.queries.insert(
+        query.to_string(),
+        CachedQuery {
+            updated: now,
+            entries: entries.to_vec(),
+        },
+    );
+    while file.queries.len() > CACHE_QUERY_LIMIT {
+        // Drop the oldest remembered query.
+        let oldest = file
+            .queries
+            .iter()
+            .min_by(|a, b| a.1.updated.cmp(&b.1.updated))
+            .map(|(key, _)| key.clone());
+        match oldest {
+            Some(key) => {
+                file.queries.remove(&key);
+            }
+            None => break,
+        }
+    }
     let text = serde_json::to_string_pretty(&file).map_err(|err| {
         CoreError::InvalidState(format!("failed to serialize market cache: {err}"))
     })?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(path, text)?;
-    Ok(())
+    deepmate_core::write_atomic_string(path, &text)
 }
 
 fn store_curated_cache(path: &Path, entries: &[MarketEntry]) -> CoreResult<()> {
@@ -538,11 +666,7 @@ fn store_curated_cache(path: &Path, entries: &[MarketEntry]) -> CoreResult<()> {
     let text = serde_json::to_string_pretty(&file).map_err(|err| {
         CoreError::InvalidState(format!("failed to serialize curated list cache: {err}"))
     })?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(path, text)?;
-    Ok(())
+    deepmate_core::write_atomic_string(path, &text)
 }
 
 #[cfg(test)]

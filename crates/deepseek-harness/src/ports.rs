@@ -56,8 +56,21 @@ impl PortRegistry {
             ));
         };
         let mut file = self.load()?;
-        if let Some(existing) = file.ports.get(profile) {
-            return Ok(*existing);
+        if let Some(existing) = file.ports.get(profile).copied() {
+            // A recorded assignment is only reused while the port is still
+            // workable: once another process takes it (or the record is
+            // simply stale) handing it back would make the engine boot fail
+            // on a bind error, which surfaces to the user as a mysterious
+            // startup timeout. Reassign instead, and keep the record in sync.
+            if !listening(existing) {
+                return Ok(existing);
+            }
+            tracing::warn!(
+                profile,
+                port = existing,
+                "assigned port is occupied; assigning a new one"
+            );
+            file.ports.remove(profile);
         }
         // A port is unavailable when another scenario already owns it or a
         // live process listens on it. A `preferred` port that fails either
@@ -65,13 +78,27 @@ impl PortRegistry {
         // over one port, and the loser only fails after the boot timeout.
         let unavailable =
             |port: u16| file.ports.values().any(|assigned| *assigned == port) || listening(port);
-        let mut candidate = match preferred {
-            Some(port) if !unavailable(port) => port,
-            _ if profile == "web" && preferred.is_none() => DEFAULT_WEB_PORT,
-            _ => FIRST_SCENARIO_PORT,
+        // A preferred port that is taken is refused rather than silently
+        // swapped for another: the user asked for this port.
+        if let Some(port) = preferred {
+            if unavailable(port) {
+                return Err(CoreError::InvalidState(format!(
+                    "port {port} is already in use or assigned to another scenario"
+                )));
+            }
+            file.ports.insert(profile.to_string(), port);
+            self.write(path, &file)?;
+            return Ok(port);
+        }
+        let mut candidate = if profile == "web" {
+            DEFAULT_WEB_PORT
+        } else {
+            FIRST_SCENARIO_PORT
         };
         while unavailable(candidate) {
-            candidate += 1;
+            candidate = candidate.checked_add(1).ok_or_else(|| {
+                CoreError::InvalidState("no free port could be assigned".to_string())
+            })?;
         }
         file.ports.insert(profile.to_string(), candidate);
         self.write(path, &file)?;
@@ -101,9 +128,22 @@ impl PortRegistry {
             }
             Err(err) => return Err(err.into()),
         };
-        let file: PortsFile = serde_json::from_str(&text).map_err(|err| {
-            CoreError::InvalidState(format!("invalid port registry {}: {err}", path.display()))
-        })?;
+        let file: PortsFile = match serde_json::from_str(&text) {
+            Ok(file) => file,
+            Err(err) => {
+                // A corrupt registry used to make every scenario look
+                // portless with no way back. Quarantine it (the bytes stay
+                // recoverable) and start from an empty assignment table: the
+                // worst case is a scenario getting a different port.
+                tracing::warn!(
+                    path = %path.display(),
+                    error = %err,
+                    "port registry is unreadable; resetting it"
+                );
+                let _ = deepmate_core::quarantine(path);
+                return Ok(PortsFile::default());
+            }
+        };
         if file.schema > SCHEMA {
             return Err(CoreError::InvalidState(format!(
                 "port registry schema {} is newer than this build supports ({SCHEMA})",
@@ -117,11 +157,7 @@ impl PortRegistry {
         let text = serde_json::to_string_pretty(file).map_err(|err| {
             CoreError::InvalidState(format!("failed to serialize port registry: {err}"))
         })?;
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(path, text)?;
-        Ok(())
+        deepmate_core::write_atomic_string(path, &text)
     }
 }
 
@@ -176,23 +212,43 @@ mod tests {
     }
 
     #[test]
-    fn preferred_port_is_skipped_when_owned_by_another_scenario() {
+    fn a_preferred_port_owned_by_another_scenario_is_refused() {
         let (registry, dir) = temp_registry();
         let free = |_port: u16| false;
         registry.assign("coding", Some(4200), free).unwrap();
-        // The port is taken: the second scenario must get the next free one
-        // instead of double-booking 4200.
-        let port = registry.assign("daily", Some(4200), free).unwrap();
-        assert_eq!(port, FIRST_SCENARIO_PORT);
+        // The user asked for this exact port. Silently handing out a
+        // different one would leave them with a scenario that ignores what
+        // they configured; the conflict is reported instead.
+        let err = registry.assign("daily", Some(4200), free).unwrap_err();
+        assert!(err.to_string().contains("4200"), "{err}");
         std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
-    fn preferred_port_is_skipped_when_listening() {
+    fn a_preferred_port_that_is_listening_is_refused() {
         let (registry, dir) = temp_registry();
         let listening = |port: u16| port == 4200;
-        let port = registry.assign("coding", Some(4200), listening).unwrap();
-        assert_eq!(port, FIRST_SCENARIO_PORT);
+        let err = registry
+            .assign("coding", Some(4200), listening)
+            .unwrap_err();
+        assert!(err.to_string().contains("4200"), "{err}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn an_occupied_assignment_is_reassigned_on_restart() {
+        let (registry, dir) = temp_registry();
+        // First assignment: nothing listening, so 3081 is handed out.
+        let first = registry.assign("coding", None, |_port| false).unwrap();
+        assert_eq!(first, FIRST_SCENARIO_PORT);
+        // On the next start something else holds that port (a stale engine,
+        // another program). Reusing it would make the boot fail on bind, so
+        // the registry moves the scenario to a free port.
+        let second = registry
+            .assign("coding", None, |port| port == first)
+            .unwrap();
+        assert_ne!(second, first);
+        assert_eq!(registry.port("coding").unwrap(), Some(second));
         std::fs::remove_dir_all(&dir).ok();
     }
 

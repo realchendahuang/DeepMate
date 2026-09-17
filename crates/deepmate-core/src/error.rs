@@ -1,4 +1,5 @@
 use std::io;
+use std::path::Path;
 
 // Errors produced by the DeepMate core. The payload of every variant carries
 // the full human-readable message so Display stays the single source of
@@ -10,6 +11,16 @@ pub enum CoreError {
 
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
+
+    // The same failure as `Io`, but carrying the path that failed. Reported
+    // by the data stores so the message names the file the user must look at
+    // instead of a bare OS errno.
+    #[error("I/O error at {path}: {source}")]
+    IoAt {
+        path: String,
+        #[source]
+        source: io::Error,
+    },
 
     // Something the caller asked for does not exist: the harness CLI, a
     // plugin, a profile.
@@ -46,13 +57,22 @@ impl CoreError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::Unsupported(_) => "unsupported",
-            Self::Io(_) => "io",
+            Self::Io(_) | Self::IoAt { .. } => "io",
             Self::NotFound(_) => "not_found",
             Self::SpawnFailed(_) => "spawn_failed",
             Self::Timeout(_) => "timeout",
             Self::CommandFailed(_) => "command_failed",
             Self::Network(_) => "network",
             Self::InvalidState(_) => "invalid_state",
+        }
+    }
+
+    // Attach a path to a raw I/O failure so the message says which file the
+    // operation touched.
+    pub fn io_at(path: impl AsRef<Path>, source: io::Error) -> Self {
+        Self::IoAt {
+            path: path.as_ref().display().to_string(),
+            source,
         }
     }
 }

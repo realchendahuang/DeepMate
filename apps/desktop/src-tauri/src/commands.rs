@@ -77,15 +77,32 @@ pub struct UiPrefs {
     pub market_refresh_interval_seconds: u64,
 }
 
-// A newer DeepMate release found on GitHub, if any. `None` means the current
-// version is the latest, or the check could not complete (offline, rate
-// limited, ...) — an update check must fail quietly, never block the UI.
+// A newer DeepMate release found on GitHub, if any.
 #[derive(Serialize, Type)]
 pub struct UpdateInfo {
     pub current_version: String,
     pub latest_version: String,
     pub url: String,
     pub published_at: String,
+}
+
+// What an update check concluded. "Could not check" is a distinct answer from
+// "you are up to date": reporting a failed check as `up_to_date` told offline
+// users they were current, which is the opposite of the truth.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateCheckStatus {
+    UpToDate,
+    Available,
+    Failed,
+}
+
+#[derive(Serialize, Type)]
+pub struct UpdateCheck {
+    pub status: UpdateCheckStatus,
+    pub info: Option<UpdateInfo>,
+    // A short, user-presentable reason when the check failed.
+    pub message: Option<String>,
 }
 
 // What an install attempt ended up doing.
@@ -96,6 +113,20 @@ pub struct UpdateInstallOutcome {
     // The DMG that was verified and handed to the platform installer.
     pub path: Option<String>,
     pub version: Option<String>,
+}
+
+// Progress for a running update install, forwarded to the webview channel:
+// a multi-hundred-megabyte download with no feedback looks like a hang.
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct UpdateProgressEvent {
+    pub phase: String,
+    // Exported as u32 because specta forbids BigInt-style widths; byte counts
+    // beyond 4 GiB are not a case an installer download reaches.
+    #[specta(type = u32)]
+    pub received: u64,
+    #[specta(type = Option<u32>)]
+    pub total: Option<u64>,
+    pub message: Option<String>,
 }
 
 // ---- Command plumbing ----
@@ -279,11 +310,13 @@ pub async fn run_doctor(app: AppHandle) -> Result<DoctorReport, String> {
     }
 }
 
-// The result of a one-click doctor fix: how many items were repaired by the
-// chosen action. The frontend shows the count and re-runs the report.
-#[derive(Debug, Clone, Copy, Serialize, Type)]
+// The result of a one-click doctor fix: how many items were repaired, and
+// which ones could not be. A partial repair is a real outcome the UI must be
+// able to show instead of a bare success count.
+#[derive(Debug, Clone, Serialize, Type)]
 pub struct DoctorFixReport {
     pub fixed: u32,
+    pub failures: Vec<String>,
 }
 
 // One-click repair for a failing doctor check. `mode` selects the repair:
@@ -298,9 +331,12 @@ pub async fn doctor_fix(
 ) -> Result<DoctorFixReport, String> {
     let state = app.state::<AppState>();
     match state.harness.fix_check(&check_id, &mode).await {
-        Ok(fixed) => {
+        Ok(report) => {
             record_action(&state.layout, "desktop.doctor.fix".to_string());
-            Ok(DoctorFixReport { fixed })
+            Ok(DoctorFixReport {
+                fixed: report.fixed,
+                failures: report.failures,
+            })
         }
         Err(e) => Err(command_error(e)),
     }
@@ -401,18 +437,6 @@ pub async fn remove_model(
         state
             .harness
             .remove_model_scenario(&profile, &provider, &id),
-    )
-    .await
-}
-
-#[tauri::command]
-#[specta::specta]
-pub async fn create_profile(app: AppHandle, name: String) -> Result<(), String> {
-    let state = app.state::<AppState>();
-    run_action(
-        &state,
-        "desktop.profile.create",
-        state.harness.create_profile(&name),
     )
     .await
 }
@@ -627,14 +651,30 @@ pub async fn snapshot_export(app: AppHandle, name: String) -> Result<(), String>
 pub async fn snapshot_import(app: AppHandle, name: String) -> Result<(), String> {
     let state = app.state::<AppState>();
     let store = deepmate_core::SnapshotStore::new(state.layout.snapshots_dir());
-    match store.load(&name) {
-        Ok(snapshot) => match state.harness.apply_snapshot(&snapshot).await {
-            Ok(_) => {
-                record_action(&state.layout, "desktop.snapshot.import".to_string());
-                Ok(())
-            }
-            Err(e) => Err(command_error(e)),
-        },
+    let snapshot = store.load(&name).map_err(command_error)?;
+    // Import overwrites the current setup, so a restore point is written
+    // first: a mistaken import stays undoable by hand (the file is named
+    // `state/pre-snapshot-import-<stamp>.json` and applies like any other
+    // snapshot).
+    match state.harness.write_restore_point("snapshot-import") {
+        Ok(Some(path)) => {
+            tracing::info!(path = %path.display(), "pre-import restore point written")
+        }
+        Ok(None) => {}
+        Err(err) => {
+            // No restore point means no way back: refuse rather than destroy
+            // the user's setup with no undo.
+            return Err(command_error_ctx(
+                "refusing to import without a restore point",
+                err,
+            ));
+        }
+    }
+    match state.harness.apply_snapshot(&snapshot).await {
+        Ok(_) => {
+            record_action(&state.layout, "desktop.snapshot.import".to_string());
+            Ok(())
+        }
         Err(e) => Err(command_error(e)),
     }
 }
@@ -863,10 +903,21 @@ pub async fn config_import(app: AppHandle) -> Result<Option<String>, String> {
     };
     let state = app.state::<AppState>();
     let backup = deepmate_core::ConfigBackup::load(&path).map_err(command_error)?;
-    backup
-        .config
-        .save(&state.layout.config_path())
-        .map_err(command_error)?;
+    // Keep the current settings so an unwanted import can be reversed with
+    // the same command pointed at the saved copy.
+    let current = state.layout.config_path();
+    if current.is_file() {
+        let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+        let saved = state
+            .layout
+            .state_dir()
+            .join(format!("pre-config-import-{stamp}.json"));
+        let previous = deepmate_core::Config::load(&current).map_err(command_error)?;
+        deepmate_core::ConfigBackup::capture(&previous)
+            .save(&saved)
+            .map_err(command_error)?;
+    }
+    backup.config.save(&current).map_err(command_error)?;
     record_action(&state.layout, "desktop.config.import".to_string());
     Ok(Some(path.display().to_string()))
 }
@@ -912,18 +963,18 @@ const UPDATE_TIMEOUT_SECS: u64 = 10;
 
 // Query the GitHub releases API for a newer DeepMate release. Shared by the
 // `check_update` command, the tray/startup notification and the install
-// flow. `None` means the current version is the latest, or the check could
-// not complete (offline, rate limited, ...) — an update check must fail
-// quietly, never block the UI.
+// flow. `Ok(None)` means the current version is the latest; `Err` means the
+// check could not complete (offline, rate limited, a bad response) and the
+// caller must say so rather than claiming the app is current.
 //
 // `DEEPMATE_UPDATE_API_URL` overrides the endpoint so the flow can be
 // exercised against a test release.
-pub(crate) async fn latest_release() -> Option<UpdateInfo> {
+pub(crate) async fn latest_release() -> Result<Option<UpdateInfo>, String> {
     let client = reqwest::Client::builder()
         .user_agent(format!("DeepMate/{}", env!("CARGO_PKG_VERSION")))
         .timeout(std::time::Duration::from_secs(UPDATE_TIMEOUT_SECS))
         .build()
-        .ok()?;
+        .map_err(|err| format!("failed to build the HTTP client: {err}"))?;
 
     #[derive(Deserialize)]
     struct Release {
@@ -934,34 +985,30 @@ pub(crate) async fn latest_release() -> Option<UpdateInfo> {
 
     let api =
         std::env::var("DEEPMATE_UPDATE_API_URL").unwrap_or_else(|_| UPDATE_API_URL.to_string());
-    let release: Release = match client.get(api).send().await {
-        Ok(response) if response.status().is_success() => match response.json().await {
-            Ok(release) => release,
-            Err(err) => {
-                tracing::warn!("update check: invalid response: {err}");
-                return None;
-            }
-        },
-        Ok(response) => {
-            tracing::warn!("update check: GitHub returned {}", response.status());
-            return None;
-        }
-        Err(err) => {
-            tracing::warn!("update check failed: {err}");
-            return None;
-        }
-    };
+    let response = client.get(api).send().await.map_err(|err| {
+        tracing::warn!("update check failed: {err}");
+        format!("could not reach the release server: {err}")
+    })?;
+    if !response.status().is_success() {
+        let status = response.status();
+        tracing::warn!("update check: the release server returned {status}");
+        return Err(format!("the release server returned HTTP {status}"));
+    }
+    let release: Release = response.json().await.map_err(|err| {
+        tracing::warn!("update check: invalid response: {err}");
+        format!("the release server returned an unreadable response: {err}")
+    })?;
 
     let current = env!("CARGO_PKG_VERSION");
     if !deepmate_core::is_newer_version(&release.tag_name, current) {
-        return None;
+        return Ok(None);
     }
-    Some(UpdateInfo {
+    Ok(Some(UpdateInfo {
         current_version: current.to_string(),
         latest_version: release.tag_name.trim_start_matches('v').to_string(),
         url: release.html_url,
         published_at: release.published_at,
-    })
+    }))
 }
 
 // The release document with its assets, for the install flow (richer than
@@ -984,7 +1031,26 @@ struct ReleaseAssetResponse {
 // the DMG opens so the drag-to-install step stays in the user's hands.
 #[tauri::command]
 #[specta::specta]
-pub async fn update_install(app: AppHandle) -> Result<UpdateInstallOutcome, String> {
+pub async fn update_install(
+    app: AppHandle,
+    channel: tauri::ipc::Channel<UpdateProgressEvent>,
+) -> Result<UpdateInstallOutcome, String> {
+    let result = update_install_inner(&app, &channel).await;
+    if let Err(err) = &result {
+        let _ = channel.send(UpdateProgressEvent {
+            phase: "failed".to_string(),
+            received: 0,
+            total: None,
+            message: Some(err.clone()),
+        });
+    }
+    result
+}
+
+async fn update_install_inner(
+    app: &AppHandle,
+    channel: &tauri::ipc::Channel<UpdateProgressEvent>,
+) -> Result<UpdateInstallOutcome, String> {
     let client = reqwest::Client::builder()
         .user_agent(format!("DeepMate/{}", env!("CARGO_PKG_VERSION")))
         .timeout(std::time::Duration::from_secs(600))
@@ -1031,18 +1097,65 @@ pub async fn update_install(app: AppHandle) -> Result<UpdateInstallOutcome, Stri
     std::fs::create_dir_all(&work)
         .map_err(|e| format!("failed to create the work directory: {e}"))?;
     let dmg_path = work.join(&dmg.name);
-    let bytes = client
+
+    // Stream to disk and report progress: a release bundle is hundreds of
+    // megabytes, and buffering it whole in memory (the previous shape) both
+    // spiked RAM and left the UI with nothing to show.
+    let _ = channel.send(UpdateProgressEvent {
+        phase: "downloading".to_string(),
+        received: 0,
+        total: None,
+        message: None,
+    });
+    let response = client
         .get(&dmg.url)
         .send()
         .await
         .map_err(|e| format!("failed to download the update: {e}"))?
         .error_for_status()
-        .map_err(|e| format!("failed to download the update: {e}"))?
-        .bytes()
-        .await
         .map_err(|e| format!("failed to download the update: {e}"))?;
-    std::fs::write(&dmg_path, &bytes).map_err(|e| format!("failed to write the update: {e}"))?;
+    let total = response.content_length();
+    let mut file = tokio::fs::File::create(&dmg_path)
+        .await
+        .map_err(|e| format!("failed to write the update: {e}"))?;
+    let mut received: u64 = 0;
+    let mut last_report: u64 = 0;
+    let mut stream = response.bytes_stream();
+    {
+        use futures::StreamExt as _;
+        use tokio::io::AsyncWriteExt as _;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| format!("failed to download the update: {e}"))?;
+            file.write_all(&chunk)
+                .await
+                .map_err(|e| format!("failed to write the update: {e}"))?;
+            received += chunk.len() as u64;
+            // Throttle the events: one per megabyte is plenty for a progress
+            // bar and keeps the channel from flooding.
+            if received - last_report >= 1_048_576 {
+                last_report = received;
+                let _ = channel.send(UpdateProgressEvent {
+                    phase: "downloading".to_string(),
+                    received,
+                    total,
+                    message: None,
+                });
+            }
+        }
+        file.flush()
+            .await
+            .map_err(|e| format!("failed to write the update: {e}"))?;
+        file.sync_all()
+            .await
+            .map_err(|e| format!("failed to write the update: {e}"))?;
+    }
 
+    let _ = channel.send(UpdateProgressEvent {
+        phase: "verifying".to_string(),
+        received,
+        total,
+        message: None,
+    });
     let sum_text = client
         .get(&checksum.url)
         .send()
@@ -1053,11 +1166,29 @@ pub async fn update_install(app: AppHandle) -> Result<UpdateInstallOutcome, Stri
         .text()
         .await
         .map_err(|e| format!("failed to download the checksum: {e}"))?;
-    let expected = deepmate_core::parse_checksum_file(&sum_text)
-        .ok_or_else(|| "the published checksum file is invalid".to_string())?;
-    deepmate_core::verify_sha256(&dmg_path, &expected)
+    // The checksum must name the artifact it is supposed to vouch for, so a
+    // stale or swapped sidecar cannot certify a different download.
+    let expected = deepmate_core::parse_checksum_for(&sum_text, &dmg.name)
+        .ok_or_else(|| "the published checksum file does not match the update".to_string())?;
+    let verify_path = dmg_path.clone();
+    tokio::task::spawn_blocking(move || deepmate_core::verify_sha256(&verify_path, &expected))
+        .await
+        .map_err(|e| format!("checksum task failed: {e}"))?
         .map_err(|e| format!("the downloaded update failed verification: {e}"))?;
 
+    // The checksum only proves the bytes arrived intact from the same
+    // channel; asking the OS to assess the code signature is the check that
+    // actually speaks to who produced the bundle.
+    verify_installer_signature(&dmg_path).map_err(|e| {
+        format!("the downloaded update is not correctly signed and was not opened: {e}")
+    })?;
+
+    let _ = channel.send(UpdateProgressEvent {
+        phase: "opening".to_string(),
+        received,
+        total,
+        message: None,
+    });
     open_with_platform(&dmg_path).map_err(|e| format!("failed to open the installer: {e}"))?;
     let state = app.state::<AppState>();
     record_action(&state.layout, "desktop.update.install".to_string());
@@ -1066,6 +1197,29 @@ pub async fn update_install(app: AppHandle) -> Result<UpdateInstallOutcome, Stri
         path: Some(dmg_path.display().to_string()),
         version: Some(version),
     })
+}
+
+// Have the OS validate the installer's code signature before it is opened.
+// Only macOS has a cheap CLI for this; other platforms pass through.
+fn verify_installer_signature(path: &std::path::Path) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let output = std::process::Command::new("spctl")
+            .args(["--assess", "--type", "install"])
+            .arg(path)
+            .output()
+            .map_err(|e| format!("could not run the signature check: {e}"))?;
+        if !output.status.success() {
+            let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(if detail.is_empty() {
+                "the installer failed the system signature assessment".to_string()
+            } else {
+                detail
+            });
+        }
+    }
+    let _ = path;
+    Ok(())
 }
 
 // Hand a downloaded file to the platform's installer association.
@@ -1093,8 +1247,24 @@ fn open_with_platform(path: &std::path::Path) -> Result<(), String> {
 
 #[tauri::command]
 #[specta::specta]
-pub async fn check_update() -> Result<Option<UpdateInfo>, String> {
-    Ok(latest_release().await)
+pub async fn check_update() -> Result<UpdateCheck, String> {
+    Ok(match latest_release().await {
+        Ok(Some(info)) => UpdateCheck {
+            status: UpdateCheckStatus::Available,
+            info: Some(info),
+            message: None,
+        },
+        Ok(None) => UpdateCheck {
+            status: UpdateCheckStatus::UpToDate,
+            info: None,
+            message: None,
+        },
+        Err(message) => UpdateCheck {
+            status: UpdateCheckStatus::Failed,
+            info: None,
+            message: Some(message),
+        },
+    })
 }
 
 // Open a URL in the system browser (used by the update banner). Only http(s)

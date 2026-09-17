@@ -25,7 +25,9 @@ describe("isMutating", () => {
     expect(isMutating("refresh")).toBe(false);
     expect(isMutating("search")).toBe(false);
     expect(isMutating("doctor")).toBe(false);
-    expect(isMutating("runtime")).toBe(false);
+    // Starting/stopping a scenario is slow and must disable the controls:
+    // leaving it out let Start be clicked while a start was in flight.
+    expect(isMutating("runtime")).toBe(true);
   });
 });
 

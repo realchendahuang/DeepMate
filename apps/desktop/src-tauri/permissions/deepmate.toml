@@ -1,0 +1,63 @@
+# Application permissions for the DeepMate control center.
+#
+# Declaring these turns the app's ACL manifest on: from then on every custom
+# command the webview may call has to be granted by a capability, so a
+# compromised renderer cannot reach commands the UI never uses. The list
+# mirrors `specta_builder()` in `src/lib.rs`; a command added there without a
+# matching entry here is rejected at invoke time, which is the failure mode we
+# want (fail closed) and is caught by the smoke tests.
+
+[[permission]]
+identifier = "allow-app-commands"
+description = "Commands the DeepMate control-center webview is allowed to invoke."
+commands.allow = [
+  "refresh_all",
+  "runtime_start",
+  "runtime_stop",
+  "runtime_restart",
+  "runtime_list",
+  "task_run",
+  "open_harness",
+  "run_doctor",
+  "doctor_fix",
+  "list_profiles",
+  "list_providers",
+  "list_models",
+  "upsert_provider",
+  "remove_provider",
+  "upsert_model",
+  "remove_model",
+  "create_scenario",
+  "remove_profile",
+  "rename_profile",
+  "set_scenario_description",
+  "list_plugins",
+  "plugin_install",
+  "plugin_disable",
+  "plugin_enable",
+  "list_disabled_plugins",
+  "plugin_op_stream",
+  "market_search",
+  "plugin_check",
+  "snapshot_export",
+  "snapshot_import",
+  "snapshot_list",
+  "snapshot_delete",
+  "config_export",
+  "config_import",
+  "set_language",
+  "set_theme",
+  "set_close_to_tray",
+  "set_check_updates",
+  "set_notify_updates",
+  "autostart_get",
+  "autostart_set",
+  "set_market_default_source",
+  "set_market_refresh_interval",
+  "advanced_file_read",
+  "advanced_file_save",
+  "check_update",
+  "update_install",
+  "open_url",
+  "get_config",
+]

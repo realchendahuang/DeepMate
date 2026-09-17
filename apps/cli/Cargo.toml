@@ -15,6 +15,7 @@ deepmate-core = { path = "../../crates/deepmate-core" }
 deepmate-platform = { path = "../../crates/deepmate-platform" }
 deepseek-harness = { path = "../../crates/deepseek-harness" }
 anyhow.workspace = true
+chrono.workspace = true
 clap.workspace = true
 flate2.workspace = true
 futures.workspace = true

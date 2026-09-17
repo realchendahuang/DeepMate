@@ -20,7 +20,6 @@ export const commands = {
 	removeProvider: (profile: string, id: string) => typedError<null, string>(__TAURI_INVOKE("remove_provider", { profile, id })),
 	upsertModel: (profile: string, provider: string, model: Model) => typedError<null, string>(__TAURI_INVOKE("upsert_model", { profile, provider, model })),
 	removeModel: (profile: string, provider: string, id: string) => typedError<null, string>(__TAURI_INVOKE("remove_model", { profile, provider, id })),
-	createProfile: (name: string) => typedError<null, string>(__TAURI_INVOKE("create_profile", { name })),
 	createScenario: (name: string, surface: Surface) => typedError<null, string>(__TAURI_INVOKE("create_scenario", { name, surface })),
 	removeProfile: (name: string) => typedError<null, string>(__TAURI_INVOKE("remove_profile", { name })),
 	renameProfile: (old: string, newName: string) => typedError<null, string>(__TAURI_INVOKE("rename_profile", { old, newName })),
@@ -50,13 +49,8 @@ export const commands = {
 	setMarketRefreshInterval: (seconds: number) => typedError<null, string>(__TAURI_INVOKE("set_market_refresh_interval", { seconds })),
 	advancedFileRead: (scope: string, name: string | null) => typedError<string | null, string>(__TAURI_INVOKE("advanced_file_read", { scope, name })),
 	advancedFileSave: (scope: string, name: string | null, content: string) => typedError<null, string>(__TAURI_INVOKE("advanced_file_save", { scope, name, content })),
-	checkUpdate: () => typedError<{
-	current_version: string,
-	latest_version: string,
-	url: string,
-	published_at: string,
-} | null, string>(__TAURI_INVOKE("check_update")),
-	updateInstall: () => typedError<UpdateInstallOutcome, string>(__TAURI_INVOKE("update_install")),
+	checkUpdate: () => typedError<UpdateCheck, string>(__TAURI_INVOKE("check_update")),
+	updateInstall: (channel: Channel<UpdateProgressEvent>) => typedError<UpdateInstallOutcome, string>(__TAURI_INVOKE("update_install", { channel })),
 	openUrl: (url: string) => typedError<null, string>(__TAURI_INVOKE("open_url", { url })),
 	getConfig: () => typedError<UiPrefs, string>(__TAURI_INVOKE("get_config")),
 };
@@ -112,6 +106,7 @@ export type DoctorCheck_Serialize = {
 
 export type DoctorFixReport = {
 	fixed: number,
+	failures: string[],
 };
 
 export type DoctorReport = DoctorReport_Serialize | DoctorReport_Deserialize;
@@ -234,6 +229,14 @@ export type UiPrefs = {
 	market_refresh_interval_seconds: number,
 };
 
+export type UpdateCheck = {
+	status: UpdateCheckStatus,
+	info: UpdateInfo | null,
+	message: string | null,
+};
+
+export type UpdateCheckStatus = "up_to_date" | "available" | "failed";
+
 export type UpdateInfo = {
 	current_version: string,
 	latest_version: string,
@@ -245,6 +248,13 @@ export type UpdateInstallOutcome = {
 	status: string,
 	path: string | null,
 	version: string | null,
+};
+
+export type UpdateProgressEvent = {
+	phase: string,
+	received: number,
+	total: number | null,
+	message: string | null,
 };
 
 /* Tauri Specta runtime */

@@ -116,6 +116,24 @@ pub struct DoctorReport {
     pub checks: Vec<DoctorCheck>,
 }
 
+// The outcome of a one-click Doctor repair.
+//
+// A batch repair attempts every item, so "partly fixed" is a real, reportable
+// outcome: `fixed` counts the repairs that landed and `failures` names the
+// ones that did not, so the UI can say "repaired 3 of 5" instead of claiming
+// success.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+pub struct FixReport {
+    pub fixed: u32,
+    pub failures: Vec<String>,
+}
+
+impl FixReport {
+    pub fn is_clean(&self) -> bool {
+        self.failures.is_empty()
+    }
+}
+
 // Harness profile (normalized representation).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct Profile {

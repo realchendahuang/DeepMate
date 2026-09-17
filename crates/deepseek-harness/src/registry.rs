@@ -40,12 +40,22 @@ impl DisabledRegistry {
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
             Err(err) => return Err(err.into()),
         };
-        let file: RegistryFile = serde_json::from_str(&text).map_err(|err| {
-            CoreError::InvalidState(format!(
-                "invalid disabled-plugin registry {}: {err}",
-                path.display()
-            ))
-        })?;
+        let file: RegistryFile = match serde_json::from_str(&text) {
+            Ok(file) => file,
+            Err(err) => {
+                // A corrupt registry must not make the plugin panel unusable
+                // forever: quarantine the bytes and start from an empty
+                // table. The cost is that previously disabled plugins are
+                // listed as installed again, which is recoverable by hand.
+                tracing::warn!(
+                    path = %path.display(),
+                    error = %err,
+                    "disabled-plugin registry is unreadable; resetting it"
+                );
+                let _ = deepmate_core::quarantine(path);
+                return Ok(Vec::new());
+            }
+        };
         if file.schema > SCHEMA {
             return Err(CoreError::InvalidState(format!(
                 "disabled-plugin registry schema {} is newer than this build supports ({SCHEMA})",
@@ -143,11 +153,7 @@ impl DisabledRegistry {
                 "failed to serialize disabled-plugin registry: {err}"
             ))
         })?;
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(path, text)?;
-        Ok(())
+        deepmate_core::write_atomic_string(path, &text)
     }
 }
 

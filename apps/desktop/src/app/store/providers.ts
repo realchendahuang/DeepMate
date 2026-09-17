@@ -2,6 +2,10 @@
 // these maps doubles as the "loaded" flag: switching scenarios renders the
 // cached data instantly and only shows a skeleton the first time. Mutations
 // reload only the affected scenario's slices.
+//
+// Failures are recorded too. A load that only toasted and left the map empty
+// made the page render a skeleton forever, which reads as "the app hung"
+// rather than "this failed, try again".
 
 import { create } from "zustand";
 import type { Model, Provider } from "@/shared/api/api";
@@ -11,6 +15,9 @@ import { runBusy } from "./busy";
 interface ProviderState {
   providers: Record<string, Provider[]>;
   models: Record<string, Model[]>;
+  // Per-scenario load failures, cleared by a successful load.
+  providersError: Record<string, string>;
+  modelsError: Record<string, string>;
   loadProviders: (profile: string) => Promise<void>;
   loadModels: (profile: string) => Promise<void>;
   upsertProvider: (profile: string, provider: Provider) => Promise<void>;
@@ -22,13 +29,35 @@ interface ProviderState {
 export const useProviderStore = create<ProviderState>((set, get) => ({
   providers: {},
   models: {},
+  providersError: {},
+  modelsError: {},
   loadProviders: async (profile: string) => {
-    const providers = await runBusy("load", () => api.listProviders(profile));
-    set((s) => ({ providers: { ...s.providers, [profile]: providers } }));
+    try {
+      const providers = await runBusy("load", () => api.listProviders(profile));
+      set((s) => {
+        const providersError = { ...s.providersError };
+        delete providersError[profile];
+        return { providers: { ...s.providers, [profile]: providers }, providersError };
+      });
+    } catch (error) {
+      // runBusy already toasted; keep the failure so the page can offer a
+      // retry instead of showing a skeleton forever.
+      set((s) => ({
+        providersError: { ...s.providersError, [profile]: String(error) },
+      }));
+    }
   },
   loadModels: async (profile: string) => {
-    const models = await runBusy("load", () => api.listModels(profile));
-    set((s) => ({ models: { ...s.models, [profile]: models } }));
+    try {
+      const models = await runBusy("load", () => api.listModels(profile));
+      set((s) => {
+        const modelsError = { ...s.modelsError };
+        delete modelsError[profile];
+        return { models: { ...s.models, [profile]: models }, modelsError };
+      });
+    } catch (error) {
+      set((s) => ({ modelsError: { ...s.modelsError, [profile]: String(error) } }));
+    }
   },
   upsertProvider: async (profile: string, provider: Provider) => {
     await runBusy("save", () => api.upsertProvider(profile, provider));

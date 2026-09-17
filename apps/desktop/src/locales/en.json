@@ -157,7 +157,8 @@
       "installing": "Installing…",
       "removing": "Removing…",
       "updating": "Updating…"
-    }
+    },
+    "marketSearchFailed": "The search failed; please try again"
   },
   "settings": {
     "title": "Settings",
@@ -279,7 +280,17 @@
     "healthHasIssues_one": "{{count}} issue needs attention",
     "healthHasIssues_other": "{{count}} issues need attention",
     "scenarioPluginCount_one": "{{count}} plugin",
-    "scenarioPluginCount_other": "{{count}} plugins"
+    "scenarioPluginCount_other": "{{count}} plugins",
+    "modality": {
+      "text": "文本",
+      "image": "图像",
+      "video": "视频",
+      "pdf": "PDF"
+    },
+    "deleteProfile": "Delete scenario",
+    "importSettingsAction": "Overwrite with import",
+    "updateInstalling": "Downloading the installer…",
+    "loadFailed": "Loading failed; please try again"
   },
   "common": {
     "close": "Close",
@@ -294,7 +305,15 @@
       "generic": "Something went wrong. Try again.",
       "crash": "The interface hit an unexpected error.",
       "reload": "Reload the app",
-      "details": "Details"
-    }
+      "details": "Details",
+      "io": "The file could not be read or written; check disk space and folder permissions",
+      "spawnFailed": "The engine process could not be started",
+      "commandFailed": "The engine reported a command failure",
+      "invalidState": "That action is not allowed in the current state",
+      "unsupported": "This operation is not supported on this system",
+      "updateCheckFailed": "The update check failed; please try again later",
+      "doctorPartlyFixed": "Repaired {{fixed}} item(s); {{failed}} failed"
+    },
+    "retry": "Retry"
   }
 }
