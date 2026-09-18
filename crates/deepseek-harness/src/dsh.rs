@@ -2339,6 +2339,46 @@ pet:
         restore_env(DSH_HOME_ENV, previous);
     }
 
+    // The settings path is read back out of a document the user can edit;
+    // `..` and absolute paths must not be honoured, or the advanced editor
+    // would read and write files outside the harness home.
+    #[test]
+    fn a_settings_path_cannot_escape_the_harness_home() {
+        let home = Path::new("/tmp/deepmate-home-test");
+        // Inside the home is fine.
+        assert_eq!(
+            resolve_inside_home(home, "profiles/web/settings.yaml").unwrap(),
+            home.join("profiles/web/settings.yaml")
+        );
+        for escape in [
+            "../../../etc/passwd",
+            "profiles/../../secrets.yaml",
+            "/etc/passwd",
+            "./../outside.yaml",
+        ] {
+            assert!(
+                resolve_inside_home(home, escape).is_err(),
+                "path should be refused: {escape}"
+            );
+        }
+    }
+
+    // cordis.patch.yml carries `!!js` expressions the YAML reader cannot
+    // handle; they are neutralized for validation only, so a real syntax
+    // error is still caught while the file keeps its expressions on disk.
+    #[test]
+    fn cordis_patch_validation_tolerates_js_tags_but_catches_errors() {
+        let good = "- id: settings\n  name: '@deepseek-ai/dsh-settings-file'\n  config:\n    path: !!js dshHomePath('profiles/web/settings.yaml')\n";
+        let neutralized = neutralize_js_tags(good);
+        assert!(!neutralized.contains("!!js"), "the tag must be neutralized");
+        assert!(yaml::from_str::<Value>(&neutralized).is_ok());
+
+        // A genuine structural error is still rejected.
+        let broken = "- id: settings\n  config:\n   path: [unclosed\n";
+        let broken_neutralized = neutralize_js_tags(broken);
+        assert!(yaml::from_str::<Value>(&broken_neutralized).is_err());
+    }
+
     #[test]
     fn profile_create_and_remove_roundtrip() {
         let _guard = ENV_LOCK.lock().unwrap();

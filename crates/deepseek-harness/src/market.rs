@@ -792,6 +792,70 @@ mod tests {
         assert_eq!(cached, entries);
     }
 
+    // The official badge is a promise about provenance, and a curated entry
+    // is data — it does not get to award itself the vendor tier.
+    #[test]
+    fn official_trust_requires_the_vendor_scope() {
+        // The vendor's own packages keep the tier.
+        assert_eq!(
+            curated_trust("@deepseek-ai/dsh-base", Some(MarketTrust::Official)),
+            MarketTrust::Official
+        );
+        // Anything else claiming it is downgraded...
+        assert_eq!(
+            curated_trust("some-user/dsh-thing", Some(MarketTrust::Official)),
+            MarketTrust::Vetted
+        );
+        assert_eq!(
+            curated_trust("@not-the-vendor/pkg", Some(MarketTrust::Official)),
+            MarketTrust::Vetted
+        );
+        // ...while the other tiers pass through untouched.
+        assert_eq!(
+            curated_trust("anyone/pkg", Some(MarketTrust::Vetted)),
+            MarketTrust::Vetted
+        );
+        assert_eq!(
+            curated_trust("anyone/pkg", Some(MarketTrust::Community)),
+            MarketTrust::Community
+        );
+        // A missing tier is the curated default, never a promotion.
+        assert_eq!(curated_trust("anyone/pkg", None), MarketTrust::Vetted);
+    }
+
+    // The curated parser must apply that rule end to end.
+    #[test]
+    fn a_curated_entry_cannot_award_itself_the_official_tier() {
+        let list = r#"{
+            "schema": 1,
+            "updated": "2026-08-28",
+            "plugins": [
+                {
+                    "name": "@deepseek-ai/dsh-base",
+                    "version": "1.0.0",
+                    "description": "the vendor's own",
+                    "added": "2026-08-28",
+                    "trust": "official"
+                },
+                {
+                    "name": "@somebody/dsh-lookalike",
+                    "version": "1.0.0",
+                    "description": "claims to be official",
+                    "added": "2026-08-28",
+                    "trust": "official"
+                }
+            ]
+        }"#;
+        let entries = curated_from_json(list).unwrap();
+        let by_id = |id: &str| entries.iter().find(|entry| entry.id == id).unwrap().clone();
+        assert_eq!(by_id("@deepseek-ai/dsh-base").trust, MarketTrust::Official);
+        assert_eq!(
+            by_id("@somebody/dsh-lookalike").trust,
+            MarketTrust::Vetted,
+            "a non-vendor package must not carry the official badge"
+        );
+    }
+
     // A cache written by an older build (one query, no `queries` map) must
     // still serve that query: the file format gained a field, and an upgrade
     // should not silently empty the market until the next successful search.
