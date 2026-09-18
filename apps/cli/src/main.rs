@@ -46,6 +46,12 @@ enum Command {
     },
     /// Run environment diagnostics.
     Doctor,
+    /// Show DeepMate's own action history (most recent first).
+    History {
+        /// How many entries to show.
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+    },
     /// Control the harness runtime.
     Runtime {
         #[command(subcommand)]
@@ -581,6 +587,38 @@ async fn run(
                 }
             }
             "cli.doctor".to_string()
+        }
+        Command::History { limit } => {
+            let (records, skipped) = layout.history().read_lenient()?;
+            let total = records.len();
+            // Most recent first: the reason to open this is "what did it just
+            // do", and the file is append-only.
+            let shown: Vec<_> = records.iter().rev().take(*limit).collect();
+            if cli.json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "total": total,
+                        "skipped": skipped,
+                        "records": shown,
+                    }))?
+                );
+            } else {
+                println!(
+                    "{total} recorded action(s), showing the last {}",
+                    shown.len()
+                );
+                for record in &shown {
+                    match &record.detail {
+                        Some(detail) => println!("{}  {}  ({detail})", record.time, record.action),
+                        None => println!("{}  {}", record.time, record.action),
+                    }
+                }
+                if skipped > 0 {
+                    println!("({skipped} damaged line(s) skipped)");
+                }
+            }
+            "cli.history".to_string()
         }
         Command::Runtime { action } => {
             let name = match action {

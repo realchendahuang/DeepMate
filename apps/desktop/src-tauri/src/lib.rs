@@ -404,21 +404,82 @@ fn specta_builder() -> tauri_specta::Builder<tauri::Wry> {
 }
 
 // The desktop app accepts the same --data-dir flag as the CLI.
+#[derive(Debug, Default, PartialEq, Eq)]
 struct Cli {
     data_dir: Option<std::path::PathBuf>,
 }
 
+// Parse the desktop app's arguments.
+//
+// Both spellings are accepted (`--data-dir <path>` and `--data-dir=<path>`)
+// because the autostart registration writes the flag itself and users copy
+// either form. Anything else is reported instead of ignored: a mistyped flag
+// silently starting against the default data directory is how a user ends up
+// with two sets of settings.
 fn parse_cli() -> Cli {
-    let mut data_dir = None;
-    let mut args = std::env::args().skip(1);
+    parse_cli_from(std::env::args().skip(1))
+}
+
+fn parse_cli_from(args: impl IntoIterator<Item = String>) -> Cli {
+    let mut cli = Cli::default();
+    let mut args = args.into_iter();
     while let Some(arg) = args.next() {
-        if arg == "--data-dir" {
-            if let Some(v) = args.next() {
-                data_dir = Some(v.into());
+        if let Some(value) = arg.strip_prefix("--data-dir=") {
+            if !value.is_empty() {
+                cli.data_dir = Some(value.into());
             }
+            continue;
         }
+        if arg == "--data-dir" {
+            match args.next() {
+                Some(value) if !value.is_empty() => cli.data_dir = Some(value.into()),
+                _ => {
+                    eprintln!("warning: --data-dir needs a path; using the default data directory")
+                }
+            }
+            continue;
+        }
+        // macOS passes `-psn_...` when an app is launched from Finder.
+        if arg.starts_with("-psn_") {
+            continue;
+        }
+        eprintln!("warning: ignoring unknown argument {arg:?}");
     }
-    Cli { data_dir }
+    cli
+}
+
+#[cfg(test)]
+mod cli_tests {
+    use super::parse_cli_from;
+    use std::path::PathBuf;
+
+    fn parse(args: &[&str]) -> super::Cli {
+        parse_cli_from(args.iter().map(|arg| arg.to_string()))
+    }
+
+    #[test]
+    fn both_data_dir_spellings_are_accepted() {
+        assert_eq!(
+            parse(&["--data-dir", "/tmp/x"]).data_dir,
+            Some(PathBuf::from("/tmp/x"))
+        );
+        assert_eq!(
+            parse(&["--data-dir=/tmp/x"]).data_dir,
+            Some(PathBuf::from("/tmp/x"))
+        );
+    }
+
+    #[test]
+    fn a_missing_or_empty_value_falls_back_to_the_default() {
+        assert_eq!(parse(&["--data-dir"]).data_dir, None);
+        assert_eq!(parse(&["--data-dir="]).data_dir, None);
+    }
+
+    #[test]
+    fn the_finder_process_serial_number_is_ignored() {
+        let cli = parse(&["-psn_0_123456", "--data-dir", "/tmp/y"]);
+        assert_eq!(cli.data_dir, Some(PathBuf::from("/tmp/y")));
+    }
 }
 
 // Export the frontend's typed bindings. Runs on every debug launch, and can

@@ -152,7 +152,7 @@ impl Market {
         harness_version: Option<String>,
     ) -> CoreResult<CompatReport> {
         let name = spec_package_name(spec);
-        let url = format!("{NPM_REGISTRY_URL}/{}", encode_package_name(name));
+        let url = format!("{NPM_REGISTRY_URL}/{}", encode_package_name(name)?);
         let response = client
             .get(url)
             .send()
@@ -333,11 +333,47 @@ pub(crate) fn spec_package_name(spec: &str) -> &str {
     spec.split_once('@').map_or(spec, |(name, _)| name)
 }
 
-// Package names are used verbatim in the registry URL; the `@scope/name`
-// slash is a legal path character, so no percent-encoding is needed beyond
-// rejecting whitespace and separators that would change the path.
-fn encode_package_name(name: &str) -> String {
-    name.trim().to_string()
+// A package name, as it may appear in a registry URL.
+//
+// npm names are lowercase, keep the `@scope/` prefix, and may contain `-`,
+// `_`, `.` and `~`. Anything else (a space, a query string, a path segment)
+// would change which document is requested, so it is rejected rather than
+// percent-encoded: a name that needs escaping is not a package name.
+fn encode_package_name(name: &str) -> CoreResult<String> {
+    let trimmed = name.trim();
+    let body = match trimmed.strip_prefix('@') {
+        Some(rest) => match rest.split_once('/') {
+            Some((scope, package)) => {
+                if scope.is_empty() || package.is_empty() {
+                    return Err(invalid_package_name(trimmed));
+                }
+                package
+            }
+            None => return Err(invalid_package_name(trimmed)),
+        },
+        None => trimmed,
+    };
+    let valid = !body.is_empty()
+        && body.chars().all(|c| {
+            c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '_' | '.' | '~')
+        });
+    let scope_valid = match trimmed.strip_prefix('@') {
+        Some(rest) => rest.split_once('/').is_some_and(|(scope, _)| {
+            !scope.is_empty()
+                && scope.chars().all(|c| {
+                    c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '_' | '.')
+                })
+        }),
+        None => true,
+    };
+    if !valid || !scope_valid {
+        return Err(invalid_package_name(trimmed));
+    }
+    Ok(trimmed.to_string())
+}
+
+fn invalid_package_name(name: &str) -> CoreError {
+    CoreError::InvalidState(format!("not a valid npm package name: {name:?}"))
 }
 
 // Extract a `CompatReport` from a registry packument document. Pure so it can
@@ -953,6 +989,48 @@ mod tests {
         let cached = market.cached("mnemon").expect("same query must hit");
         assert_eq!(cached, entries);
         assert!(market.cached("other").is_none(), "other query must miss");
+    }
+
+    // The name goes straight into a registry URL, so anything that would
+    // change which document is fetched is refused instead of escaped.
+    #[test]
+    fn package_names_are_validated_not_escaped() {
+        // Real names, scoped and not.
+        for name in [
+            "dsh-mnemon",
+            "@deepseek-ai/dsh-base",
+            "a",
+            "a.b_c~d",
+            "@scope/pkg",
+        ] {
+            assert_eq!(
+                encode_package_name(name).unwrap(),
+                name,
+                "should be accepted: {name}"
+            );
+            // Surrounding whitespace is trimmed, not rejected.
+            assert_eq!(encode_package_name(&format!("  {name}  ")).unwrap(), name);
+        }
+        // Things that would alter the request.
+        for name in [
+            "",
+            "  ",
+            "pkg?x=1",
+            "pkg/extra",
+            "../pkg",
+            "pkg name",
+            "PKG",
+            "@scope",
+            "@scope/",
+            "@/pkg",
+            "pkg#frag",
+            "pkg%2Fother",
+        ] {
+            assert!(
+                encode_package_name(name).is_err(),
+                "should be refused: {name:?}"
+            );
+        }
     }
 
     #[test]

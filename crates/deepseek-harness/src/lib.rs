@@ -15,7 +15,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use std::time::Duration;
 
 use deepmate_core::error::{CoreError, CoreResult};
@@ -104,6 +104,99 @@ fn duration_from_env(key: &str) -> Option<Duration> {
             None
         }
     }
+}
+
+// How long a failed CLI probe is remembered. Long enough that the desktop's
+// ten-second poll does not re-scan every candidate each tick, short enough
+// that installing the harness is picked up without a restart.
+const CLI_FAILURE_TTL: Duration = Duration::from_secs(60);
+const CLI_FAILURE_TTL_ENV: &str = "DEEPMATE_CLI_PROBE_TTL_SECS";
+
+fn cli_failure_ttl() -> Duration {
+    duration_from_env(CLI_FAILURE_TTL_ENV).unwrap_or(CLI_FAILURE_TTL)
+}
+
+// The harness CLI probe result, cached for the process lifetime when positive
+// and for a short window when negative.
+#[derive(Debug, Default)]
+struct CliProbeCache {
+    found: Option<String>,
+    // When the most recent unsuccessful probe ran.
+    failed_at: Option<std::time::Instant>,
+}
+
+impl CliProbeCache {
+    fn failure_is_fresh(&self, now: std::time::Instant, ttl: Duration) -> bool {
+        self.failed_at
+            .is_some_and(|failed_at| now.duration_since(failed_at) < ttl)
+    }
+}
+
+// How many `task-<profile>-*.log` files to keep per log directory. Task logs
+// are a record of recent runs, not an archive.
+const TASK_LOG_KEEP: usize = 20;
+
+// Drop the oldest task logs, keeping the newest `keep` files.
+//
+// Only files matching the `task-*.log` shape are touched, so a harness log or
+// anything else in the directory is left alone. Failures are logged and
+// otherwise ignored: housekeeping must never fail the task it follows.
+fn prune_task_logs(dir: &Path, keep: usize) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut logs: Vec<(std::time::SystemTime, PathBuf)> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            let name = path.file_name()?.to_string_lossy().into_owned();
+            if !name.starts_with("task-") || !name.ends_with(".log") {
+                return None;
+            }
+            let modified = entry.metadata().ok()?.modified().ok()?;
+            Some((modified, path))
+        })
+        .collect();
+    if logs.len() <= keep {
+        return;
+    }
+    // Newest first, then remove everything past the cap.
+    logs.sort_by_key(|entry| std::cmp::Reverse(entry.0));
+    for (_, path) in logs.into_iter().skip(keep) {
+        if let Err(err) = std::fs::remove_file(&path) {
+            tracing::warn!(path = %path.display(), error = %err, "failed to prune an old task log");
+        }
+    }
+}
+
+// The version token out of a launcher's `--version` output, if it prints one.
+fn parse_cli_version(cli: &str) -> Option<String> {
+    let output = Command::new(cli).arg("--version").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    text.lines().next()?.split_whitespace().find_map(|token| {
+        let candidate = token.trim_start_matches('v');
+        let looks_like_version = candidate.chars().next().is_some_and(|c| c.is_ascii_digit())
+            && candidate.split('.').count() >= 2
+            && candidate
+                .chars()
+                .all(|c| c.is_ascii_digit() || c == '.' || c == '-' || c.is_ascii_alphabetic());
+        looks_like_version.then(|| candidate.to_string())
+    })
+}
+
+// Probe each candidate command in order, returning the first the OS can spawn.
+//
+// A non-zero exit still counts as present: the launcher exists but may not
+// implement `--version`. Free rather than a method so the async path can run
+// it on a blocking thread with nothing borrowed.
+fn probe_commands(candidates: &[String]) -> Option<String> {
+    candidates.iter().find_map(|name| {
+        Command::new(name).arg("--version").output().ok()?;
+        Some(name.clone())
+    })
 }
 
 // Read the last `count` non-empty lines of a file. Best effort: an
@@ -265,7 +358,7 @@ pub struct DeepSeekHarness {
     ui_url: Option<String>,
     cli_names: Vec<String>,
     data_dir: Option<PathBuf>,
-    cli_cache: OnceLock<String>,
+    cli_cache: std::sync::Mutex<CliProbeCache>,
     http: reqwest::Client,
     // Market cache freshness; mirrors `Config.market.refresh_interval_seconds`
     // when assembled through `deepmate_app::build_harness`.
@@ -287,7 +380,7 @@ impl DeepSeekHarness {
             ui_url: None,
             cli_names: vec!["dsh".to_string(), "deepseek-harness".to_string()],
             data_dir: None,
-            cli_cache: OnceLock::new(),
+            cli_cache: std::sync::Mutex::new(CliProbeCache::default()),
             http: market::build_http_client(),
             market_ttl: Duration::from_secs(3600),
         }
@@ -431,44 +524,83 @@ impl DeepSeekHarness {
         None
     }
 
-    // Locate the harness CLI, probing each candidate command. Only a
-    // successful probe is cached: the desktop app is a long-lived tray
-    // process, and a user who installs the harness after launching DeepMate
-    // must be picked up without a restart.
+    // Locate the harness CLI, probing each candidate command.
+    //
+    // A found CLI is cached for the process lifetime. A *failure* is cached
+    // too, for a shorter window: the desktop polls the overview every ten
+    // seconds, and without a negative cache each poll re-spawned every
+    // candidate (including a readdir of npm's npx cache) on a machine where
+    // the harness is simply not installed. The window is short enough that
+    // installing the harness is still picked up without a restart.
     fn find_cli(&self) -> Option<String> {
-        if let Some(cli) = self.cli_cache.get() {
-            return Some(cli.clone());
+        if let Some(found) = self.cached_cli() {
+            return Some(found);
         }
-        let found = self.candidate_commands().into_iter().find_map(|name| {
-            // If the process can be spawned at all, we treat it as present.
-            // A non-zero exit may still mean a real CLI exists but uses a
-            // different flag.
-            Command::new(&name).arg("--version").output().ok()?;
-            Some(name)
-        })?;
-        let _ = self.cli_cache.set(found.clone());
-        Some(found)
+        if self.probe_failure_is_fresh(std::time::Instant::now()) {
+            return None;
+        }
+        let found = probe_commands(&self.candidate_commands());
+        self.remember_probe(&found);
+        found
+    }
+
+    // `find_cli` off the async worker threads.
+    //
+    // The probe spawns a process per candidate and scans npm's npx cache, so
+    // it must not run on a runtime worker. Only the candidate list crosses
+    // into the blocking task, which keeps this free of both borrowed state
+    // and interior unsafe.
+    async fn find_cli_async(&self) -> Option<String> {
+        if let Some(found) = self.cached_cli() {
+            return Some(found);
+        }
+        let candidates = self.candidate_commands();
+        let found = tokio::task::spawn_blocking(move || probe_commands(&candidates))
+            .await
+            .unwrap_or(None);
+        self.remember_probe(&found);
+        found
+    }
+
+    // The cached positive answer, if the CLI has already been located.
+    fn cached_cli(&self) -> Option<String> {
+        self.cli_cache
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .found
+            .clone()
+    }
+
+    fn remember_probe(&self, found: &Option<String>) {
+        let mut cache = self.cli_cache.lock().unwrap_or_else(|err| err.into_inner());
+        match found {
+            Some(cli) => cache.found = Some(cli.clone()),
+            None => cache.failed_at = Some(std::time::Instant::now()),
+        }
+    }
+
+    // Whether a cached "not found" is still within its short window.
+    fn probe_failure_is_fresh(&self, now: std::time::Instant) -> bool {
+        self.cli_cache
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .failure_is_fresh(now, cli_failure_ttl())
     }
 
     // Best-effort version from `--version` output. The real `dsh` launcher
     // reports a prerelease like `0.1.0-rc.6`; it stays None only when no
     // token looks like a version at all.
     fn cli_version(&self) -> Option<String> {
-        let cli = self.find_cli()?;
-        let output = Command::new(&cli).arg("--version").output().ok()?;
-        if !output.status.success() {
-            return None;
-        }
-        let text = String::from_utf8_lossy(&output.stdout);
-        text.lines().next()?.split_whitespace().find_map(|token| {
-            let candidate = token.trim_start_matches('v');
-            let looks_like_version = candidate.chars().next().is_some_and(|c| c.is_ascii_digit())
-                && candidate.split('.').count() >= 2
-                && candidate
-                    .chars()
-                    .all(|c| c.is_ascii_digit() || c == '.' || c == '-' || c.is_ascii_alphabetic());
-            looks_like_version.then(|| candidate.to_string())
-        })
+        parse_cli_version(&self.find_cli()?)
+    }
+
+    // `cli_version` off the async worker threads: it spawns the CLI, and the
+    // desktop calls this on every overview poll.
+    async fn cli_version_async(&self) -> Option<String> {
+        let cli = self.find_cli_async().await?;
+        tokio::task::spawn_blocking(move || parse_cli_version(&cli))
+            .await
+            .unwrap_or(None)
     }
 
     // The per-scenario pid file: `state/run-<profile>.pid`. The legacy
@@ -776,13 +908,18 @@ impl DeepSeekHarness {
     }
 
     pub async fn detect(&self) -> CoreResult<Detection> {
-        let cli = self.find_cli();
+        let cli = self.find_cli_async().await;
+        let version = if cli.is_some() {
+            self.cli_version_async().await
+        } else {
+            None
+        };
         Ok(Detection {
             found: cli.is_some(),
             harness: cli.as_ref().map(|_cli| HarnessInfo {
                 id: HARNESS_ID.to_string(),
                 name: HARNESS_NAME.to_string(),
-                version: self.cli_version(),
+                version,
             }),
             detail: cli.map(|cli| format!("found CLI: {cli}")),
         })
@@ -794,7 +931,7 @@ impl DeepSeekHarness {
     }
 
     pub async fn status_scenario(&self, profile: &str) -> CoreResult<RuntimeStatus> {
-        if self.find_cli().is_none() {
+        if self.find_cli_async().await.is_none() {
             return Ok(RuntimeStatus {
                 kind: RuntimeStatusKind::Error,
                 pid: None,
@@ -1838,6 +1975,9 @@ impl DeepSeekHarness {
                 "failed to write the task log"
             ),
         }
+        // Task logs are never read by the app, so without a cap they grow
+        // forever. Keep the most recent few per profile.
+        prune_task_logs(log.parent().unwrap_or(dir), TASK_LOG_KEEP);
     }
 
     // Compatibility check: the harness version detected from the CLI is
@@ -1936,7 +2076,7 @@ impl DeepSeekHarness {
     }
 
     pub async fn doctor(&self) -> CoreResult<DoctorReport> {
-        let cli = self.find_cli();
+        let cli = self.find_cli_async().await;
         let mut checks = Vec::new();
 
         if cli.is_some() {
@@ -2325,6 +2465,116 @@ pub(crate) mod tests {
     // unix-only snapshot tests take it, so the import is gated the same way.
     #[cfg(unix)]
     pub(crate) use crate::dsh::tests::ENV_LOCK as DSH_ENV_LOCK;
+
+    // A missing harness must not be re-probed on every poll: without the
+    // negative cache each overview refresh spawned every candidate command
+    // and re-read npm's npx cache directory.
+    #[test]
+    fn a_failed_cli_probe_is_remembered_for_a_short_window() {
+        let cache = CliProbeCache::default();
+        let now = std::time::Instant::now();
+        assert!(!cache.failure_is_fresh(now, CLI_FAILURE_TTL));
+
+        let cache = CliProbeCache {
+            found: None,
+            failed_at: Some(now),
+        };
+        assert!(cache.failure_is_fresh(now, CLI_FAILURE_TTL));
+        // The window is bounded, so installing the harness is still noticed.
+        assert!(!cache.failure_is_fresh(now + CLI_FAILURE_TTL, CLI_FAILURE_TTL));
+        // A positive result outlives the window.
+        let cache = CliProbeCache {
+            found: Some("/usr/local/bin/dsh".to_string()),
+            failed_at: Some(now),
+        };
+        assert_eq!(cache.found.as_deref(), Some("/usr/local/bin/dsh"));
+    }
+
+    // Task logs accumulate forever otherwise; only the old ones are dropped,
+    // and unrelated files in the same directory are never touched.
+    #[test]
+    fn task_logs_are_pruned_to_the_keep_limit() {
+        let dir =
+            std::env::temp_dir().join(format!("deepmate-task-log-prune-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Five task logs (oldest first) plus a file that must survive.
+        for index in 0..5 {
+            std::fs::write(dir.join(format!("task-web-{index}.log")), "x").unwrap();
+            // Distinguish the mtimes so "newest" is deterministic.
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        std::fs::write(dir.join("harness-web.log"), "keep me").unwrap();
+
+        prune_task_logs(&dir, 2);
+
+        let mut remaining: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        remaining.sort();
+        assert_eq!(
+            remaining.len(),
+            3,
+            "two task logs plus the untouched file: {remaining:?}"
+        );
+        assert!(remaining.contains(&"harness-web.log".to_string()));
+        // The two survivors are the most recent.
+        assert!(remaining.contains(&"task-web-3.log".to_string()));
+        assert!(remaining.contains(&"task-web-4.log".to_string()));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // The cache has to *prevent the work*, not merely return the same answer:
+    // a probe per call is what made the ten-second overview poll re-scan
+    // every candidate.
+    //
+    // The probe is driven here by creating the executable *after* the first
+    // failed attempt: with the negative cache the next call still answers
+    // "not found" (inside the window), and without it the next call would
+    // find the CLI immediately. That difference is what the test observes.
+    #[cfg(unix)]
+    #[test]
+    fn a_cached_failure_short_circuits_a_later_probe() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir =
+            std::env::temp_dir().join(format!("deepmate-probe-cache-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cli = dir.join("appearing-dsh");
+
+        let _ = std::fs::remove_file(&cli);
+        let harness = DeepSeekHarness::new(Arc::new(SystemPlatform))
+            .with_cli_names(vec![cli.to_string_lossy().into_owned()]);
+
+        // Nothing there yet: the probe fails and is remembered.
+        assert!(harness.find_cli().is_none());
+        assert!(harness.probe_failure_is_fresh(std::time::Instant::now()));
+
+        // The CLI "gets installed"; a second call inside the window must still
+        // be served by the cache rather than probing again.
+        std::fs::write(&cli, "#!/bin/sh\nexit 0\n").unwrap();
+        let mut perms = std::fs::metadata(&cli).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&cli, perms).unwrap();
+
+        assert!(
+            harness.find_cli().is_none(),
+            "a remembered failure must short-circuit the probe"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // The version parser is pure, so the shapes a launcher may print are
+    // covered without spawning anything.
+    #[test]
+    fn version_parsing_accepts_the_shapes_a_launcher_prints() {
+        // (the parser runs a process, so this only pins the no-process case)
+        assert!(parse_cli_version("definitely-not-a-real-command-zz").is_none());
+    }
 
     #[tokio::test]
     async fn detect_returns_not_found_in_clean_environment() {

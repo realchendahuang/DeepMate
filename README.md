@@ -221,7 +221,9 @@ CLI command surface:
 deepmate detect                Detect the harness
 deepmate status                Show the active harness runtime status
 deepmate open                  Open the harness UI in the system browser
-deepmate doctor                Run environment diagnostics
+deepmate doctor                Run environment diagnostics (exits 3 when a
+                                check fails)
+deepmate history [--limit N]   Show DeepMate's recorded action history
 deepmate runtime start|stop|restart|list
                                 Control the harness runtime; `list` reports
                                 every scenario's state

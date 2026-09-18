@@ -36,6 +36,10 @@ is a redesign — these are cases where the code claimed more than it did.
   views instead of an eternal skeleton.
 - Tasks log their partial output even when they time out or fail;
   scenario logs are attached to boot failures.
+- `deepmate history` shows the recorded action history (most recent first,
+  `--limit`, `--json`); the file was written but had no reader.
+- Task logs are capped at the newest 20 per scenario instead of accumulating
+  forever.
 
 ### Changed
 
@@ -106,6 +110,17 @@ is a redesign — these are cases where the code claimed more than it did.
 - `make ci` includes the core purity gate (case-insensitive), a generated-
   bindings freshness check and `--locked`; `make verify` adds the frontend
   format check and a localization gate that compares both catalogs.
+- A missing harness CLI is remembered for a short window instead of being
+  re-probed on every ten-second overview poll (each poll used to spawn every
+  candidate command and rescan npm's npx cache).
+- The desktop app accepts `--data-dir=<path>` as well as `--data-dir <path>`,
+  ignores macOS's Finder `-psn_…` argument, and reports unknown arguments
+  instead of silently starting against the default data directory.
+- Package names are validated before being placed in a registry URL, so a
+  spec containing a space, query string or path segment is refused rather
+  than silently requesting a different document.
+- The app's logo asset is 169 KB instead of 784 KB (it renders at 48 px;
+  the source is kept in `logo/` at full resolution).
 
 ## [0.8.1] - 2026-09-17
 
@@ -298,6 +313,13 @@ is a redesign — these are cases where the code claimed more than it did.
   listing, bundle declaration), matching what those callers already assumed.
 - Windows CI: the group-kill `pid` is unix-only now, fixing the
   `unused variable` clippy failure that had kept `main` red.
+- Desktop: an error in the plugins view no longer takes the whole window
+  down. The crash came from rendering content outside its Tabs root; the view
+  was fixed and a top-level error boundary now catches render failures and
+  offers a reload instead of a blank window.
+- Desktop: a failed backup is reported instead of silently skipped, and a
+  task's log is surfaced in the scenario that ran it (previously the log was
+  written but only reachable from the scenario that happened to be selected).
 
 ### Security
 
@@ -507,6 +529,11 @@ Initial Stage 1 foundation.
 - Cross-platform CI (formatting, clippy, tests) with a core purity gate that
   keeps harness-specific names out of `deepmate-core`.
 
+[0.8.1]: https://github.com/realchendahuang/DeepMate/compare/v0.8.0...v0.8.1
+[0.8.0]: https://github.com/realchendahuang/DeepMate/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/realchendahuang/DeepMate/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/realchendahuang/DeepMate/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/realchendahuang/DeepMate/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/realchendahuang/DeepMate/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/realchendahuang/DeepMate/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/realchendahuang/DeepMate/compare/v0.1.0...v0.2.0
