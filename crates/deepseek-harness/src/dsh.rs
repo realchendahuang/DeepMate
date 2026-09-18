@@ -705,21 +705,27 @@ fn scene_settings_path(profile_id: &str) -> CoreResult<Option<PathBuf>> {
 }
 
 // Resolve a `dshHomePath(...)` argument, refusing anything that leaves the
-// harness home. An absolute path or one containing a `..` component is a
-// misconfigured (or hostile) patch file, not a settings location.
+// harness home.
+//
+// The check is a whitelist rather than a list of known-bad shapes, because
+// `Path::join` has a case that a blacklist misses: on Windows a path with a
+// drive prefix but no root (`C:settings.yaml`) is neither absolute nor
+// free of `..`, yet joining it replaces the base path entirely. Accepting
+// only plain name components rules that out by construction — the paths
+// DeepMate itself writes (`profiles/<scene>/settings.yaml`) are exactly
+// that shape.
 fn resolve_inside_home(home: &Path, raw: &str) -> CoreResult<PathBuf> {
     let candidate = Path::new(raw);
-    if candidate.is_absolute() {
+    let plain = !raw.is_empty()
+        && candidate.components().all(|component| {
+            matches!(
+                component,
+                std::path::Component::Normal(_) | std::path::Component::CurDir
+            )
+        });
+    if !plain {
         return Err(CoreError::InvalidState(format!(
-            "settings path must be relative to the harness home: {raw}"
-        )));
-    }
-    if candidate
-        .components()
-        .any(|component| matches!(component, std::path::Component::ParentDir))
-    {
-        return Err(CoreError::InvalidState(format!(
-            "settings path must not escape the harness home: {raw}"
+            "settings path must stay inside the harness home: {raw}"
         )));
     }
     Ok(home.join(candidate))
@@ -2353,12 +2359,30 @@ pet:
         for escape in [
             "../../../etc/passwd",
             "profiles/../../secrets.yaml",
-            "/etc/passwd",
             "./../outside.yaml",
         ] {
             assert!(
                 resolve_inside_home(home, escape).is_err(),
                 "path should be refused: {escape}"
+            );
+        }
+        // Absolute paths have no platform-neutral spelling, so those cases
+        // are built from the OS the test runs on rather than hard-coded. The
+        // drive-relative form matters most: it is neither absolute nor a
+        // `..` traversal, yet `Path::join` would replace the base with it.
+        let (absolute, drive_relative) = if cfg!(windows) {
+            ("C:\\Windows\\win.ini", Some("C:settings.yaml"))
+        } else {
+            ("/etc/passwd", None)
+        };
+        assert!(
+            resolve_inside_home(home, absolute).is_err(),
+            "an absolute path must be refused: {absolute}"
+        );
+        if let Some(drive_relative) = drive_relative {
+            assert!(
+                resolve_inside_home(home, drive_relative).is_err(),
+                "a drive-relative path must be refused: {drive_relative}"
             );
         }
     }
