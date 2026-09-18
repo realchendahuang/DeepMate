@@ -627,6 +627,18 @@ fn store_cache(path: &Path, query: &str, entries: &[MarketEntry]) -> CoreResult<
             entries: Vec::new(),
             queries: std::collections::BTreeMap::new(),
         });
+    // Fold a pre-`queries` file's entry into the map before the top-level
+    // slots are reused for this query: otherwise the first search after an
+    // upgrade would drop the only cached result the old build had.
+    if !file.query.is_empty() && !file.queries.contains_key(&file.query) {
+        file.queries.insert(
+            file.query.clone(),
+            CachedQuery {
+                updated: file.updated.clone(),
+                entries: file.entries.clone(),
+            },
+        );
+    }
     let now = chrono::Utc::now().to_rfc3339();
     file.updated = now.clone();
     file.query = query.to_string();
@@ -778,6 +790,60 @@ mod tests {
         store_curated_cache(market.curated_cache_path.as_ref().unwrap(), &entries).unwrap();
         let cached = market.cached_curated().expect("fresh cache must hit");
         assert_eq!(cached, entries);
+    }
+
+    // A cache written by an older build (one query, no `queries` map) must
+    // still serve that query: the file format gained a field, and an upgrade
+    // should not silently empty the market until the next successful search.
+    #[test]
+    fn a_legacy_single_query_cache_is_still_read() {
+        let dir = std::env::temp_dir().join(format!(
+            "deepmate-legacy-cache-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let market = Market::new(Some(dir.clone()), build_http_client());
+        let legacy = serde_json::json!({
+            "updated": chrono::Utc::now().to_rfc3339(),
+            "query": "dsh",
+            "entries": [{
+                "id": "legacy-pkg",
+                "name": "legacy-pkg",
+                "description": "written by an older build",
+                "version": "1.0.0",
+                "source": "community",
+                "trust": "community",
+                "repository": null,
+                "publisher": null,
+                "updated": null,
+                "category": null,
+                "popularity": null,
+                "quality": null,
+            }],
+        });
+        let cache_path = market.cache_path.as_ref().unwrap();
+        std::fs::create_dir_all(cache_path.parent().unwrap()).unwrap();
+        std::fs::write(cache_path, serde_json::to_string_pretty(&legacy).unwrap()).unwrap();
+
+        let cached = market
+            .cached("dsh")
+            .expect("the legacy shape must still hit for its own query");
+        assert_eq!(cached.len(), 1);
+        assert_eq!(cached[0].id, "legacy-pkg");
+        // A different query is still a miss.
+        assert!(market.cached("other").is_none());
+
+        // Writing a new query preserves the old entry alongside it.
+        store_cache(market.cache_path.as_ref().unwrap(), "other", &[]).unwrap();
+        assert!(
+            market.cached("dsh").is_some(),
+            "the earlier query must survive"
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

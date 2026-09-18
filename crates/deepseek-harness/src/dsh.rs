@@ -117,7 +117,10 @@ pub fn discover_profiles() -> CoreResult<Vec<Profile>> {
             continue;
         }
         let name = entry.file_name().to_string_lossy().into_owned();
-        if name == "node_modules" {
+        // `node_modules` is the launcher's shared fallback, and any dot
+        // directory is DeepMate's own bookkeeping (`.deepmate-trash` holds
+        // removed profiles); neither is a scenario.
+        if name == "node_modules" || name.starts_with('.') {
             continue;
         }
         let dir = entry.path();
@@ -2356,6 +2359,24 @@ pet:
         assert!(discover_profiles().unwrap().iter().all(|p| p.id != "tui"));
         // Removing a missing profile is rejected.
         assert!(remove_profile("tui").is_err());
+
+        // Removal is recoverable: the directory is moved into the trash, not
+        // deleted, and the trash itself is never listed as a scenario.
+        let trash = home.join("profiles").join(".deepmate-trash");
+        let recovered: Vec<_> = std::fs::read_dir(&trash)
+            .unwrap()
+            .flatten()
+            .filter(|entry| entry.file_name().to_string_lossy().starts_with("tui-"))
+            .collect();
+        assert_eq!(
+            recovered.len(),
+            1,
+            "expected the removed profile in the trash"
+        );
+        assert!(discover_profiles()
+            .unwrap()
+            .iter()
+            .all(|p| p.id != ".deepmate-trash"));
 
         restore_env(DSH_HOME_ENV, previous);
     }
