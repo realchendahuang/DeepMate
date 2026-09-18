@@ -282,9 +282,9 @@
     "scenarioPluginCount_one": "{{count}} plugin",
     "scenarioPluginCount_other": "{{count}} plugins",
     "modality": {
-      "text": "文本",
-      "image": "图像",
-      "video": "视频",
+      "text": "Text",
+      "image": "Image",
+      "video": "Video",
       "pdf": "PDF"
     },
     "deleteProfile": "Delete scenario",

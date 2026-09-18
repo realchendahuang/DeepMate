@@ -6,6 +6,9 @@
 //   - every key present in one catalog exists in the other
 //   - no empty values
 //   - interpolation variables match between translations
+//   - the English catalog is actually English (no untranslated zh values)
+//   - every `t("...")` the source references resolves to real text in both
+//     languages, rather than falling through to the key path
 //
 // Plural forms are the documented exception: English carries `_one`/`_other`
 // while Chinese uses a single `_other`, and i18next resolves `key` to
@@ -14,9 +17,10 @@
 //
 // Exits non-zero with a readable list when a rule is broken.
 
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import i18next from "i18next";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const localesDir = join(here, "..", "src", "locales");
@@ -82,9 +86,63 @@ for (const [key, enEntries] of en) {
   }
 }
 
+// The English catalog must not carry Chinese text. This is how a half-done
+// translation looks: the key exists, so the parity check above is happy, and
+// an English user reads Chinese. (It happened: `settings.modality.*` landed
+// with the zh wording in both catalogs.)
+const CJK = /[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]/;
+for (const [key, entries] of en) {
+  for (const { path, value } of entries) {
+    if (typeof value === "string" && CJK.test(value)) {
+      problems.push(`en value contains Chinese text: ${path} = ${JSON.stringify(value)}`);
+    }
+  }
+}
+
+// Keys the source actually asks for. A key that exists in both catalogs but
+// is spelled differently in the code still renders as the key path, and
+// checking parity alone cannot see that.
+function sourceFiles(dir, out = []) {
+  for (const entry of readdirSync(dir)) {
+    const path = join(dir, entry);
+    if (statSync(path).isDirectory()) sourceFiles(path, out);
+    else if (/\.(ts|tsx)$/.test(path) && !path.includes("locales")) out.push(path);
+  }
+  return out;
+}
+
+const referenced = new Set();
+for (const file of sourceFiles(join(here, "..", "src"))) {
+  const source = readFileSync(file, "utf8");
+  for (const match of source.matchAll(/\bt\(\s*"([a-zA-Z0-9_.]+)"/g)) {
+    referenced.add(match[1]);
+  }
+}
+
+async function keysRenderingAsPaths(language, resource, label) {
+  const instance = i18next.createInstance();
+  await instance.init({
+    resources: { [language]: { translation: resource } },
+    lng: language,
+    fallbackLng: false,
+    interpolation: { escapeValue: false },
+  });
+  const unresolved = [];
+  for (const key of referenced) {
+    // `count` lets i18next pick the plural form, matching how the UI calls it.
+    if (instance.t(key, { count: 1 }) === key) unresolved.push(key);
+  }
+  return unresolved.map((key) => `${label}: ${key} renders as a raw key path`);
+}
+
+problems.push(
+  ...(await keysRenderingAsPaths("en", read("en"), "en")),
+  ...(await keysRenderingAsPaths("zh", read("zh"), "zh")),
+);
+
 if (problems.length > 0) {
   console.error("i18n catalogs disagree:\n" + problems.map((line) => `  - ${line}`).join("\n"));
   process.exit(1);
 }
 
-console.log(`i18n catalogs agree (${en.size} keys)`);
+console.log(`i18n catalogs agree (${en.size} keys, ${referenced.size} referenced)`);
